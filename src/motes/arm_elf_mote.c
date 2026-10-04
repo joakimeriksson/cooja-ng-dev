@@ -400,6 +400,30 @@ void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
     sim_radio_bus_register(bus, slot, ops, node, mode, /*caps=*/0);
 }
 
+/* Per-node "peripherals": only the nRF54L15 SoC has an SPI chip list today,
+ * so every other ARM board reports no support and the list is ignored. */
+int arm_elf_mote_configure_peripherals(mixed_node_t *node,
+                                       const sim_peripheral_config_t *list,
+                                       int count, const sim_mote_env_t *env) {
+    nrf54l15_soc_t *soc = arm_platform_nrf54l15(&node->plat.arm);
+    if (!soc)
+        return 1;
+    nrf54l15_soc_clear_spi_chips(soc);
+    for (int k = 0; k < count; k++) {
+        const sim_peripheral_config_t *pc = &list[k];
+        if (nrf54l15_soc_attach_spi_chip(soc, pc->chip, pc->spim,
+                                         pc->cs_port, pc->cs_pin) < 0) {
+            fprintf(stderr, "Node %d: cannot attach peripheral '%s' on SPIM%02d "
+                    "CS P%d.%02d\n", node->id, pc->chip, pc->spim, pc->cs_port, pc->cs_pin);
+            return -1;
+        }
+        if (*env->verbose)
+            printf("  Node %d: %s on SPIM%02d, CS P%d.%02d\n",
+                   node->id, pc->chip, pc->spim, pc->cs_port, pc->cs_pin);
+    }
+    return 0;
+}
+
 /* ============================================================
  * Cooja-style execute tick (ex runner tick_one_arm)
  * ============================================================ */

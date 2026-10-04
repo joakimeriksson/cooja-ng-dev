@@ -42,7 +42,6 @@
 #include "sim_event_queue.h"
 #include "sim_runtime.h"
 #include "sim_board.h"
-#include "nrf54l15_soc.h"
 #include "sim_registry.h"
 #include "sim_serial_bridge.h"
 #include "renode_cosim_service.h"
@@ -1494,31 +1493,21 @@ static int init_node(int idx, const char *firmware_path,
         return rc;
 
     /* Per-node "peripherals" (off-SoC SPI chips).  An explicit list
-     * replaces the board defaults the SoC attached during boot; only the
-     * nRF54L15 SoC consumes it today. */
+     * replaces the board defaults the SoC attached during boot; the mote
+     * kind decides whether its board can take one. */
     if (node_cfg_src && idx < node_cfg_src->node_count &&
         node_cfg_src->nodes[idx].has_peripherals) {
         const sim_node_config_t *nc = &node_cfg_src->nodes[idx];
-        nrf54l15_soc_t *soc = (node->board->kind == SIM_BOARD_KIND_ARM)
-                              ? arm_platform_nrf54l15(&node->plat.arm) : NULL;
-        if (!soc) {
+        int prc = kind->configure_peripherals
+                ? kind->configure_peripherals(node, nc->peripherals,
+                                              nc->peripheral_count,
+                                              &mixed_mote_env)
+                : 1;
+        if (prc < 0)
+            return -1;
+        if (prc > 0)
             fprintf(stderr, "Node %d: 'peripherals' ignored — board %s has no SPI chip support\n",
                     node_id, node->board->label);
-        } else {
-            nrf54l15_soc_clear_spi_chips(soc);
-            for (int k = 0; k < nc->peripheral_count; k++) {
-                const sim_peripheral_config_t *pc = &nc->peripherals[k];
-                if (nrf54l15_soc_attach_spi_chip(soc, pc->chip, pc->spim,
-                                                 pc->cs_port, pc->cs_pin) < 0) {
-                    fprintf(stderr, "Node %d: cannot attach peripheral '%s' on SPIM%02d "
-                            "CS P%d.%02d\n", node_id, pc->chip, pc->spim, pc->cs_port, pc->cs_pin);
-                    return -1;
-                }
-                if (verbose)
-                    printf("  Node %d: %s on SPIM%02d, CS P%d.%02d\n",
-                           node_id, pc->chip, pc->spim, pc->cs_port, pc->cs_pin);
-            }
-        }
     }
 
     /* M9.3/9.4: radio endpoint ops + delivery mode onto the bus.  Done
