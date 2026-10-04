@@ -2,6 +2,7 @@
  * UDGM (Unit Disk Graph Medium) radio medium implementation
  */
 #include "radio_medium.h"
+#include "radio_trace.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -476,9 +477,6 @@ static bool radio_pair_match(radio_medium_t *rm,
      * -1 (unknown) on either side passes — legacy single-channel API
      * path where channel was never tracked. Cross-band isolation above
      * still applies. Trace hook stays available via CSIM_TRACE_RADIO. */
-    extern int csim_radio_trace_enabled(void);
-    extern void csim_radio_trace_filter(int sender, int sender_radio,
-        int receiver, int receiver_radio, int s_ch, int r_ch, int delivered);
     const frame_tracker_t *ft = &rm->frame_track[sender][sender_radio];
     int s_eff_channel = s->channel;
     bool channel_ok;

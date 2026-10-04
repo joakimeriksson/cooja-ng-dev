@@ -24,6 +24,7 @@
 #include "sim_config.h"
 #include "csim_version.h"
 #include "radio_medium.h"
+#include "radio_trace.h"
 #include "ws_server.h"
 #include "sim_state.h"
 #include "websocket_ui_service.h"
@@ -140,41 +141,15 @@ static sim_runtime_t sim_rt;
 #define sim_eq          (sim_rt.event_queue)
 #define radio_medium    (sim_rt.radio_medium)
 
-/* ============================================================
- * CSIM_TRACE_RADIO — channel + TX + filter trace for debugging
- * ============================================================
- * Enabled by `CSIM_TRACE_RADIO=1` env var. When on, every channel
- * change, frame TX (start + complete), filter decision (deliver
- * or drop with reason), and per-node CPU step is logged with a
- * sim_ns timestamp. Output is one line per event, parseable.
- *
- * Format:
- *   [t=12.345678s] event_type field=val field=val ...
- *
- * Disabled overhead = one TLS bool check.
- */
-static int csim_radio_trace = -1;
-int csim_radio_trace_enabled(void) {
-    if (csim_radio_trace < 0) {
-        const char *e = getenv("CSIM_TRACE_RADIO");
-        csim_radio_trace = (e && e[0] && strcmp(e, "0") != 0) ? 1 : 0;
-    }
-    return csim_radio_trace;
-}
+/* CSIM_TRACE_RADIO (src/common/radio_trace.c): the medium and the chips
+ * write to it too; the runner installs the kernel clock for its t= stamp. */
 #define RTRACE(fmt, ...) do { \
     if (csim_radio_trace_enabled()) \
-        fprintf(stderr, "[t=%.6fs] " fmt "\n", \
-                (double)sim_runtime_now_ns(&sim_rt) / 1e9, ##__VA_ARGS__); \
+        csim_radio_trace(fmt, ##__VA_ARGS__); \
 } while (0)
 
-void csim_radio_trace_filter(int s, int sr, int rcv, int rr,
-                              int s_ch, int r_ch, int delivered) {
-    if (delivered)
-        RTRACE("filter sender=%d/%d receiver=%d/%d ch=%d/%d -> DELIVER",
-               s, sr, rcv, rr, s_ch, r_ch);
-    else
-        RTRACE("filter sender=%d/%d receiver=%d/%d ch=%d/%d -> DROP "
-               "(channel_mismatch)", s, sr, rcv, rr, s_ch, r_ch);
+static int64_t radio_trace_clock(void *user) {
+    return sim_runtime_now_ns((const sim_runtime_t *)user);
 }
 
 /* Optional pcap capture — opened by --pcap PATH, captures every TX frame
@@ -2079,6 +2054,7 @@ int run_mixed_multinode_test(int argc, char **argv) {
      * radio-medium init still happen at their existing call sites below,
      * just through the runtime fields. */
     sim_runtime_init(&sim_rt);
+    csim_radio_trace_set_clock(radio_trace_clock, &sim_rt);
     /* Phase 8 M45: build the static built-in registry from the existing
      * tables.  References boards[]/kinds[] (no data moved); the runner's
      * board/kind/service lookups route through it (M46–M50).  Populated here,

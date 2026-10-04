@@ -101,6 +101,7 @@ RISCV_SOURCES = $(RISCV_SRC_DIR)/riscv_cpu.c \
 
 COMMON_SOURCES = $(COMMON_SRC_DIR)/elf_loader.c \
                  $(COMMON_SRC_DIR)/radio_medium.c \
+                 $(COMMON_SRC_DIR)/radio_trace.c \
                  $(COMMON_SRC_DIR)/packet_analyzer.c \
                  $(COMMON_SRC_DIR)/timeline.c \
                  $(COMMON_SRC_DIR)/js_test_engine.c \
