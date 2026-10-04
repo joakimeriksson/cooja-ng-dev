@@ -124,7 +124,8 @@ SIM_SOURCES = $(SIM_SRC_DIR)/sim_runtime.c \
               $(SIM_SRC_DIR)/sim_config.c \
               $(SIM_SRC_DIR)/sim_config_yaml.c
 
-SERVICES_SOURCES = $(SERVICES_SRC_DIR)/timeline_service.c \
+SERVICES_SOURCES = $(SERVICES_SRC_DIR)/builtin_services.c \
+                   $(SERVICES_SRC_DIR)/timeline_service.c \
                    $(SERVICES_SRC_DIR)/pcap_service.c \
                    $(SERVICES_SRC_DIR)/progress_service.c \
                    $(SERVICES_SRC_DIR)/json_test_service.c \
