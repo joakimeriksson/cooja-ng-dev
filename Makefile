@@ -241,7 +241,7 @@ ifeq ($(CONTIKI_DIR),)
   CONTIKI_DIR = ../contiki-ng
 endif
 
-.PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge
+.PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
 
 all: $(BUILD_DIR)/test_runner
 
@@ -336,8 +336,32 @@ $(LINENOISE_BUILD_DIR)/%.o: $(LINENOISE_SRC_DIR)/%.c | $(LINENOISE_BUILD_DIR)
 $(BUILD_DIR)/test_%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/test_runner: $(COMMON_OBJECTS) $(SIM_OBJECTS) $(SERVICES_OBJECTS) $(MOTES_OBJECTS) $(OBJECTS) $(ARM_OBJECTS) $(CHIPS_OBJECTS) $(RISCV_OBJECTS) $(NATIVE_OBJECTS) $(UI_OBJECTS) $(LIB_OBJECTS) $(QUICKJS_OBJECTS) $(YAML_OBJECTS) $(LINENOISE_OBJECTS) $(TEST_OBJECTS) | $(BUILD_DIR)
+# The simulator without its frontend: everything test_runner links except
+# test/.  libcsim.a is that set as an archive; lib-link-check links the same
+# objects (not the archive — an archive only pulls the members something
+# references, so it would hide a leak) with a main of its own, so any
+# library object that needs a symbol only the runner defines fails to link.
+CSIM_LIB_OBJECTS = $(COMMON_OBJECTS) $(SIM_OBJECTS) $(SERVICES_OBJECTS) $(MOTES_OBJECTS) $(OBJECTS) $(ARM_OBJECTS) $(CHIPS_OBJECTS) $(RISCV_OBJECTS) $(NATIVE_OBJECTS) $(UI_OBJECTS) $(LIB_OBJECTS) $(QUICKJS_OBJECTS) $(YAML_OBJECTS) $(LINENOISE_OBJECTS)
+
+$(BUILD_DIR)/test_runner: $(CSIM_LIB_OBJECTS) $(TEST_OBJECTS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# The objects are LTO bitcode: GNU ar only indexes gcc's through its plugin,
+# which gcc-ar loads.  (CC_IS_CLANG is set in the PGO section below; this
+# variable is expanded when the recipe runs.)
+LIB_AR = $(if $(filter 0,$(CC_IS_CLANG)),gcc-ar,$(AR))
+
+$(BUILD_DIR)/libcsim.a: $(CSIM_LIB_OBJECTS) | $(BUILD_DIR)
+	rm -f $@
+	$(LIB_AR) rcs $@ $^
+
+$(BUILD_DIR)/lib_link_check: $(CSIM_LIB_OBJECTS) $(BUILD_DIR)/test_lib_link_check.o | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+lib: $(BUILD_DIR)/libcsim.a
+
+lib-link-check: $(BUILD_DIR)/lib_link_check
+	./$(BUILD_DIR)/lib_link_check
 
 # Auto-generated header dependencies (from -MMD). Catches the case where
 # editing a header doesn't trigger a rebuild of every TU that includes

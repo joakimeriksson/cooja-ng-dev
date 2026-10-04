@@ -3240,6 +3240,21 @@ the same patch.
   and Tier 1's horizon change if the baseline shows it moves) gets an
   explicit "expected to move" sign-off and is never folded into a
   byte-identical step.
+- **The simulator is a library; `make lib-link-check` (CI) keeps it one**
+  (2026-10-04).  `CSIM_LIB_OBJECTS` is everything `test_runner` links except
+  `test/`; `build/libcsim.a` archives it, and `build/lib_link_check` links the
+  same objects (not the archive, which would only pull referenced members)
+  with a main of its own.  A kernel, chip or service object may not need a
+  symbol only a frontend defines — the first check found `radio_medium.c`
+  and `cc2420.c` calling the runner's `csim_radio_trace_*`, now
+  `src/common/radio_trace.c` with a frontend-installed clock.  `src/sim`
+  names no service: `csim_register_builtin_services` lives in
+  `src/services/builtin_services.c`, the way boards and mote kinds register
+  themselves.  Per-node `peripherals` go through the kind row's
+  `configure_peripherals` hook, so the runner names no SoC.  Moving the
+  runner's radio glue, node table and dispatch into `src/sim` waits until
+  the plan's Tier 0 and R1 have landed: both rewrite that code, and R1
+  deletes part of it.
 
 ## Doc Status
 
