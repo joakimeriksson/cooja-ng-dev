@@ -337,19 +337,25 @@ $(BUILD_DIR)/test_%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # The simulator without its frontend: everything test_runner links except
-# test/.  libcsim.a is that set as an archive; lib-link-check links the same
-# objects (not the archive — an archive only pulls the members something
-# references, so it would hide a leak) with a main of its own, so any
-# library object that needs a symbol only the runner defines fails to link.
+# test/.  libcsim.a is that set as an archive.  lib-link-check links the same
+# objects with a main of its own, so any library object that needs a symbol
+# only the runner defines fails to link — directly, not through the archive,
+# which only pulls the members something references and would hide a leak.
+# It then links that main against libcsim.a too, which fails if the archive
+# came out without a usable symbol index.
 CSIM_LIB_OBJECTS = $(COMMON_OBJECTS) $(SIM_OBJECTS) $(SERVICES_OBJECTS) $(MOTES_OBJECTS) $(OBJECTS) $(ARM_OBJECTS) $(CHIPS_OBJECTS) $(RISCV_OBJECTS) $(NATIVE_OBJECTS) $(UI_OBJECTS) $(LIB_OBJECTS) $(QUICKJS_OBJECTS) $(YAML_OBJECTS) $(LINENOISE_OBJECTS)
 
 $(BUILD_DIR)/test_runner: $(CSIM_LIB_OBJECTS) $(TEST_OBJECTS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# The objects are LTO bitcode: GNU ar only indexes gcc's through its plugin,
-# which gcc-ar loads.  (CC_IS_CLANG is set in the PGO section below; this
-# variable is expanded when the recipe runs.)
-LIB_AR = $(if $(filter 0,$(CC_IS_CLANG)),gcc-ar,$(AR))
+# The objects are LTO bitcode, so the archiver has to understand it to write
+# a symbol index: gcc-ar for gcc (binutils ar plus gcc's LTO plugin); for
+# clang, Apple's ar on macOS (it indexes bitcode through libLTO) and llvm-ar
+# elsewhere — binutils ar indexes LLVM bitcode only with a matching
+# LLVMgold.so installed, and silently writes an archive with no index without
+# one.  (CC_IS_CLANG is set in the PGO section below; this variable is
+# expanded when the recipe runs.)
+LIB_AR = $(if $(filter 0,$(CC_IS_CLANG)),gcc-ar,$(if $(filter Darwin,$(shell uname -s)),$(AR),$(shell $(CC) -print-prog-name=llvm-ar)))
 
 $(BUILD_DIR)/libcsim.a: $(CSIM_LIB_OBJECTS) | $(BUILD_DIR)
 	rm -f $@
@@ -360,8 +366,12 @@ $(BUILD_DIR)/lib_link_check: $(CSIM_LIB_OBJECTS) $(BUILD_DIR)/test_lib_link_chec
 
 lib: $(BUILD_DIR)/libcsim.a
 
-lib-link-check: $(BUILD_DIR)/lib_link_check
+$(BUILD_DIR)/lib_archive_check: $(BUILD_DIR)/test_lib_link_check.o $(BUILD_DIR)/libcsim.a | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+lib-link-check: $(BUILD_DIR)/lib_link_check $(BUILD_DIR)/lib_archive_check
 	./$(BUILD_DIR)/lib_link_check
+	./$(BUILD_DIR)/lib_archive_check
 
 # Auto-generated header dependencies (from -MMD). Catches the case where
 # editing a header doesn't trigger a rebuild of every TU that includes
