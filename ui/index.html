@@ -93,6 +93,10 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     <input type="range" id="speed-slider" min="1" max="100" value="10"
            style="width:200px;">
   </span>
+  <span id="replay-bar" class="stat" style="display:none; align-items:center; gap:6px; flex-shrink:0;" title="Replaying a recorded run from a file">
+    Replay: <input type="range" id="replay-seek" min="0" max="1000" value="0" style="width:200px;">
+    <b id="replay-pos">0 / 0 ms</b>
+  </span>
   <button id="tl-btn" title="Toggle timeline panel">Timeline</button>
   <button id="tl-zoom-in" class="tl-ctrl" title="Zoom in timeline" style="display:none;">TL +</button>
   <button id="tl-zoom-out" class="tl-ctrl" title="Zoom out timeline" style="display:none;">TL -</button>
@@ -340,11 +344,13 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   speedSlider.addEventListener('input', () => {
     const v = parseInt(speedSlider.value);
     speedVal.textContent = v;
-    if (ws && ws.readyState === 1)
+    if (replay) replay.speed = v;
+    else if (ws && ws.readyState === 1)
       ws.send(JSON.stringify({cmd: 'speed', value: v}));
   });
 
   function togglePause() {
+    if (replay) { replaySetPaused(!replay.paused); return; }
     if (ws && ws.readyState === 1)
       ws.send(JSON.stringify({cmd: isPaused ? 'play' : 'pause'}));
   }
@@ -352,6 +358,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   pauseBtn.addEventListener('click', togglePause);
 
   document.getElementById('restart-btn').addEventListener('click', () => {
+    if (replay) { replaySeek(0); return; }
     if (ws && ws.readyState === 1) {
       if (confirm('Restart simulation? All current state will be reset.'))
         ws.send(JSON.stringify({cmd: 'restart'}));
@@ -678,6 +685,77 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
         }
       }
     }
+  }
+
+  // ---- Replay from a file: index.html?replay=ui-replay.json ---------------------------
+  // The file is the UI's own wire protocol (tools/rundir2ui.py in agent-sim-protocol, or
+  // the simulator's recorder): {format, run, full, deltas[]} where each delta is in the
+  // CBOR key layout handleCBORDelta reads.  No simulator, no server: static files only.
+  let replay = null;
+  const replayBar = document.getElementById('replay-bar');
+  const replaySeekEl = document.getElementById('replay-seek');
+  const replayPosEl = document.getElementById('replay-pos');
+
+  function replayRedraw() {
+    if (!state) return;
+    updateHeader(state); updateSidebar(state); updatePacketLog(); drawCanvas(state); drawTimeline();
+  }
+  function replaySetPaused(p) {
+    replay.paused = p; isPaused = p;
+    pauseBtn.textContent = p ? 'Play' : 'Pause';
+    if (state) state.stats.paused = p;
+    replayRedraw();
+  }
+  // Apply deltas up to and including simulation time `ms`.  Backwards = rebuild from `full`.
+  function replayApplyTo(ms) {
+    if (ms < replay.clock) {
+      handleFullState(JSON.parse(JSON.stringify(replay.doc.full)));
+      replay.idx = 0;
+    }
+    const ds = replay.doc.deltas;
+    while (replay.idx < ds.length && ds[replay.idx]['0'] <= ms) {
+      handleCBORDelta(ds[replay.idx]); replay.idx++;
+    }
+    replay.clock = ms;
+    if (state) { state.sim_time_ms = ms; state.stats.paused = replay.paused; state.stats.speed = replay.speed; }
+    replaySeekEl.value = Math.round(1000 * ms / Math.max(1, replay.end));
+    replayPosEl.textContent = Math.round(ms) + ' / ' + replay.end + ' ms';
+  }
+  function replaySeek(ms) {
+    replayApplyTo(Math.max(0, Math.min(replay.end, ms)));
+    replayRedraw();
+  }
+  function replayTick(now) {
+    if (!replay) return;
+    const dt = replay.last ? (now - replay.last) : 0;
+    replay.last = now;
+    if (!replay.paused && replay.clock < replay.end) {
+      replayApplyTo(Math.min(replay.end, replay.clock + dt * replay.speed));
+      if (replay.clock >= replay.end) replaySetPaused(true);
+      replayRedraw();
+    }
+    requestAnimationFrame(replayTick);
+  }
+  async function loadReplay(url) {
+    connDot.className = ''; connDot.title = 'Replay: ' + url;
+    let doc;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+      doc = await r.json();
+    } catch (e) { console.error('replay: cannot load', url, e); connDot.title = 'Replay failed: ' + e; return; }
+    if (!doc || doc.format !== 'cooja-ng-ui-replay/1' || !doc.full || !Array.isArray(doc.deltas)) {
+      console.error('replay: not a cooja-ng-ui-replay/1 file'); connDot.title = 'Replay: bad file'; return;
+    }
+    const end = doc.deltas.length ? doc.deltas[doc.deltas.length - 1]['0'] : (doc.full.sim_time_ms || 0);
+    replay = { doc, idx: 0, clock: 0, end, speed: parseInt(speedSlider.value) || 10, paused: false, last: 0 };
+    replayBar.style.display = 'flex';
+    document.title = 'Cooja-NG replay: ' + (doc.run && doc.run.scenario || url);
+    replaySeekEl.addEventListener('input', () => replaySeek(replay.end * parseInt(replaySeekEl.value) / 1000));
+    handleFullState(JSON.parse(JSON.stringify(doc.full)));
+    replayApplyTo(0);
+    replayRedraw();
+    requestAnimationFrame(replayTick);
   }
 
   function connect() {
@@ -1547,7 +1625,8 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 
   window.addEventListener('resize', () => { if (state) { drawCanvas(state); drawTimeline(); } });
 
-  connect();
+  const replayUrl = new URLSearchParams(window.location.search).get('replay');
+  if (replayUrl) loadReplay(replayUrl); else connect();
 })();
 </script>
 </body>
