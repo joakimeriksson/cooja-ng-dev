@@ -3,47 +3,13 @@
  *
  * See include/sim/sim_registry.h.  Board glue lives in sim_board.c and
  * mote-kind glue in mote_kinds.c (each domain registers itself and implements
- * its own forwarding accessor); this file owns the name → ops service catalog
- * and the built-in service registration.
+ * its own forwarding accessor), and so do the services
+ * (src/services/builtin_services.c); this file owns the name → ops service
+ * and radio-medium catalogs.
  */
 #include "sim_registry.h"
 
-#include "timeline_service.h"     /* timeline_service_ops   */
-#include "pcap_service.h"         /* pcap_service_ops       */
-#include "progress_service.h"     /* progress_service_ops   */
-#include "json_test_service.h"    /* json_test_service_ops  */
-#include "js_test_service.h"      /* js_test_service_ops    */
-#include "gdb_service.h"          /* gdb_service_ops        */
-
-/* Compiled-in example "plugin": the energy estimator as a built-in service,
- * selectable by config name (its engine is shared with plugins/energest.so). */
-extern const sim_service_ops_t energest_service_ops;
-extern const sim_service_ops_t shell_service_ops;
-
-/* Renode co-simulation (csim as clock slave).  Normally selected by the
- * runner's --renode flag, which hands over its own config; also reachable
- * as a config plugins[] name, in which case it reads CSIM_RENODE. */
-extern const sim_service_ops_t renode_cosim_service_ops;
-
 #include <string.h>
-
-/* Register the built-in library services that ship as exported ops structs.
- * The runner registers its two file-local serial-socket services
- * (serial-bridge, external-command) on top of these.  Registration order is
- * not significant — the catalog is keyed by name, and attach order (= the
- * service host's fan-out order) is decided at the attach sites, not here. */
-void csim_register_builtin_services(sim_registry_t *r) {
-    if (!r) return;
-    sim_registry_register_service(r, &timeline_service_ops);
-    sim_registry_register_service(r, &pcap_service_ops);
-    sim_registry_register_service(r, &progress_service_ops);
-    sim_registry_register_service(r, &json_test_service_ops);
-    sim_registry_register_service(r, &js_test_service_ops);
-    sim_registry_register_service(r, &gdb_service_ops);
-    sim_registry_register_service(r, &energest_service_ops);
-    sim_registry_register_service(r, &renode_cosim_service_ops);
-    sim_registry_register_service(r, &shell_service_ops);
-}
 
 int sim_registry_register_service(sim_registry_t *r,
                                   const sim_service_ops_t *ops) {

@@ -29,6 +29,7 @@ static sim_mote_kind_t kinds[] = {
         .node_type      = NODE_ARM,
         .boot           = arm_elf_mote_boot,
         .register_radio = arm_elf_mote_register_radio,
+        .configure_peripherals = arm_elf_mote_configure_peripherals,
         .ops            = &arm_elf_mote_ops,
     },
     [SIM_BOARD_KIND_NATIVE] = {

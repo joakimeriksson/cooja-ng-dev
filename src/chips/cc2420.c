@@ -7,6 +7,7 @@
  */
 #include "cc2420.h"
 #include "ieee_802154.h"
+#include "radio_trace.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -346,7 +347,6 @@ static void set_state(cc2420_t *r, cc2420_radio_state_t new_state) {
      * of cycle vs. wall-clock drift.  This is fine for debugging chip
      * sequencing — the deltas between transitions are still correct —
      * but don't compare these timestamps to current_sim_ns directly. */
-    extern int csim_radio_trace_enabled(void);
     if (csim_radio_trace_enabled() && old_state != new_state) {
         fprintf(stderr, "[t=%.6fs] cc2420 node=%d state %s -> %s\n",
                 (double)HOST_NOW_NS(r) / 1e9, r->node_id,

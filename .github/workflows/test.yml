@@ -54,6 +54,12 @@ jobs:
       - name: Build
         run: make
 
+      # The simulator linked without test/ — fails if a kernel, chip or
+      # service object needs a symbol only the runner defines.  test_runner
+      # links everything together, so nothing else would notice.
+      - name: Library link check
+        run: make lib-link-check
+
       - name: MSP430 instruction tests
         run: ./build/test_runner correctness
 

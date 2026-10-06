@@ -24,6 +24,7 @@
 #include "sim_config.h"
 #include "csim_version.h"
 #include "radio_medium.h"
+#include "radio_trace.h"
 #include "ws_server.h"
 #include "sim_state.h"
 #include "websocket_ui_service.h"
@@ -41,7 +42,6 @@
 #include "sim_event_queue.h"
 #include "sim_runtime.h"
 #include "sim_board.h"
-#include "nrf54l15_soc.h"
 #include "sim_registry.h"
 #include "sim_serial_bridge.h"
 #include "renode_cosim_service.h"
@@ -140,41 +140,15 @@ static sim_runtime_t sim_rt;
 #define sim_eq          (sim_rt.event_queue)
 #define radio_medium    (sim_rt.radio_medium)
 
-/* ============================================================
- * CSIM_TRACE_RADIO — channel + TX + filter trace for debugging
- * ============================================================
- * Enabled by `CSIM_TRACE_RADIO=1` env var. When on, every channel
- * change, frame TX (start + complete), filter decision (deliver
- * or drop with reason), and per-node CPU step is logged with a
- * sim_ns timestamp. Output is one line per event, parseable.
- *
- * Format:
- *   [t=12.345678s] event_type field=val field=val ...
- *
- * Disabled overhead = one TLS bool check.
- */
-static int csim_radio_trace = -1;
-int csim_radio_trace_enabled(void) {
-    if (csim_radio_trace < 0) {
-        const char *e = getenv("CSIM_TRACE_RADIO");
-        csim_radio_trace = (e && e[0] && strcmp(e, "0") != 0) ? 1 : 0;
-    }
-    return csim_radio_trace;
-}
+/* CSIM_TRACE_RADIO (src/common/radio_trace.c): the medium and the chips
+ * write to it too; the runner installs the kernel clock for its t= stamp. */
 #define RTRACE(fmt, ...) do { \
     if (csim_radio_trace_enabled()) \
-        fprintf(stderr, "[t=%.6fs] " fmt "\n", \
-                (double)sim_runtime_now_ns(&sim_rt) / 1e9, ##__VA_ARGS__); \
+        csim_radio_trace(fmt, ##__VA_ARGS__); \
 } while (0)
 
-void csim_radio_trace_filter(int s, int sr, int rcv, int rr,
-                              int s_ch, int r_ch, int delivered) {
-    if (delivered)
-        RTRACE("filter sender=%d/%d receiver=%d/%d ch=%d/%d -> DELIVER",
-               s, sr, rcv, rr, s_ch, r_ch);
-    else
-        RTRACE("filter sender=%d/%d receiver=%d/%d ch=%d/%d -> DROP "
-               "(channel_mismatch)", s, sr, rcv, rr, s_ch, r_ch);
+static int64_t radio_trace_clock(void *user) {
+    return sim_runtime_now_ns((const sim_runtime_t *)user);
 }
 
 /* Optional pcap capture — opened by --pcap PATH, captures every TX frame
@@ -1519,31 +1493,21 @@ static int init_node(int idx, const char *firmware_path,
         return rc;
 
     /* Per-node "peripherals" (off-SoC SPI chips).  An explicit list
-     * replaces the board defaults the SoC attached during boot; only the
-     * nRF54L15 SoC consumes it today. */
+     * replaces the board defaults the SoC attached during boot; the mote
+     * kind decides whether its board can take one. */
     if (node_cfg_src && idx < node_cfg_src->node_count &&
         node_cfg_src->nodes[idx].has_peripherals) {
         const sim_node_config_t *nc = &node_cfg_src->nodes[idx];
-        nrf54l15_soc_t *soc = (node->board->kind == SIM_BOARD_KIND_ARM)
-                              ? arm_platform_nrf54l15(&node->plat.arm) : NULL;
-        if (!soc) {
+        int prc = kind->configure_peripherals
+                ? kind->configure_peripherals(node, nc->peripherals,
+                                              nc->peripheral_count,
+                                              &mixed_mote_env)
+                : 1;
+        if (prc < 0)
+            return -1;
+        if (prc > 0)
             fprintf(stderr, "Node %d: 'peripherals' ignored — board %s has no SPI chip support\n",
                     node_id, node->board->label);
-        } else {
-            nrf54l15_soc_clear_spi_chips(soc);
-            for (int k = 0; k < nc->peripheral_count; k++) {
-                const sim_peripheral_config_t *pc = &nc->peripherals[k];
-                if (nrf54l15_soc_attach_spi_chip(soc, pc->chip, pc->spim,
-                                                 pc->cs_port, pc->cs_pin) < 0) {
-                    fprintf(stderr, "Node %d: cannot attach peripheral '%s' on SPIM%02d "
-                            "CS P%d.%02d\n", node_id, pc->chip, pc->spim, pc->cs_port, pc->cs_pin);
-                    return -1;
-                }
-                if (verbose)
-                    printf("  Node %d: %s on SPIM%02d, CS P%d.%02d\n",
-                           node_id, pc->chip, pc->spim, pc->cs_port, pc->cs_pin);
-            }
-        }
     }
 
     /* M9.3/9.4: radio endpoint ops + delivery mode onto the bus.  Done
@@ -2079,6 +2043,7 @@ int run_mixed_multinode_test(int argc, char **argv) {
      * radio-medium init still happen at their existing call sites below,
      * just through the runtime fields. */
     sim_runtime_init(&sim_rt);
+    csim_radio_trace_set_clock(radio_trace_clock, &sim_rt);
     /* Phase 8 M45: build the static built-in registry from the existing
      * tables.  References boards[]/kinds[] (no data moved); the runner's
      * board/kind/service lookups route through it (M46–M50).  Populated here,

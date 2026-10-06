@@ -101,6 +101,7 @@ RISCV_SOURCES = $(RISCV_SRC_DIR)/riscv_cpu.c \
 
 COMMON_SOURCES = $(COMMON_SRC_DIR)/elf_loader.c \
                  $(COMMON_SRC_DIR)/radio_medium.c \
+                 $(COMMON_SRC_DIR)/radio_trace.c \
                  $(COMMON_SRC_DIR)/packet_analyzer.c \
                  $(COMMON_SRC_DIR)/timeline.c \
                  $(COMMON_SRC_DIR)/js_test_engine.c \
@@ -123,7 +124,8 @@ SIM_SOURCES = $(SIM_SRC_DIR)/sim_runtime.c \
               $(SIM_SRC_DIR)/sim_config.c \
               $(SIM_SRC_DIR)/sim_config_yaml.c
 
-SERVICES_SOURCES = $(SERVICES_SRC_DIR)/timeline_service.c \
+SERVICES_SOURCES = $(SERVICES_SRC_DIR)/builtin_services.c \
+                   $(SERVICES_SRC_DIR)/timeline_service.c \
                    $(SERVICES_SRC_DIR)/pcap_service.c \
                    $(SERVICES_SRC_DIR)/progress_service.c \
                    $(SERVICES_SRC_DIR)/json_test_service.c \
@@ -239,7 +241,7 @@ ifeq ($(CONTIKI_DIR),)
   CONTIKI_DIR = ../contiki-ng
 endif
 
-.PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge
+.PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
 
 all: $(BUILD_DIR)/test_runner
 
@@ -334,8 +336,42 @@ $(LINENOISE_BUILD_DIR)/%.o: $(LINENOISE_SRC_DIR)/%.c | $(LINENOISE_BUILD_DIR)
 $(BUILD_DIR)/test_%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/test_runner: $(COMMON_OBJECTS) $(SIM_OBJECTS) $(SERVICES_OBJECTS) $(MOTES_OBJECTS) $(OBJECTS) $(ARM_OBJECTS) $(CHIPS_OBJECTS) $(RISCV_OBJECTS) $(NATIVE_OBJECTS) $(UI_OBJECTS) $(LIB_OBJECTS) $(QUICKJS_OBJECTS) $(YAML_OBJECTS) $(LINENOISE_OBJECTS) $(TEST_OBJECTS) | $(BUILD_DIR)
+# The simulator without its frontend: everything test_runner links except
+# test/.  libcsim.a is that set as an archive.  lib-link-check links the same
+# objects with a main of its own, so any library object that needs a symbol
+# only the runner defines fails to link — directly, not through the archive,
+# which only pulls the members something references and would hide a leak.
+# It then links that main against libcsim.a too, which fails if the archive
+# came out without a usable symbol index.
+CSIM_LIB_OBJECTS = $(COMMON_OBJECTS) $(SIM_OBJECTS) $(SERVICES_OBJECTS) $(MOTES_OBJECTS) $(OBJECTS) $(ARM_OBJECTS) $(CHIPS_OBJECTS) $(RISCV_OBJECTS) $(NATIVE_OBJECTS) $(UI_OBJECTS) $(LIB_OBJECTS) $(QUICKJS_OBJECTS) $(YAML_OBJECTS) $(LINENOISE_OBJECTS)
+
+$(BUILD_DIR)/test_runner: $(CSIM_LIB_OBJECTS) $(TEST_OBJECTS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# The objects are LTO bitcode, so the archiver has to understand it to write
+# a symbol index: gcc-ar for gcc (binutils ar plus gcc's LTO plugin); for
+# clang, Apple's ar on macOS (it indexes bitcode through libLTO) and llvm-ar
+# elsewhere — binutils ar indexes LLVM bitcode only with a matching
+# LLVMgold.so installed, and silently writes an archive with no index without
+# one.  (CC_IS_CLANG is set in the PGO section below; this variable is
+# expanded when the recipe runs.)
+LIB_AR = $(if $(filter 0,$(CC_IS_CLANG)),gcc-ar,$(if $(filter Darwin,$(shell uname -s)),$(AR),$(shell $(CC) -print-prog-name=llvm-ar)))
+
+$(BUILD_DIR)/libcsim.a: $(CSIM_LIB_OBJECTS) | $(BUILD_DIR)
+	rm -f $@
+	$(LIB_AR) rcs $@ $^
+
+$(BUILD_DIR)/lib_link_check: $(CSIM_LIB_OBJECTS) $(BUILD_DIR)/test_lib_link_check.o | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+lib: $(BUILD_DIR)/libcsim.a
+
+$(BUILD_DIR)/lib_archive_check: $(BUILD_DIR)/test_lib_link_check.o $(BUILD_DIR)/libcsim.a | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+lib-link-check: $(BUILD_DIR)/lib_link_check $(BUILD_DIR)/lib_archive_check
+	./$(BUILD_DIR)/lib_link_check
+	./$(BUILD_DIR)/lib_archive_check
 
 # Auto-generated header dependencies (from -MMD). Catches the case where
 # editing a header doesn't trigger a rebuild of every TU that includes

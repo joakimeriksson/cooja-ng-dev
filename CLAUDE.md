@@ -28,6 +28,10 @@ make pgo          # Profile-guided optimization. Recursive make, so it reuses th
                   # Measured on an *untrained* workload (chain-3node-nrf52840-dk):
                   # ~1.55x on clang/arm64, ~1.18x on gcc/x86-64. arm-bench itself is
                   # in the training set, so its 1.6-2.0x is an optimistic read.
+make lib          # build/libcsim.a: the simulator without test/ (the frontends)
+make lib-link-check  # link those objects with a main of their own — fails if a
+                  # kernel/chip/service object needs a symbol only the runner
+                  # defines (test_runner links everything, so it can't tell). CI runs it
 make clean        # Remove build/
 ```
 
@@ -342,7 +346,7 @@ firmware/cc2538dk/    Pre-compiled Contiki-NG firmware for CC2538DK
 | `sim_runtime.c` | `sim_runtime_t` container: now_ns, unified event queue, radio medium, mote slots + generations, observer fan-out, `sim_runtime_run_until()` event pump |
 | `sim_radio_bus.c` | Full RF delivery path (Phase 5): per-sender byte clock, frame assembler (802.15.4 + 802.15.4g), medium-filtered per-receiver dispatch (SYNC/PER_BYTE/BATCH), RX-stall timer, emulated RX core (deliver/queue/drain), frame-complete policy (air-time + collision windows, RXFIFO backpressure, dual 192 µs auto-ACK windows), native/JS frame path, channel push/pull, channel-busy query, bus-owned RX/frame stats |
 | `sim_board.c` | Board registry: firmware extension → {mote kind, platform name, label} |
-| `sim_registry.c` | Static built-in registry (Phase 8): one `sim_registry_t` lookup surface for boards, mote kinds, services, and radio media; `csim_register_builtin_{platforms,mote_types,services,media}` populate it; services + media (Phase 11: "udgm"/"none" + plugins) resolve by name via owned name→ops catalogs |
+| `sim_registry.c` | Static built-in registry (Phase 8): one `sim_registry_t` lookup surface for boards, mote kinds, services, and radio media; `csim_register_builtin_{platforms,mote_types,services,media}` populate it (services from `src/services/builtin_services.c` — `src/sim` names no service); services + media (Phase 11: "udgm"/"none" + plugins) resolve by name via owned name→ops catalogs |
 | `sim_plugin.c` | Dynamic plugin loader (Phase 9): `sim_plugin_load` dlopens a `.so` (RTLD_NOW\|RTLD_LOCAL), resolves `csim_plugin_init`, and hands it a `csim_api_t` so the plugin registers a service. ABI is additive/version-gated (`include/sim/csim_plugin.h`): v1 `register_service`, v2 `+register_radio_medium`, v3 `+ui->publish_panel` (a plugin draws a live web-UI panel — see [`docs/design/ui-plugins.md`](docs/design/ui-plugins.md)). Dynamic `.so` examples: `plugins/packet_sink.c` (service), `plugins/lossy_medium.c` (medium). A plugin can also be **compiled in** as a built-in service (registered in `sim_registry.c`) and selected by config name (`"plugins": ["energest"]`, Cooja's built-in-plugin style) — example: the energy estimator `src/services/energest_{engine,service}.c` |
 | `sim_control.c` | The one implementation of every live mutation — add/move/remove/reboot/send a node, pause/resume/run-for/step, speed — over a bundle of runner primitives (`sim_control_ops_t`); the JSON/JS action executors, the WebSocket UI and the shell all call it. Only writer of `run_state` PAUSED/RUNNING |
 | `sim_config.c` | Config loader (Phase 7): `sim_config_load` picks the front end by extension (`.yaml`/`.yml` → libyaml, `.json` → cJSON), runs the schema validator, then dispatches on `version` to `parse_v1`/`parse_v2`, both populating one `sim_normalized_config_t` the runtime consumes |

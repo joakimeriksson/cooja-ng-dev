@@ -27,6 +27,7 @@
 #include "sim_mote.h"
 #include "sim_runtime.h"
 #include "sim_radio_bus.h"
+#include "sim_config.h"   /* sim_peripheral_config_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -250,6 +251,9 @@ int  arm_elf_mote_boot(mixed_node_t *node, int slot,
                        const sim_mote_env_t *env);
 void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
                                  sim_radio_bus_t *bus);
+int  arm_elf_mote_configure_peripherals(mixed_node_t *node,
+                                        const sim_peripheral_config_t *list,
+                                        int count, const sim_mote_env_t *env);
 int64_t arm_elf_mote_tick(mixed_node_t *node, int64_t sim_ns);
 /* Cycle-derived "now" in ns (raw intra-step value) for the UI/timeline
  * rf-state event — keeps arm_systick.h out of the runner (Phase 10 M53). */
@@ -278,6 +282,13 @@ typedef struct sim_mote_kind {
                  int node_id, const sim_mote_env_t *env);
     void (*register_radio)(mixed_node_t *node, int slot,
                            sim_radio_bus_t *bus);
+    /* A node's "peripherals" list (off-SoC SPI chips), applied after boot:
+     * it replaces the board defaults the SoC attached.  0 = attached, -1 =
+     * a chip could not be attached (already reported), 1 = this board has
+     * no SPI chip support.  NULL = no board of this kind has any. */
+    int  (*configure_peripherals)(mixed_node_t *node,
+                                  const sim_peripheral_config_t *list,
+                                  int count, const sim_mote_env_t *env);
     const sim_mote_ops_t *ops;
 } sim_mote_kind_t;
 
