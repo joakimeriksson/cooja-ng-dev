@@ -627,7 +627,8 @@ static void deliver_rx_byte(const sim_event_t *ev) {
         }
     }
 
-    int64_t returned_us = m->ops->sync_to_time(m, ev->time_ns);
+    /* The returned lead is not needed: see the wakeup below. */
+    (void)m->ops->sync_to_time(m, ev->time_ns);
 
     const char *old_state_name = NULL;
     if (cc) {
@@ -657,9 +658,11 @@ static void deliver_rx_byte(const sim_event_t *ev) {
 
     /* Match Cooja's MspMoteTimeEvent + requestImmediateWakeup:
      * execute(t, 0) first, then receivedByte(), then a same-time mote
-     * wakeup request. Also retain the next wakeup returned by execute. */
-    int64_t next_ns = ev->time_ns + returned_us * 1000LL;
-    sim_schedule_mote_wakeup_if_earlier(&sim_rt, idx, next_ns);
+     * wakeup request.  This used to request execute's next wakeup
+     * (t + returned lead) first, but the lead is never negative, and
+     * anything earlier than now is clamped to now (= t, the event's own
+     * time): the same-time request always wins, and with nothing scheduled
+     * in between, the earlier one only spent a sequence number. */
     sim_schedule_mote_wakeup_if_earlier(&sim_rt, idx, ev->time_ns);
 }
 
