@@ -106,6 +106,11 @@ static sim_mote_t mote_store[MAX_NODES];
  * EB-process / queue-add counters) moved into src/motes/msp430_elf_mote.c —
  * the runner installs it type-blind and reads the counts via getters. */
 static int num_nodes = 0;
+/* Set once a native node has been initialized, never cleared: the wakeup
+ * path skips its per-native loops until then.  Conservative on removal —
+ * a run that has had a native keeps paying for the loops — so it can never
+ * skip work that matters. */
+static bool have_native = false;
 static int verbose = 1;
 /* M9.2: RF routing state lives in the kernel-owned radio bus.  The
  * aliases keep call sites unchanged until the dispatch functions
@@ -1462,6 +1467,8 @@ static int init_node(int idx, const char *firmware_path,
     const sim_mote_kind_t *kind =
         sim_registry_mote_kind_for(&g_registry, node->board->kind);
     node->type = kind->node_type;
+    if (node->type == NODE_NATIVE)
+        have_native = true;
     node->id = node_id;
     node->slot = idx;
     node->env = &mixed_mote_env;
@@ -1945,16 +1952,22 @@ static void dispatch_mote_wakeup(const sim_event_t *ev) {
 
     /* Snapshot ALL nodes' state to detect frame delivery.
      * Must be fresh for each event — ACK chains require
-     * detecting frames delivered during the current event. */
+     * detecting frames delivered during the current event.
+     * Only natives are snapshotted, so with none in the run (the common
+     * case) the two all-nodes loops are skipped: with 1 µs slices they ran
+     * once per active microsecond per mote, O(N²) in the node count. */
+    const bool natives = have_native;  /* one value for both loops */
     int rx_before[MAX_NODES];
     int insize_before[MAX_NODES];
-    for (int r = 0; r < num_nodes; r++) {
-        if (nodes[r].type == NODE_NATIVE) {
-            rx_before[r] = nodes[r].plat.native.rx_queue.count;
-            insize_before[r] = *nodes[r].plat.native.simInSize;
-        } else {
-            rx_before[r] = 0;
-            insize_before[r] = 0;
+    if (natives) {
+        for (int r = 0; r < num_nodes; r++) {
+            if (nodes[r].type == NODE_NATIVE) {
+                rx_before[r] = nodes[r].plat.native.rx_queue.count;
+                insize_before[r] = *nodes[r].plat.native.simInSize;
+            } else {
+                rx_before[r] = 0;
+                insize_before[r] = 0;
+            }
         }
     }
 
@@ -1973,7 +1986,7 @@ static void dispatch_mote_wakeup(const sim_event_t *ev) {
      * Their signal strength, which is what keeps a neighbour's CCA from
      * transmitting over this frame, is derived from the frame's on-air time
      * on the receiver's own next tick. */
-    for (int r = 0; r < num_nodes; r++) {
+    for (int r = 0; natives && r < num_nodes; r++) {
         if (r == i || !node_active(r)) continue;
         if (nodes[r].type == NODE_NATIVE) {
             bool got_frame =
@@ -1993,15 +2006,17 @@ static void dispatch_mote_wakeup(const sim_event_t *ev) {
      * 1ms of CPU time (~4000 cycles at 4MHz) which covers ISR +
      * one process_run() iteration. */
     for (int r = 0; r < num_nodes; r++) {
+        /* An empty queue drains to nothing; testing it here saves the bus
+         * call, which was most of this loop's cost. */
+        if (emu_rx_queue[r].count == 0) continue;
         if (!node_active(r) || nodes[r].type == NODE_NATIVE) continue;
         emu_rx_queue_drain(r);
     }
 
-    /* Deliver pending bytes to native assemblers */
-    for (int r = 0; r < num_nodes; r++) {
-        if (!node_active(r) || nodes[r].type != NODE_NATIVE) continue;
-        mixed_deliver_rf_bytes(r);
-    }
+    /* (No native byte delivery here: natives are SYNC receivers, fed each
+     * byte by the bus as it is sent; rf_pending is only staged for BATCH
+     * receivers, so the per-native mixed_deliver_rf_bytes loop that stood
+     * here never had anything to deliver.) */
 
     /* (debug stepping removed — was causing cascade on Node 1
      * via unguarded step_node_until on Node 2) */
