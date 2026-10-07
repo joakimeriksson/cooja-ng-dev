@@ -714,7 +714,10 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     }
     const ds = replay.doc.deltas;
     while (replay.idx < ds.length && ds[replay.idx]['0'] <= ms) {
-      handleCBORDelta(ds[replay.idx]); replay.idx++;
+      const d = ds[replay.idx];
+      handleCBORDelta(d);
+      if (d.p) renderPluginPanels(d.p);   // the tick's plugin panels (--ui-record)
+      replay.idx++;
     }
     replay.clock = ms;
     if (state) { state.sim_time_ms = ms; state.stats.paused = replay.paused; state.stats.speed = replay.speed; }

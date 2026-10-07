@@ -157,6 +157,7 @@ NATIVE_SOURCES = $(NATIVE_SRC_DIR)/native_node.c \
                  $(NATIVE_SRC_DIR)/renode_dev.c
 
 UI_SOURCES = $(UI_SRC_DIR)/ws_server.c \
+             $(UI_SRC_DIR)/cbor_json.c \
              $(UI_SRC_DIR)/sim_state.c
 
 QUICKJS_SRC_DIR = lib/quickjs
