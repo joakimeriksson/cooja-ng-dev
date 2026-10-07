@@ -407,8 +407,18 @@ void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
     /* Record first byte time for accurate TX start computation and track
      * subsequent bytes on the sender's on-air byte clock.
      *
-     * Fires for either preamble flavour: 0x00 (IEEE 802.15.4 2.4 GHz)
-     * or 0x55 (CC1200 802.15.4g sub-GHz). Without arming for 0x55, the
+     * Fires once per frame, on its first byte, for either preamble
+     * flavour: 0x00 (IEEE 802.15.4 2.4 GHz) or 0x55 (CC1200 802.15.4g
+     * sub-GHz).  "First" is the assembler still at its start: PREAMBLE
+     * with nothing in either preamble detector.  zero_count alone only
+     * says that for 0x00 — it never counts 0x55 — so it used to re-arm
+     * on every sub-GHz preamble byte, restarting the frame's clock and
+     * stamping the whole preamble "now" with the sync word right behind
+     * it.  A soft ACK sent back fast enough then had its sync word on the
+     * air before the data sender's radio was back in RX, and was lost:
+     * every unicast on a CC1200 link failed all its retries whenever the
+     * receiver turned around quickly (chain-4node-firefly-subghz).
+     * Without arming for 0x55, the
      * per-byte schedule fell back to first_byte_ns=0 → bytes clamped
      * to sim_now → whole frame dumped into the receiver in one batch.
      * That short-circuited the ~16 ms real air time to ~5 ms and
@@ -418,6 +428,7 @@ void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
      * (without that, bytes arriving the same sim_ns as the receiver's
      * CSMA prepare()→SIDLE→SRX transition were silently dropped). */
     if (a->state == TX_ASM_PREAMBLE && a->zero_count == 0 &&
+        a->sync_match == 0 &&
         (byte == 0x00 || byte == 0x55)) {
         /* Match Cooja's radio callbacks: outgoing bytes are observed at the
          * current scheduler time, not from a mote-local sim_time that may

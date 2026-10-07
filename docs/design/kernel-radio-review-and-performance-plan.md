@@ -224,6 +224,51 @@ misses" shortcuts.
   back with zero air time — dead today (no caller reaches native
   `step_until`), a landmine.
 
+### F17 (A) — sub-GHz byte clock re-armed on every preamble byte (**fixed on `fix/cc1200-preamble-byte-clock`**)
+
+`sim_radio_bus_tx_byte` arms a frame's byte clock (`first_byte_ns`, the
+capture length) on its first preamble byte, guarded by `zero_count == 0`.
+`zero_count` only counts `0x00`, so for a CC1200 frame (`0x55` preamble) the
+guard held on **every** preamble byte: the clock restarted four times, all
+four preamble bytes were stamped "now" and the sync word followed 32 µs
+apart instead of after 640 µs of preamble.  The CC1200 drops bytes it
+receives outside RX, and hunts for the whole sync word.  A soft ACK sent
+back within ~0.3 ms of `RX_DONE` (the common case in the emulator) therefore
+had its sync word on the air before the data sender's radio was back in RX
+(the sender's own model ends TX ~0.7 ms after the receiver's `RX_DONE`), and
+was lost.  The sender retried, the receiver ACKed again with the same
+timing, and CSMA reported `MAC_TX_NOACK` after all 8 attempts — unicast
+links either worked on the first try or never.  RPL's ETX for those links
+climbed past MRHOF's 512 limit, no parent was acceptable, DAOs stopped, and
+`chain-4node-firefly-subghz` collapsed after ~40 s (node 4 never got a
+response).  This is the "byte-delivery model bunches sub-GHz frames"
+residual `b7c18bc` described in June; arming on `0x55` (added since) did not
+fix it, because the arm was not once per frame.
+
+Fix: arm only while the assembler is at a frame's start (`sync_match == 0`
+as well — the `0x55` detector's register, cleared at frame end, abort and
+reset).  2.4 GHz frames take the same path as before: `check-baseline.sh`
+byte-identical.  Sub-GHz moves, as it should: the 4-node chain passes (64
+requests at the root, 19 responses at node 4, two retries in 240 s where
+every failure used to be eight); 2-node `-subghz-fixed` RPL-UDP completes
+5/5 round trips in 60 s (was 2/5, with 50 NOACKs); nullnet broadcast is
+unchanged.  The chain is now a CI step (~2 s).
+
+F4's CC1200 item (the first 8 bytes at the 2.4 GHz period) is a separate,
+smaller effect: the assembler keeps `subghz` across frames, so it only hits
+a node's first sub-GHz frame (and the first after a 2.4 GHz frame on a
+Firefly).  With F17 fixed, also starting the sub-GHz period at the `0x55`
+preamble changes nothing in these runs.
+
+### F18 (C) — pcap and the packet analyzer misread sub-GHz frames
+
+The pcap capture writes CC1200 frames with garbled timestamps and payloads
+that do not start at the MAC header (`3a1a9b…`), and the verbose `[PKT]`
+decoder calls a 95-byte data frame "ACK seq=155".  Both look like a 2.4 GHz
+PHY-wrap strip (4 preamble + SFD + length) applied to 802.15.4g frames
+(4 preamble + 4 sync + 2 PHR).  Observation only — the simulation is
+unaffected — but a sub-GHz pcap is currently useless for debugging.
+
 ## 3. Findings — event-queue usage and time-keeping
 
 ### F8 (perf, A-class for scale) — O(N) work on every `NODE_WAKEUP`
