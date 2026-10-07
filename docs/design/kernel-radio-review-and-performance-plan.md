@@ -1,8 +1,9 @@
 # Kernel and radio-path review, with a performance and refactoring plan
 
 Status: **review complete** (2026-09-25, revised 2026-09-27 after review on
-PR #62). Tier 0 item 3 and Tier 2 item 1 have landed (PRs #61 and #60); the
-current sequencing is in §7.
+PR #62). Tier 0 (items 1–4) and Tier 2 item 1 have landed (Tier 0 item 3
+in PR #61, items 1, 2 and 4 on `perf/tier0-wakeup-loops`; Tier 2 item 1 in
+PR #60); the current sequencing is in §7.
 
 Revisions: the §4 measurements and the Tier 0 prototype were taken on this
 machine (Apple Silicon, stock `make`, GNU Lightning present) at `252fc0e`;
@@ -57,8 +58,9 @@ PC-trace hook on every MSP430 node):
 
 stdout (every timestamped console line) was identical on all three. The
 PC-trace half has since landed on its own (PR #61) and measured no speedup,
-so the gain is the loop skipping (Tier 0 items 1–2), which has not yet been
-measured alone.
+so the gain is the loop skipping (Tier 0 items 1–2). Measured alone (with
+item 4) against `main` at `521d32c`: 5.78x on the grid, 1.27x on the Sky
+chain, 1.05x on the CC2538 chain, byte-identical — see Tier 0.
 
 ---
 
@@ -372,20 +374,39 @@ radio-bus/radio-medium unit suites. Tiers 0 and 2 are semantics-preserving by
 construction. Tier 1 is only once its prerequisite has been shown not to move
 output (see there). Tier 3 is not, and gets its own gate.
 
-### Tier 0 — remove O(N) work from the wakeup path (**prototype: 5.4x on 100 nodes, 1.24x on Sky chain, byte-identical**)
+### Tier 0 — remove O(N) work from the wakeup path (**DONE: 5.78x on 100 nodes, 1.27x on Sky chain, byte-identical**)
 
 The prototype combined items 1–3 at `252fc0e`. Item 3 alone has since
-measured no change, so the gain is items 1–2; re-measure them alone on
-current `main`, whose stock baseline already includes #60.
+measured no change, so the gain is items 1–2.
 
-1. `dispatch_mote_wakeup`: compute `have_native` once per topology change
+Measured on `perf/tier0-wakeup-loops` (items 1, 2 and 4) against `main` at
+`521d32c` (#60 and #61 in both), min of three sequential runs, stock `make`,
+Apple Silicon. stdout (minus the wall-clock lines), stderr and the exit code
+were identical in every run:
+
+| Workload | `main` | Tier 0 | |
+|---|---|---|---|
+| `udgm-100node-grid-sky`, 180 s sim (the config's own `timeout_ms`) | 160.7 s | **27.8 s** | **5.78x** |
+| `chain-4node-sky.yaml` | 687 ms | 542 ms | 1.27x |
+| `chain-4node-cc2538dk.json` | 678 ms | 644 ms | 1.05x |
+
+Also byte-identical: `check-baseline.sh 521d32c` (all nine workloads),
+`test-tsch-cc2538dk`, `mixed-sky-native` (Sky + native motes), and the
+Contiki-NG Cooja suite (85/93 pass, 0 fail; the 8 skips are the TUN cases).
+
+1. **DONE** `dispatch_mote_wakeup`: compute `have_native` once per topology change
    (add/remove/reboot) and skip the snapshot, got-frame and
    `mixed_deliver_rf_bytes` loops when false; delete the
    `mixed_deliver_rf_bytes` loop outright (dead — natives are `SYNC`).
-   For the native case, replace the all-nodes snapshot with the sender's
-   neighbour list from the medium.
-2. Drain only receivers with a non-empty `emu_rx_queue` (keep a count or a
-   small dirty list on the bus; the prototype tested `count == 0` inline).
+   As built, `have_native` is set by `init_node` and never cleared, so a
+   removal can only leave the loops running, never skip one that matters.
+   **Not done:** for the native case, replace the all-nodes snapshot with
+   the sender's neighbour list from the medium — only native-heavy
+   workloads would gain, and it changes which nodes are inspected, so it
+   wants its own gate.
+2. **DONE** (the `count == 0` test inline, as the prototype did; a bus-side
+   count would need every one of the queue's six writers kept in step, for
+   a loop R1 deletes) Drain only receivers with a non-empty `emu_rx_queue`.
    Once F1 lands, this loop disappears entirely.
 3. ~~Make the PC trace opt-in~~ **DONE (PR #61)**: `CSIM_PC_TRACE=1`;
    the `FW cc2420_transmit=…` line goes with it. Not a measurable speedup
@@ -393,10 +414,13 @@ current `main`, whose stock baseline already includes #60.
    `check-baseline.sh` capture stdout and stderr separately, since the
    merged capture reported spurious diffs whenever an early stdout line
    moved a buffer-flush boundary.
-4. Drop the redundant **first** `if_earlier` in `deliver_rx_byte`, the one
+4. **DONE** Drop the redundant **first** `if_earlier` in `deliver_rx_byte`, the one
    with `next_ns` (F7). Not the second: that is the same-time wakeup after
    `receive_byte`, and without it every receiver reacts to a radio byte one
-   slice late, which moves every radio workload.
+   slice late, which moves every radio workload.  Pop order cannot change:
+   anything below `now` is clamped to `now` (= the event's time), and with
+   nothing scheduled between the two calls the first only spent a sequence
+   number.
 
 Cost: a day. Risk: low. The prototype of items 1–3 diffed clean on 2686 + 173
 output lines; item 4 was not in it and is gated like the rest.
@@ -604,13 +628,12 @@ in-slice time. Both are additive.
 
 ## 7. Sequencing
 
-State on 2026-09-27: Tier 0 item 3 (PR #61) and Tier 2 item 1 (PR #60) have
-landed. Tier 0 items 1–2 waited for PR #56 (native CCA), which touches the
-same per-wakeup loops; it merged 2026-09-26, so they can start. R1 comes
-after Tier 0, not in parallel with it, since both change the per-wakeup
-drain loop.
+State on 2026-10-07: Tier 0 is done — item 3 in PR #61, items 1, 2 and 4 on
+`perf/tier0-wakeup-loops` (5.78x on the grid, byte-identical) — and Tier 2
+item 1 in PR #60. R1 is next; it came after Tier 0, not in parallel with
+it, since both change the per-wakeup drain loop.
 
-1. Tier 0 (a day) — ship first; it is the 5.4x and it is low-risk.
+1. ~~Tier 0 (a day)~~ **DONE** — 5.78x on the grid, byte-identical.
 2. R1 (two to three days) — deletes the hazard and most of the remaining
    per-wakeup runner work; rewrites `test_radio_bus`.
 3. R2 (half a day) — fixes a broken supported scenario.
