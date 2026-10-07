@@ -35,6 +35,20 @@ make lib-link-check  # link those objects with a main of their own — fails if 
 make clean        # Remove build/
 ```
 
+```sh
+# Web UI recording + the project site (docs/ui-replay.md).  --ui-record FILE writes the stream
+# a live browser would get as a replay file (headless and unpaced without --ui; the simulation
+# is unchanged); ui/index.html?replay=FILE plays it.  The Pages site (site/, deployed by
+# .github/workflows/pages.yml to https://mikroverk.github.io/cooja-ng/) plays demos that CI
+# records from the same commit with tools/record-demos.sh — a demo that fails its own test, or
+# whose recording lacks its expectation (a console pattern on >= N nodes, the DEMOS line's third
+# field), fails the deploy.  Add a demo: a DEMOS line there plus a card in site/index.html (the
+# deploy checks every card has a recording).
+tools/check-ui-record.sh                  # --ui-record end to end: stdout unchanged, whole run in the file
+./build/test_runner test configs/test-mixed-platform-rpl.yaml -q --ui-record mixed.json
+tools/record-demos.sh /tmp/demos          # all demos + demos.json manifest; or name some
+```
+
 GNU Lightning is optional (auto-detected via pkg-config). Without it, the interpreter is used for all execution.
 
 ## Testing

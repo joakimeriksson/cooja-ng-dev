@@ -1,0 +1,57 @@
+name: pages
+# Publish the project site to GitHub Pages (https://mikroverk.github.io/cooja-ng/): site/ (the
+# landing page and its images), the web UI as player.html, and demo replays recorded here, from
+# this commit, by tools/record-demos.sh — so every playback on the page is a run of the code it
+# describes.  A demo that fails its own test, or does not show what its card says, fails the
+# build instead of being published.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+# One deployment at a time, and never cut one off halfway: a newer push waits
+# for the running one and then publishes itself.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make -j"$(nproc)"
+      - name: Record the demo replays
+        run: WALL=900 tools/record-demos.sh _site/demos
+      - name: Assemble the site
+        run: |
+          cp -r site/. _site/
+          cp ui/index.html _site/player.html
+          v=${GITHUB_SHA::8}
+          sed -i "s|__COMMIT__|$v|" _site/index.html
+          grep -q "$v" _site/index.html
+          # Every card on the page has its recording.
+          missing=0
+          for name in $(grep -o 'data-demo="[a-z0-9-]*"' site/index.html | cut -d'"' -f2); do
+            [ -s "_site/demos/$name.json" ] || { echo "no recording for card '$name'"; missing=1; }
+          done
+          [ "$missing" -eq 0 ]
+          ls -la _site _site/demos
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
