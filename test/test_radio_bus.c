@@ -471,6 +471,92 @@ static void test_capture_and_first_byte(void) {
 }
 
 /* ============================================================
+ * Byte-clock arming: once per frame, at its first preamble byte, with the
+ * frame's own byte period (F17 in kernel-radio-review-and-performance-
+ * plan.md).  The clock is read back through the host's on_tx_byte hook,
+ * which gets every byte's on-air time.
+ * ============================================================ */
+
+static int64_t arm_times[128];
+static int     arm_count;
+static void arm_on_tx_byte(void *user, int sender, uint8_t byte,
+                           int64_t byte_time_ns, int depth) {
+    (void)user; (void)sender; (void)byte; (void)depth;
+    if (arm_count < (int)(sizeof arm_times / sizeof arm_times[0]))
+        arm_times[arm_count++] = byte_time_ns;
+}
+
+/* Send seq from node 0, the sender's clock advancing `step` ns per byte
+ * from `start` (a chip pushing bytes as it goes); true if every byte's
+ * on-air time is start + i * period. */
+static bool arm_send_and_check(fixture_t *f, const uint8_t *seq, int n,
+                               int64_t start, int64_t step, int64_t period) {
+    arm_count = 0;
+    for (int i = 0; i < n; i++) {
+        f->sim.now_ns = start + (int64_t)i * step;
+        sim_radio_bus_tx_byte(&f->bus, &f->sim, 0, 0, seq[i]);
+    }
+    if (arm_count != n) return false;
+    for (int i = 0; i < n; i++)
+        if (arm_times[i] != start + (int64_t)i * period) return false;
+    return true;
+}
+
+static void test_byte_clock_arming(void) {
+    fixture_t f;
+    fx_init(&f, 2);
+    sim_radio_bus_register(&f.bus, 0, &mock_ops, &f.rx[0], SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    sim_radio_bus_register(&f.bus, 1, &mock_ops, &f.rx[1], SIM_RADIO_DELIVERY_PER_BYTE, 0);
+    f.bus.host.on_tx_byte = arm_on_tx_byte;
+    const int64_t g = byte_period_ns(true), b = byte_period_ns(false);
+
+    /* A CC1200 frame: 4×0x55 preamble, sync word, 1-byte PHR, payload, CRC. */
+    const uint8_t sub[] = { 0x55,0x55,0x55,0x55, 0x6E,0x4E,0x90,0x4E, 8,
+                            1,2,3,4,5,6,7,8, 0xC1,0xC2 };
+    const int nsub = (int)sizeof sub;
+
+    /* Armed once, at the first 0x55 — not again on the next three — and
+     * timed at the sub-GHz period from the first byte, sync word included.
+     * The node's first sub-GHz frame used to run its first 8 bytes at the
+     * 2.4 GHz period. */
+    ASSERT(arm_send_and_check(&f, sub, nsub, 1000000, 7, g),
+           "sub-GHz frame: armed once at its first preamble byte, 160 us apart");
+    ASSERT_EQ(f.bus.tx_cap[0].len, nsub, "sub-GHz capture keeps the whole preamble");
+    /* The next frame arms at its own start. */
+    ASSERT(arm_send_and_check(&f, sub, nsub, 50000000, 0, g),
+           "second sub-GHz frame armed at its own first byte");
+
+    /* A 2.4 GHz frame after a sub-GHz one from the same node (dual-band
+     * Firefly) runs at the 2.4 GHz period from its first byte. */
+    uint8_t ieee[32];
+    int nieee = build_802154(ieee, 6);
+    ASSERT(arm_send_and_check(&f, ieee, nieee, 90000000, 0, b),
+           "2.4 GHz frame after sub-GHz: 32 us from the first byte");
+
+    /* A rejected length (here 0x80, above 127), with the rest of the bad
+     * frame still coming: the next frame arms at its own first byte. */
+    const uint8_t rejected[] = { 0,0,0,0, 0x7A, 0x80, 0x11, 0x22 };
+    arm_send_and_check(&f, rejected, (int)sizeof rejected, 100000000, 0, b);
+    ASSERT(arm_send_and_check(&f, ieee, nieee, 150000000, 0, b),
+           "frame after a length reject armed at its own first byte");
+    ASSERT_EQ(f.bus.tx_cap[0].len, nieee, "capture restarted for that frame");
+
+    /* A sub-GHz frame longer than its PHR says: the extra bytes trail into
+     * PREAMBLE, and the next frame still arms at its own start. */
+    const uint8_t longer[] = { 0x55,0x55,0x55,0x55, 0x6E,0x4E,0x90,0x4E, 5,
+                               1,2,3,4,5, 0xC1,0xC2, 0x99, 0x00, 0x00 };
+    arm_send_and_check(&f, longer, (int)sizeof longer, 120000000, 0, g);
+    ASSERT(arm_send_and_check(&f, sub, nsub, 130000000, 0, g),
+           "frame after trailing bytes armed at its own first byte");
+
+    /* The same after a rejected 802.15.4g PHR. */
+    const uint8_t badphr[] = { 0x55,0x55,0x55,0x55, 0x6E,0x4E,0x90,0x4E, 0xFF, 0xFF };
+    arm_send_and_check(&f, badphr, (int)sizeof badphr, 200000000, 0, g);
+    ASSERT(arm_send_and_check(&f, sub, nsub, 250000000, 0, g),
+           "frame after a PHR reject armed at its own first byte");
+}
+
+/* ============================================================
  * Re-entrant depth staging (auto-ACK during synchronous delivery).
  * ============================================================ */
 
@@ -1215,6 +1301,7 @@ int run_radio_bus_tests(int verbose) {
     test_delivery_per_byte();
     test_delivery_batch();
     test_capture_and_first_byte();
+    test_byte_clock_arming();
     test_reentrant_depth();
     test_rx_stall();
     test_reset_node();

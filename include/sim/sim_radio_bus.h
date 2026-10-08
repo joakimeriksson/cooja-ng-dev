@@ -53,6 +53,10 @@ typedef struct {
     int state;
     int zero_count;        /* 0x00 preamble bytes (802.15.4) */
     uint32_t sync_match;   /* sliding 32-bit register for 802.15.4g sync */
+    int pre_run;           /* 0x100 | the preamble byte (0x00 or 0x55) the
+                            * last byte fed in PREAMBLE belonged to, else 0
+                            * (also the zero-initialised state): a frame's
+                            * byte clock is armed on the first byte of a run */
     int phr_lo;            /* CC1200: top 3 bits of length stashed here */
     int expected_len;      /* PHY length value (PHR for CC1200) */
     int payload_count;     /* bytes received after length byte */

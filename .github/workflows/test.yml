@@ -240,6 +240,14 @@ jobs:
         # node should print at least one "Received" line.
         run: ./build/test_runner zoul-firefly-multinode firmware/zoul-firefly/nullnet-broadcast-subghz.zoul-firefly -t 20000 -q
 
+      - name: Zoul Firefly sub-GHz 4-node RPL chain (240s sim, ~2s)
+        # Three hops of CC1200 unicast with soft ACKs: fails if a sub-GHz
+        # ACK's sync word reaches the sender before its radio is back in RX
+        # (the per-frame byte clock, F17 in kernel-radio-review-and-
+        # performance-plan.md).  Nullnet above is broadcast-only and cannot
+        # see that.
+        run: ./build/test_runner test configs/chain-4node-firefly-subghz.json -q
+
       - name: nRF52840-DK Contiki RPL-UDP (40s sim)
         # The runner exits 0 regardless, so assert on the firmware's own
         # reception count (no -q — that suppresses the firmware console).

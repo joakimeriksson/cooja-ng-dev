@@ -224,6 +224,71 @@ misses" shortcuts.
   back with zero air time — dead today (no caller reaches native
   `step_until`), a landmine.
 
+### F17 (A) — sub-GHz byte clock re-armed on every preamble byte (**fixed by PR #67**)
+
+`sim_radio_bus_tx_byte` arms a frame's byte clock (`first_byte_ns`, the
+capture length) on its first preamble byte, guarded by `zero_count == 0`.
+`zero_count` only counts `0x00`, so for a CC1200 frame (`0x55` preamble) the
+guard held on **every** preamble byte: the clock restarted on each of the four,
+so the preamble was stamped "now" and the sync word followed one byte period
+later instead of after four.  For a node's first sub-GHz frame the byte period
+was also still the 2.4 GHz one until the sync word (F4), so its whole preamble
+and sync word took 128 µs instead of 1.28 ms; for every later frame the
+assembler kept `subghz`, and the frame ran 3 byte periods (480 µs) early from
+the sync word on, the capture short of 3 preamble bytes.
+
+The CC1200 drops bytes it receives outside RX, and hunts for the whole sync
+word.  A soft ACK sent back within ~0.3 ms of `RX_DONE` (the common case in
+the emulator) therefore had its sync word on the air before the data sender's
+radio was back in RX (the sender's own model ends TX ~0.7 ms after the
+receiver's `RX_DONE`), and was lost.  The sender retried, the receiver ACKed
+again with the same timing, and CSMA reported `MAC_TX_NOACK` after all 8
+attempts — unicast links either worked on the first try or never.  RPL's ETX
+for those links climbed past MRHOF's 512 limit, no parent was acceptable, DAOs
+stopped, and `chain-4node-firefly-subghz` collapsed after ~40 s (node 4 never
+got a response).  This is the "byte-delivery model bunches sub-GHz frames"
+residual `b7c18bc` described in June; arming on `0x55` (added since) did not
+fix it, because the arm was not once per frame.
+
+The fix (PR #67, after review):
+- The clock arms on the **first byte of a run** of one preamble byte while the
+  assembler hunts for a preamble (`tx_asm.pre_run`).  Any other byte ends the
+  run, so a rejected frame's remainder or a stray byte cannot stop the next
+  frame from arming — a first version guarded on `sync_match == 0`, which a
+  length reject left holding the SFD and trailing bytes re-dirtied.  For
+  2.4 GHz the rule is exactly the old `zero_count == 0`.
+- Every return to PREAMBLE (frame end, length reject, PHR reject) goes
+  through one reset that clears both preamble detectors.
+- The first preamble byte also sets the frame's byte period, so a node's first
+  sub-GHz frame, and a 2.4 GHz frame right after a sub-GHz one on a dual-band
+  Firefly, are timed at their own rate from the first byte (F4's CC1200 item).
+- The sub-GHz special cases that anchored the busy, collision, delivery and
+  interference windows to `now` ("first_byte_ns unarmed") are gone: with the
+  clock armed they computed the same values (the Firefly runs are
+  byte-identical with and without them).
+- `test_radio_bus` pins it: one arm per sub-GHz frame at 160 µs from the first
+  byte, two frames in a row, 2.4 GHz after sub-GHz, and the next frame after a
+  length reject, a frame longer than its PHR, and a PHR reject.
+
+2.4 GHz is unchanged: `check-baseline.sh` byte-identical.  Sub-GHz moves, as
+it should: the 4-node chain passes (64 requests at the root, 19 responses at
+node 4, two retries in 240 s where every failure used to be eight); 2-node
+`-subghz-fixed` RPL-UDP completes 5/5 round trips in 60 s (was 2/5, with 50
+NOACKs); nullnet broadcast is unchanged.  The chain is a CI step (~2 s) that
+asks for at least 10 responses at node 4, so a mostly broken link does not
+pass.
+
+### F18 (C) — pcap and the packet analyzer misread sub-GHz frames
+
+The pcap capture writes CC1200 frames with timestamps out of order (hundreds of
+seconds into a 12 s run) and payloads that do not start at the MAC header
+(`3a1a9b…`), and the verbose `[PKT]` decoder calls a 95-byte data frame
+"ACK seq=155".  Both look like a 2.4 GHz PHY-wrap strip (4 preamble + SFD +
+length) applied to 802.15.4g frames (4 preamble + 4 sync + PHR).  Not caused
+by F17: a capture with PR #67 applied is the same.  Observation only — the
+simulation is unaffected — but a sub-GHz pcap is currently useless for
+debugging.
+
 ## 3. Findings — event-queue usage and time-keeping
 
 ### F8 (perf, A-class for scale) — O(N) work on every `NODE_WAKEUP`

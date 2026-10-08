@@ -30,10 +30,22 @@ int frame_fifo_bytes(const uint8_t *data, int len, bool subghz) {
  * Per-sender frame assembler (moved from the runner, M9.4).
  * ============================================================ */
 
+/* Back to hunting for a preamble, with the preamble detectors clean.
+ * Every return to PREAMBLE goes through here — frame end and every
+ * reject. */
+static void asm_back_to_preamble(tx_frame_asm_t *a) {
+    a->state = TX_ASM_PREAMBLE;
+    a->zero_count = 0;
+    a->sync_match = 0;
+    a->phr_lo = -1;
+    a->pre_run = 0;
+}
+
 bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
     switch (a->state) {
     case TX_ASM_PREAMBLE:
         /* Look for either preamble pattern. */
+        a->pre_run = (byte == 0x00 || byte == 0x55) ? (0x100 | byte) : 0;
         a->sync_match = (a->sync_match << 8) | byte;
         if (a->sync_match == RADIO_FRAME_802154G_SYNC_WORD) {
             /* CC1200 sync word — next 1 or 2 bytes are the PHR (we
@@ -59,8 +71,7 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
         a->expected_len = byte;
         if (byte < 3 || byte > 127) {
             /* Invalid length, reset */
-            a->state = TX_ASM_PREAMBLE;
-            a->zero_count = 0;
+            asm_back_to_preamble(a);
             return false;
         }
         a->state = TX_ASM_PAYLOAD;
@@ -98,9 +109,7 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
             /* PHRB byte: low 8 bits */
             a->expected_len = (a->phr_lo << 8) | byte;
             if (a->expected_len < 3 || a->expected_len > 200) {
-                a->state = TX_ASM_PREAMBLE;
-                a->zero_count = 0;
-                a->sync_match = 0;
+                asm_back_to_preamble(a);
                 a->subghz = false;
                 return false;
             }
@@ -124,10 +133,7 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
              * subghz / subghz_phr_len / expected_len intact so the caller
              * can read them to compute total_air_bytes. They get cleared
              * the next time a fresh frame's first preamble byte arrives. */
-            a->state = TX_ASM_PREAMBLE;
-            a->zero_count = 0;
-            a->sync_match = 0;
-            a->phr_lo = -1;
+            asm_back_to_preamble(a);
             return true;
         }
         return false;
@@ -140,6 +146,7 @@ void sim_radio_bus_asm_reset(tx_frame_asm_t *a) {
     a->state = TX_ASM_PREAMBLE;
     a->zero_count = 0;
     a->sync_match = 0;
+    a->pre_run = 0;
     a->expected_len = 0;
     a->payload_count = 0;
     a->phr_lo = -1;
@@ -404,20 +411,18 @@ void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
     tx_frame_asm_t *a = &bus->tx_asm[sender_idx];
     tx_frame_capture_t *cap = &bus->tx_cap[sender_idx];
 
-    /* Record first byte time for accurate TX start computation and track
-     * subsequent bytes on the sender's on-air byte clock.
-     *
-     * Fires for either preamble flavour: 0x00 (IEEE 802.15.4 2.4 GHz)
-     * or 0x55 (CC1200 802.15.4g sub-GHz). Without arming for 0x55, the
-     * per-byte schedule fell back to first_byte_ns=0 → bytes clamped
-     * to sim_now → whole frame dumped into the receiver in one batch.
-     * That short-circuited the ~16 ms real air time to ~5 ms and
-     * pushed the receiver's ACK ~10 ms ahead of the firmware-tuned
-     * CSMA_ACK_WAIT envelope. The 0x55 arm is paired with the
-     * receive-side MARC_IDLE-tolerance fix in cc1200_receive_byte
-     * (without that, bytes arriving the same sim_ns as the receiver's
-     * CSMA prepare()→SIDLE→SRX transition were silently dropped). */
-    if (a->state == TX_ASM_PREAMBLE && a->zero_count == 0 &&
+    /* Arm the frame's on-air byte clock, once per frame: on the first byte
+     * of a run of one preamble byte — 0x00 (802.15.4, 2.4 GHz) or 0x55
+     * (CC1200 802.15.4g, sub-GHz) — while the assembler hunts for a
+     * preamble.  Any other byte (a rejected frame's remainder, a stray
+     * byte) ends the run, so the next frame arms at its own start.  The preamble byte also sets the frame's byte period, so the
+     * preamble and sync word are timed at the right rate before the
+     * assembler has seen a sync word or SFD.  (The guard used to be
+     * zero_count == 0, which never counts 0x55: a sub-GHz frame re-armed on
+     * every preamble byte and lost its soft ACKs — F17 in
+     * kernel-radio-review-and-performance-plan.md.)  The 0x55 arm is paired
+     * with the MARC_IDLE tolerance in cc1200_receive_byte. */
+    if (a->state == TX_ASM_PREAMBLE && (0x100 | byte) != a->pre_run &&
         (byte == 0x00 || byte == 0x55)) {
         /* Match Cooja's radio callbacks: outgoing bytes are observed at the
          * current scheduler time, not from a mote-local sim_time that may
@@ -431,12 +436,13 @@ void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
         a->first_byte_ns = a->at_override_ns > 0 ? a->at_override_ns
                                                  : sim_runtime_now_ns(sim);
         a->at_override_ns = 0;
+        a->subghz = (byte == 0x55);
         cap->len = 0;
         bus->on_air_end_ns[sender_idx] = 0;   /* a new frame's window */
     }
     /* Per-sender byte period — sub-GHz CC1200 frames take 5x longer per
-     * byte than 2.4 GHz IEEE 802.15.4. Use the sender's frame profile
-     * detected by the assembler (subghz set on sync-word match). */
+     * byte than 2.4 GHz IEEE 802.15.4.  The frame's profile was set when it
+     * armed, from its first preamble byte. */
     int64_t sender_byte_ns = byte_period_ns(a->subghz);
     int64_t byte_time_ns = a->first_byte_ns +
                            (int64_t)cap->len * sender_byte_ns;
@@ -687,11 +693,8 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
     if (accurate_tx_start < 0) accurate_tx_start = 0;
 
     /* Mark the medium TX-busy on the sender's channel until the frame
-     * leaves the air (CCA reads this).  Sub-GHz first_byte_ns isn't
-     * armed, so anchor busy-until to now + air-time for CC1200. */
+     * leaves the air (CCA reads this). */
     int64_t busy_until = accurate_tx_end;
-    if (a->subghz)
-        busy_until = now + frame_air_dur;
     if (busy_until > bus->tx_busy_until_ns[sender_idx])
         bus->tx_busy_until_ns[sender_idx] = busy_until;
 
@@ -756,13 +759,9 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
     for (int s = 0; s < snap_count; s++) {
         int i = snap_indices[s];
         /* Collision window: the frame occupies the channel [coll_start,
-         * coll_end).  Sub-GHz anchors to now (first_byte_ns unarmed). */
+         * coll_end). */
         int64_t coll_start = accurate_tx_start;
         int64_t coll_end = accurate_tx_end;
-        if (a->subghz) {
-            coll_start = now;
-            coll_end = now + frame_air_dur;
-        }
 
         if (coll_start < bus->emu_rx_end_ns[i]) {
             bus->stats.rx_collided++;
@@ -795,7 +794,7 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
             const int fcs = IEEE802154_FCS_LEN;
             int mac_len = frame_snap_len[i] - phy_hdr - fcs;
             if (mac_len > 0) {
-                bus->frame_start_ns = a->subghz ? now : accurate_tx_start;
+                bus->frame_start_ns = accurate_tx_start;
                 bus->consumer_frame_end_ns[i] = accurate_tx_end;
                 if (mi->ops->receive_frame(mi, frame_snap[i] + phy_hdr,
                                            mac_len, now, sender_idx) < 0)
@@ -818,8 +817,7 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
                 mi->ops->step_until(mi, mi->ops->cycles(mi) + 5000);
         }
         if (bus->ops[i]->rxfifo_available(bus->mote[i]) >= fifo_needed) {
-            /* Sub-GHz delivery anchors to now (first_byte_ns unarmed). */
-            int64_t delivery_start = a->subghz ? now : accurate_tx_start;
+            int64_t delivery_start = accurate_tx_start;
             /* MSP430-only full-slice pre-sync before delivery. */
             if (mi && mi->ops->rx_pre_sync && i != bus->executing_node)
                 mi->ops->rx_pre_sync(mi, delivery_start);
@@ -891,8 +889,8 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
      * window is the frame's own, the one the reception path used above. */
     if (sim->radio_medium.type != RADIO_MEDIUM_NONE) {
         neighbor_list_t *inl = &sim->radio_medium.interference_neighbors[sender_idx];
-        int64_t int_start = a->subghz ? now : accurate_tx_start;
-        int64_t int_end = a->subghz ? now + frame_air_dur : accurate_tx_end;
+        int64_t int_start = accurate_tx_start;
+        int64_t int_end = accurate_tx_end;
         for (int n = 0; n < inl->count; n++) {
             int i = inl->neighbors[n];
             if (!bus_reaches(bus, sim, sender_idx, sender_radio, i))

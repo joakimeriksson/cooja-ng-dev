@@ -7,6 +7,15 @@
 
 ## Current state — short version
 
+> **2026-10-07:** the residual from `b7c18bc` (June: "L6 still fails on csim
+> with the 5 ms ACK_WAIT firmware … something in how csim's byte-delivery
+> model bunches sub-GHz frames") is found and fixed — the radio bus restarted
+> a CC1200 frame's byte clock on every `0x55` preamble byte, so a quick soft
+> ACK's sync word reached the sender before its radio was back in RX.  With
+> it fixed (PR #67), the 4-node sub-GHz chain
+> (`configs/chain-4node-firefly-subghz.json`) passes and is a CI gate.  Details: F17 in
+> [`kernel-radio-review-and-performance-plan.md`](../../docs/design/kernel-radio-review-and-performance-plan.md).
+
 **The port is complete. L6 RPL-UDP converges in csim with corrected
 Contiki-NG firmware (2026-05-06).** Everything works end-to-end:
 
