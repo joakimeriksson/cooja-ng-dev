@@ -29,6 +29,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CSIM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CSC2JSON="$SCRIPT_DIR/csc2json.py"
 
+# GNU make: Contiki-NG's makefiles are GNU syntax, and "make" is BSD make
+# on the BSDs.
+case $(uname -s) in *BSD|DragonFly) MAKE=${MAKE:-gmake} ;; *) MAKE=${MAKE:-make} ;; esac
+
 # Every temporary this script makes, removed on exit whichever mode ran.
 RESULTS_FILE=""
 FW_LIST_FILE=""
@@ -143,8 +147,8 @@ build_one() {
     # of it must count as failed.
     if (
         cd "$src_dir" || exit 1
-        make TARGET="$target" clean >/dev/null 2>&1 || true
-        if ! make -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)" TARGET="$target" "$build_name.$target" \
+        $MAKE TARGET="$target" clean >/dev/null 2>&1 || true
+        if ! $MAKE -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)" TARGET="$target" "$build_name.$target" \
             WERROR=0 CONTIKI="$CONTIKI_DIR" COOJA_CI=1 $extra_args >/dev/null 2>&1; then
             echo "    FAILED to build $fw"
             exit 1
@@ -162,7 +166,7 @@ build_one() {
         fi
         cp "$built_file" "$target_file" || exit 1
         echo "    -> $target_file"
-        make TARGET="$target" clean >/dev/null 2>&1 || true
+        $MAKE TARGET="$target" clean >/dev/null 2>&1 || true
     ); then
         echo "built" >> "$RESULTS_FILE"
     else

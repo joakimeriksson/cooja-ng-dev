@@ -15,7 +15,9 @@ SO=build/plugins/packet_sink.so
 CFG=${CFG:-configs/test-rpl-udp-sky.json}
 T=${T:-30000}
 
-make plugins >/dev/null 2>&1 || { echo "FAIL: build plugins"; exit 1; }
+# GNU make: the Makefile is GNU syntax, and "make" is BSD make on the BSDs.
+case $(uname -s) in *BSD|DragonFly) MAKE=${MAKE:-gmake} ;; *) MAKE=${MAKE:-make} ;; esac
+$MAKE plugins >/dev/null 2>&1 || { echo "FAIL: build plugins"; exit 1; }
 [ -f "$SO" ] || { echo "FAIL: $SO not built"; exit 1; }
 
 t1=$("$RUNNER" test "$CFG" -t "$T" --plugin "$SO" 2>&1 | grep -E '^packet-sink:')
