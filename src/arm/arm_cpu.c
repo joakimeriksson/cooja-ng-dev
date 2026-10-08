@@ -4710,6 +4710,24 @@ int arm_step(arm_cpu_t *cpu, int count) {
                     arm_decode_block(cpu->flash, cpu->flash_base,
                                      cpu->flash_end - cpu->flash_base,
                                      pc, &blk);
+                    /* The interpreter runs the 64-bit divide helpers
+                     * natively (handle_fw_trap, a flat 20 cycles), and a
+                     * block never asks.  Compiled, their Thumb code gives
+                     * the same quotient in a different number of cycles,
+                     * and the simulation then depends on the JIT.  So a
+                     * block stops before a trap address and falls through
+                     * to the interpreter there; one that would start at
+                     * it is empty, and is refused. */
+                    for (int i = 0; i < blk.length; i++) {
+                        uint32_t ipc = blk.insns[i].pc;
+                        if ((cpu->fw_udivmoddi4 && ipc == cpu->fw_udivmoddi4) ||
+                            (cpu->fw_aeabi_uldivmod && ipc == cpu->fw_aeabi_uldivmod)) {
+                            blk.length = i;
+                            blk.end_pc = ipc;
+                            blk.all_supported = false;
+                            break;
+                        }
+                    }
                     arm_compiled_block_t *ncb = arm_jit_compile(&blk, cpu);
                     if (ncb) {
                         if (cb) arm_jit_free(cb);   /* evict the collision */

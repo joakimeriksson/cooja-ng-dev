@@ -3211,6 +3211,13 @@ the same patch.
 - **Terminology**: "service" for built-in components via `sim_service_ops_t`,
   "plugin" for dynamic-loaded services only (§2.1).
 - **JIT lives at the CPU-arch layer** (§5), not at runtime/mote/platform.
+- **A compiled ARM block never runs code the interpreter intercepts.**  The
+  interpreter runs `__aeabi_uldivmod` / `__udivmoddi4` natively for a flat 20
+  cycles (`handle_fw_trap`); a block stops before such an address, and one
+  that would start there is not compiled.  Compiling the helper's Thumb code
+  instead gave the same quotient in other cycles, so `CSIM_ARM_JIT=0` and `=1`
+  diverged on TSCH (~14 s into `test-tsch-nrf52840-dk`).  Any new trap gets
+  the same exclusion; CI's JIT=0-vs-1 step on that config gates it.
 - **Multi-radio per node is `(mote_index, radio_idx)` everywhere** (§5).
 - **Observer events distinguish UART bytes vs log lines** (§3.11).
 - **Serial-socket extracts as two services** (`serial_bridge_service` +
