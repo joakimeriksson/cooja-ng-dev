@@ -329,6 +329,20 @@ jobs:
           tail -5 tsch.txt
           grep -aq "TEST PASSED" tsch.txt
 
+      # The same contract on TSCH, whose drift compensation divides through
+      # __aeabi_uldivmod often enough for the JIT to reach it.  The
+      # interpreter runs that helper natively (a flat 20 cycles); a block
+      # that compiled its Thumb code instead got the same quotient in other
+      # cycles, and this run diverged at ~14 s — while chain-3node, which
+      # rarely divides, stayed identical.
+      - name: JIT cycle-exactness on TSCH (nRF52840-DK, CSIM_ARM_JIT=0 vs 1)
+        run: |
+          filter='Wall-clock|Speed ratio|Throughput|MIPS'
+          CSIM_ARM_JIT=0 ./build/test_runner test configs/test-tsch-nrf52840-dk.json | grep -vE "$filter" > tschjit-off.txt
+          ./build/test_runner test configs/test-tsch-nrf52840-dk.json | grep -vE "$filter" > tschjit-on.txt
+          grep -q "TEST PASSED" tschjit-on.txt
+          cmp tschjit-off.txt tschjit-on.txt
+
       - name: nRF54L15-DK shell over the UARTE console (console input)
         run: |
           ./build/test_runner test configs/test-shell-nrf54l15-dk.yaml > shell54.txt 2>&1
