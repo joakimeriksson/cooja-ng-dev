@@ -82,6 +82,7 @@ static int run_sim(int argc, char **argv) {
 
 /* Timeline unit tests */
 extern int run_timeline_tests(int verbose);
+extern int run_cbor_json_tests(int verbose);
 
 /* Mock sim_host_t unit tests */
 extern int run_mock_host_tests(int verbose);
@@ -483,6 +484,11 @@ int main(int argc, char **argv) {
 
     if (strcmp(mode, "timeline") == 0 || strcmp(mode, "all") == 0) {
         failures += run_timeline_tests(verbose);
+    }
+
+    /* --ui-record's CBOR->JSON transcoder */
+    if (strcmp(mode, "cbor-json") == 0 || strcmp(mode, "all") == 0) {
+        failures += run_cbor_json_tests(verbose);
     }
 
     if (g_sim_exit_code != 0) return g_sim_exit_code;

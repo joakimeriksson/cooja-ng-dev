@@ -157,6 +157,7 @@ NATIVE_SOURCES = $(NATIVE_SRC_DIR)/native_node.c \
                  $(NATIVE_SRC_DIR)/renode_dev.c
 
 UI_SOURCES = $(UI_SRC_DIR)/ws_server.c \
+             $(UI_SRC_DIR)/cbor_json.c \
              $(UI_SRC_DIR)/sim_state.c
 
 QUICKJS_SRC_DIR = lib/quickjs
@@ -222,6 +223,7 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_arm_firmware.c \
                $(TEST_DIR)/test_mixed_multinode.c \
                $(TEST_DIR)/test_timeline.c \
+               $(TEST_DIR)/test_cbor_json.c \
                $(TEST_DIR)/test_mock_host.c \
                $(TEST_DIR)/test_cc1200.c \
                $(TEST_DIR)/test_nrf54l15_spim.c \

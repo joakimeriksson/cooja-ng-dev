@@ -27,6 +27,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "sim_service.h"
 #include "ws_server.h"
@@ -87,6 +88,28 @@ typedef struct websocket_ui_service {
      * NULL = no panel source.  ui_service_broadcast reads the published
      * panels through it and ships a {"type":"panels"} frame. */
     struct sim_runtime *rt;
+
+    /* --ui-record: the broadcast stream written to a file as one
+     * cooja-ng-ui-replay/1 document (docs/ui-replay.md) for the browser's
+     * replay player.  The file is created once, before the run starts
+     * (ui_service_record_open); the document begins when the run does
+     * (ui_service_record_begin) and is finished once — at the run's end, at
+     * a restart, or at destroy.  While it records, the recorder counts as a
+     * client that is always connected, so deltas are built with no browser
+     * attached.  record == NULL: no file open (never asked, or finished). */
+    FILE   *record;
+    char    record_path[512];
+    bool    record_begun;         /* the document's header is written     */
+    long    record_deltas;        /* deltas written; -1 = no full state yet */
+    int64_t record_end_ns;        /* stop recording here (the run's end)  */
+    int64_t record_last_ns;       /* sim time of the last recorded tick   */
+    bool    record_failed;        /* a write, the close, or a delta failed */
+    int     record_bad_panels;    /* panel publishes that were not JSON   */
+    /* Every console line since the recording began, until its first full
+     * state is written: that full state carries them all, where a live
+     * client's gets the last UI_CONSOLE_LINES of each node. */
+    char  **record_boot[UI_SVC_MAX_NODES];
+    int     record_boot_n[UI_SVC_MAX_NODES];
 } websocket_ui_service_t;
 
 /* Start the UI: open the ws_server on `bind_addr`:`port` (NULL = loopback,
@@ -107,6 +130,68 @@ bool ui_service_start(websocket_ui_service_t *svc, const char *bind_addr, int po
 
 static inline bool ui_service_active(const websocket_ui_service_t *svc) {
     return svc->server != NULL;
+}
+
+/* --ui-record, in two steps so a bad path fails before anything starts and
+ * a restart can never re-open (and so empty) the file:
+ *
+ * ui_service_record_open creates `path`, nothing more; call it while
+ * validating arguments.  Returns false (with a message) if it cannot.
+ *
+ * ui_service_record_begin writes the document's start and starts recording
+ * the stream until simulation time `end_ns`, a restart, or
+ * ui_service_destroy — whichever comes first; the document is then
+ * finished.  A no-op unless the file is open and not yet begun, so the
+ * runner calls it on every pass and only the first one counts.  `run_json`
+ * is the document's "run" object, written as given.  The state pointers are
+ * ui_service_start's; with --ui the two calls store the same values.  Works
+ * with or without the server: without it the run is headless and unpaced,
+ * and only the recording sees the stream.
+ *
+ * The recorder writes nothing to stdout: its two status lines go to stderr,
+ * so a run's stdout is byte-identical with and without --ui-record. */
+bool ui_service_record_open(websocket_ui_service_t *svc, const char *path);
+void ui_service_record_begin(websocket_ui_service_t *svc,
+                             const char *run_json, int64_t end_ns,
+                             const sim_node_state_t *node_states,
+                             sim_node_state_t *prev_node_states,
+                             const int64_t *node_last_tx_ns,
+                             int64_t *prev_last_tx_ns,
+                             radio_medium_t *medium, timeline_t *tl,
+                             const int *node_count,
+                             ui_describe_fn describe, sim_control_t *ctl);
+
+/* Close the recording at simulation time sim_ns: one last tick for the
+ * recorder only — what happened since the last broadcast, and a full state
+ * for a run too short to have had one — then the end of the document.  The
+ * runner calls it when the main loop ends (run end, test verdict, restart),
+ * so the file has the run's last interval.  `why` goes in the status line.
+ * A no-op if nothing is being recorded. */
+void ui_service_record_finish(websocket_ui_service_t *svc, int64_t sim_ns,
+                              const char *why);
+
+/* The simulation time the recording stops at, once the runner knows it
+ * (the document begins before the motes boot, so it captures their first
+ * output, but the run's end is only settled after). */
+static inline void ui_service_record_set_end(websocket_ui_service_t *svc,
+                                             int64_t end_ns) {
+    svc->record_end_ns = end_ns;
+}
+
+/* True if writing the recording failed (full disk, I/O error, a delta
+ * that did not transcode): the file is not the run, and the runner fails
+ * the run rather than report it. */
+static inline bool ui_service_record_failed(const websocket_ui_service_t *svc) {
+    return svc->record_failed;
+}
+
+/* True while anything consumes the UI stream — a server or a recording.
+ * Gates the runner's UI-only state tracking (radio/LED state, frame
+ * events, console lines) and the broadcast; ui_service_active() alone
+ * gates what only a live server needs (pacing, polling, the run going on
+ * after its end). */
+static inline bool ui_service_observing(const websocket_ui_service_t *svc) {
+    return svc->server != NULL || (svc->record != NULL && svc->record_begun);
 }
 static inline bool ui_service_restart_requested(const websocket_ui_service_t *svc) {
     return svc->restart_requested != 0;
@@ -134,7 +219,7 @@ void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns);
 /* Clear console rings + delta snapshots (UI restart). */
 void ui_service_reset(websocket_ui_service_t *svc);
 
-/* Close the socket. */
+/* Close the socket, and finish the recording if one is open. */
 void ui_service_destroy(websocket_ui_service_t *svc);
 
 #ifdef __cplusplus

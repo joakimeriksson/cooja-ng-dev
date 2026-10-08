@@ -272,6 +272,12 @@ static sim_external_command_t external_cmd;
 static timeline_service_t timeline_svc;
 static sim_node_state_t node_states[MAX_NODES];
 static sim_node_state_t prev_node_states[MAX_NODES]; /* previous delta state for change detection */
+/* The radio state last reported on the observer stream, per node.  Kept
+ * apart from node_states[].radio_state, which the UI's own paths also set
+ * (a frame's end shows the radio back ON): an energy service's view must
+ * not depend on whether a web UI or a recording is watching.  Without
+ * either, the two never differ. */
+static sim_radio_state_t obs_radio_state[MAX_NODES];
 static int64_t prev_last_tx_ns[MAX_NODES];           /* previous TX timestamps for change detection */
 /* "suppress chip state callbacks during synchronous delivery" moved to
  * radio_bus.in_delivery (M27). */
@@ -314,6 +320,14 @@ static inline void emit_radio_state_obs(int mote_index, int64_t time_ns,
     ev.u.radio_state.state = (int)state;
     sim_runtime_emit(&sim_rt, &ev);
 }
+/* Report a radio state on the observer stream if it differs from the last
+ * one reported for this node (obs_radio_state). */
+static void report_radio_state(int mote_index, int64_t time_ns,
+                               sim_radio_state_t state) {
+    if (state == obs_radio_state[mote_index]) return;
+    obs_radio_state[mote_index] = state;
+    emit_radio_state_obs(mote_index, time_ns, state);
+}
 /* Emit a per-mote CPU power-time snapshot (cumulative active/LPM ns) for an
  * energy service.  Called once per mote at end-of-run; totals are exact. */
 static inline void emit_cpu_state_obs(int mote_index, int64_t time_ns,
@@ -330,7 +344,7 @@ static inline void emit_cpu_state_obs(int mote_index, int64_t time_ns,
  * handlers (with proper frame duration). This callback handles radio ON/OFF
  * transitions (ISRXON, ISRFOFF, tx_done return-to-RX). */
 static void mixed_rf_state_handler(void *user_data, int old_state, int new_state) {
-    if ((!ui_service_active(&ui_svc) &&
+    if ((!ui_service_observing(&ui_svc) &&
          !sim_runtime_radio_state_tracking(&sim_rt)) || radio_bus.in_delivery)
         return;
     mixed_node_t *node = (mixed_node_t *)user_data;
@@ -348,22 +362,20 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
     /* Skip TX/RX timeline events — explicit timeline events handle those with
      * proper frame duration.  The energy stream still wants every transition. */
     if (sim_state == SIM_RADIO_TX || sim_state == SIM_RADIO_RX) {
-        if (sim_state != node_states[idx].radio_state) {
-            node_states[idx].radio_state = sim_state;
-            emit_radio_state_obs(idx, ts, sim_state);
-        }
+        node_states[idx].radio_state = sim_state;
+        report_radio_state(idx, ts, sim_state);
         return;
     }
 
     if (sim_state != node_states[idx].radio_state) {
         node_states[idx].radio_state = sim_state;
-        if (ui_service_active(&ui_svc)) {
+        if (ui_service_observing(&ui_svc)) {
             tl_event_type_t etype =
                 (sim_state == SIM_RADIO_ON) ? TL_RADIO_ON : TL_RADIO_OFF;
             tl_radio_event(&timeline_svc.tl, node->id, ts, etype);
         }
-        emit_radio_state_obs(idx, ts, sim_state);
     }
+    report_radio_state(idx, ts, sim_state);
 }
 
 /* Track per-node radio state for timeline events */
@@ -379,7 +391,7 @@ static void update_radio_state(int idx) {
     if (new_state != node_states[idx].radio_state) {
         node_states[idx].radio_state = new_state;
         int64_t ts = sim_runtime_now_ns(&sim_rt);
-        if (ui_service_active(&ui_svc)) {
+        if (ui_service_observing(&ui_svc)) {
             tl_event_type_t etype;
             switch (new_state) {
             case SIM_RADIO_TX:   etype = TL_RADIO_TX;   break;
@@ -390,8 +402,8 @@ static void update_radio_state(int idx) {
             }
             tl_radio_event(&timeline_svc.tl, nodes[idx].id, ts, etype);
         }
-        emit_radio_state_obs(idx, ts, new_state);
     }
+    report_radio_state(idx, sim_runtime_now_ns(&sim_rt), new_state);
 }
 
 /* Track LED state changes (M16: ui_leds op; platform mapping lives in
@@ -406,7 +418,7 @@ static void update_led_state(int idx) {
     for (int l = 0; l < SIM_MAX_LEDS; l++) {
         if (leds[l] != node_states[idx].led[l]) {
             node_states[idx].led[l] = leds[l];
-            if (ui_service_active(&ui_svc))
+            if (ui_service_observing(&ui_svc))
                 emit_led_obs(idx, sim_runtime_now_ns(&sim_rt), l, leds[l] ? true : false);
         }
     }
@@ -880,7 +892,7 @@ static bool bus_host_node_active(void *user, int idx) {
 static void bus_host_on_rx(void *user, int idx, int64_t start_ns,
                            int64_t end_ns) {
     (void)user;
-    if (!ui_service_active(&ui_svc)) return;
+    if (!ui_service_observing(&ui_svc)) return;
     emit_radio_obs(idx, start_ns, SIM_OBS_RADIO_RX_START);
     emit_radio_obs(idx, end_ns, SIM_OBS_RADIO_RX_END);
     node_states[idx].radio_state = SIM_RADIO_ON;
@@ -951,13 +963,13 @@ static void bus_host_frame_observed(void *user,
                            cc2420_state_name(trace_scc));
     }
 
-    if (ui_service_active(&ui_svc)) {
+    if (ui_service_observing(&ui_svc)) {
         emit_radio_obs(sender_idx, accurate_tx_start, SIM_OBS_RADIO_TX_START);
         emit_radio_obs(sender_idx, accurate_tx_end,   SIM_OBS_RADIO_TX_END);
         node_states[sender_idx].radio_state = SIM_RADIO_ON;
     }
 
-    if (ui_service_active(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
+    if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
         const uint8_t *buf = fi->capture;
         int buf_len = fi->capture_len;
         int fstart = -1;
@@ -990,7 +1002,7 @@ static void bus_host_frame_observed(void *user,
              * unless MSP430 node 1). */
             if (verbose)
                 msp430_elf_mote_dump_uip(&nodes[sender_idx]);
-            if (ui_service_active(&ui_svc))
+            if (ui_service_observing(&ui_svc))
                 emit_frame_obs(sender_idx, accurate_tx_start, true,
                                pinfo.summary);
         }
@@ -1043,7 +1055,7 @@ static void bus_host_on_rx_frame(void *user, const sim_radio_frame_info_t *fi,
                     nodes[sender_idx].id, nodes[i].id,
                     (double)coll_start_ns / 1e9,
                     (double)prev_rx_end_ns / 1e9);
-        if (ui_service_active(&ui_svc)) {
+        if (ui_service_observing(&ui_svc)) {
             int64_t intf_dur = (int64_t)len * fi->sender_byte_ns;
             emit_radio_obs(i, fi->tx_start_ns, SIM_OBS_RADIO_INTERFERENCE);
             emit_radio_obs(i, fi->tx_start_ns + intf_dur, SIM_OBS_RADIO_RX_END);
@@ -1060,7 +1072,7 @@ static void bus_host_on_rx_frame(void *user, const sim_radio_frame_info_t *fi,
                                (double)delivery_start / 1e9,
                                cc2420_state_name(trace_rcc));
         }
-        if (ui_service_active(&ui_svc) && len > 5) {
+        if (ui_service_observing(&ui_svc) && len > 5) {
             int fstart = -1;
             for (int b = 0; b + 5 < len; b++) {
                 if (data[b] == 0x7A && b >= 4) { fstart = b + 1; break; }
@@ -1084,7 +1096,7 @@ static void bus_host_on_ack(void *user, const sim_radio_frame_info_t *fi,
                             int data_receiver, int64_t ack_start_ns,
                             int ack_byte_count) {
     (void)user;
-    if (!ui_service_active(&ui_svc)) return;
+    if (!ui_service_observing(&ui_svc)) return;
     int64_t ack_dur = (int64_t)ack_byte_count * fi->sender_byte_ns;
     emit_radio_obs(data_receiver, ack_start_ns, SIM_OBS_RADIO_TX_START);
     emit_radio_obs(data_receiver, ack_start_ns + ack_dur, SIM_OBS_RADIO_TX_END);
@@ -1148,7 +1160,7 @@ static void mixed_uart_callback(void *user_data, uint8_t byte) {
             printf("  %7.3f [Node %d/%s] %s\n", (double)ns / 1e9,
                    node->id, node_type_str(nidx), node->line_buf);
         /* test engines receive this line via test_engine_observer */
-        if (ui_service_active(&ui_svc))
+        if (ui_service_observing(&ui_svc))
             ui_service_add_console_line(&ui_svc, nidx, ns, node->line_buf);
         /* Kernel observer stream: assembled console line.  The
          * external-command service tees this into COOJA.testlog. */
@@ -2103,6 +2115,7 @@ int run_mixed_multinode_test(int argc, char **argv) {
     int sim_ms_set = 0;  /* track if -t was given (overrides config) */
     int ui_enabled = 0;
     int ui_port = 8080;
+    const char *ui_record_path = NULL;   /* --ui-record FILE */
     /* Shell / run-control flags (docs/shell.md).  cli_speed < 0 = not
      * given; 0 = unpaced ("max"); > 0 = sim seconds per wall second. */
     int shell_enabled = 0;
@@ -2141,7 +2154,7 @@ int run_mixed_multinode_test(int argc, char **argv) {
     static const char *const value_flags[] = {
         "--gdb", "--pcap", "--plugin", "--renode-freq", "--seed",
         "--save-config", "--script", "--wall-timeout", "--speed",
-        "--ui-bind", "-n", "-t", "-d", NULL
+        "--ui-bind", "--ui-record", "-n", "-t", "-d", NULL
     };
     for (int i = 0; i < argc; i++) {
         for (int k = 0; value_flags[k]; k++) {
@@ -2156,6 +2169,9 @@ int run_mixed_multinode_test(int argc, char **argv) {
                 ui_port = atoi(argv[++i]);
                 if (ui_port <= 0) ui_port = 8080;
             }
+        }
+        else if (strcmp(argv[i], "--ui-record") == 0 && i + 1 < argc) {
+            ui_record_path = argv[++i];
         }
         else if (strcmp(argv[i], "--ui-bind") == 0 && i + 1 < argc) {
             /* The UI accepts commands: listening beyond loopback is opt-in. */
@@ -2331,6 +2347,11 @@ int run_mixed_multinode_test(int argc, char **argv) {
         fprintf(stderr, "--paused: nothing could resume the simulation (add --shell, --script or --ui)\n");
         return SHELL_EXIT_INVALID;
     }
+    /* --ui-record: create the file now, while nothing has started — a path
+     * that cannot be written ends the run before it begins, and the restart
+     * path (which comes back below sim_restart:) never re-opens it. */
+    if (ui_record_path && !ui_service_record_open(&ui_svc, ui_record_path))
+        return SHELL_EXIT_INVALID;
     /* Shell or script through a pipe: make command echo, prompts and
      * script output visible promptly.  Here, before anything has been
      * written to stdout — setvbuf after the first output is undefined. */
@@ -2367,8 +2388,8 @@ int run_mixed_multinode_test(int argc, char **argv) {
     }
 
     if (firmware_count < 1) {
-        printf("Usage: test_runner mixed-multinode <firmware1> [firmware2...] [-t ms] [-n nodes] [--seed N] [--save-config out.yaml] [-v] [-q] [--ui [port] [--ui-bind addr]]\n");
-        printf("       test_runner mixed-multinode <config.yaml|json> [-t ms] [--seed N] [--save-config out.yaml] [-v] [-q] [--ui [port] [--ui-bind addr]]\n");
+        printf("Usage: test_runner mixed-multinode <firmware1> [firmware2...] [-t ms] [-n nodes] [--seed N] [--save-config out.yaml] [-v] [-q] [--ui [port] [--ui-bind addr]] [--ui-record out.json]\n");
+        printf("       test_runner mixed-multinode <config.yaml|json> [-t ms] [--seed N] [--save-config out.yaml] [-v] [-q] [--ui [port] [--ui-bind addr]] [--ui-record out.json]\n");
         printf("  Firmware types detected by extension:\n");
         printf("    .sky      -> MSP430 (Tmote Sky)\n");
         printf("    .cc2538dk -> ARM (CC2538DK)\n");
@@ -2462,6 +2483,35 @@ int run_mixed_multinode_test(int argc, char **argv) {
                     g_ui_bind ? g_ui_bind : "127.0.0.1", ui_port);
             return SHELL_EXIT_INVALID;
         }
+        ui_svc.rt = &sim_rt;   /* plugin UI panels source */
+    }
+
+    /* --ui-record: the web UI's stream to a file for the browser's replay
+     * player (docs/ui-replay.md).  Begun here, where a --ui server starts —
+     * before the motes boot, so their first output is in it — and only on
+     * this first pass (a restart finishes the recording, and it is not
+     * begun again).  It observes only; with no --ui the run stays headless
+     * and unpaced.  The end is set once known (ui_service_record_set_end). */
+    if (ui_record_path) {
+        cJSON *run = cJSON_CreateObject();
+        cJSON_AddStringToObject(run, "simulator", "cooja-ng");
+        cJSON_AddStringToObject(run, "version", CSIM_VERSION);
+        cJSON_AddStringToObject(run, "scenario",
+                                config_path ? config_path : "(firmware arguments)");
+        if (config_loaded && config.title[0])
+            cJSON_AddStringToObject(run, "title", config.title);
+        if (config.seed)   /* the config's, or --seed's on any run */
+            cJSON_AddNumberToObject(run, "seed", config.seed);
+        if (!shell_enabled)   /* a shell run ends at `exit` */
+            cJSON_AddNumberToObject(run, "duration_ms", sim_ms);
+        char *run_json = cJSON_PrintUnformatted(run);
+        cJSON_Delete(run);
+        ui_service_record_begin(&ui_svc, run_json, INT64_MAX,
+                                node_states, prev_node_states,
+                                node_last_tx_ns, prev_last_tx_ns,
+                                &radio_medium, &timeline_svc.tl,
+                                &node_count, ui_describe_node, &sim_ctl);
+        free(run_json);
         ui_svc.rt = &sim_rt;   /* plugin UI panels source */
     }
 
@@ -2679,6 +2729,7 @@ sim_restart:
                        &timeline_svc);
     memset(node_states, 0, sizeof(node_states));
     memset(prev_node_states, 0, sizeof(prev_node_states));
+    memset(obs_radio_state, 0, sizeof(obs_radio_state));
     memset(prev_last_tx_ns, 0, sizeof(prev_last_tx_ns));
 
 
@@ -2830,6 +2881,10 @@ sim_restart:
     g_save_timeout_ms = sim_ms;
     g_save_elapsed = shell_enabled || script_path;
     g_sim_start_ns = sim_start_ns;
+
+    /* --ui-record: the run's end is settled now (see where the recording
+     * begins, before the motes boot). */
+    ui_service_record_set_end(&ui_svc, end_ns);
     /* M34: the per-tick progress report is a service now.  Cadence state +
      * the print move into progress_service; the explicit tick stays at the
      * original loop position so the line interleaves with mote UART output
@@ -2854,6 +2909,7 @@ sim_restart:
                                sim_registry_find_service(&g_registry, "renode"),
                                &renode_svc) < 0) {
             fprintf(stderr, "renode: co-simulation could not start\n");
+            ui_service_destroy(&ui_svc);   /* closes a --ui-record document */
             return SHELL_EXIT_INVALID;
         }
     }
@@ -3340,7 +3396,7 @@ sim_restart:
         /* Update per-node radio/LED state for timeline (M16: the ops'
          * NULL-ness encodes which mote kinds are polled — CC2538 pushes
          * radio state via async callback, natives/JS have neither). */
-        if (ui_service_active(&ui_svc) ||
+        if (ui_service_observing(&ui_svc) ||
             sim_runtime_radio_state_tracking(&sim_rt)) {
             for (int i = 0; i < node_count; i++) {
                 if (!node_active(i)) continue;
@@ -3359,7 +3415,7 @@ sim_restart:
          * wall-clock pacing because t_start is shared with serial mode and
          * the end-of-run perf print). */
         ui_broadcast:
-        if (ui_service_active(&ui_svc)) {
+        if (ui_service_observing(&ui_svc)) {
             if (!sim_control_paused(&sim_ctl)) ui_service_poll(&ui_svc);
             if (sim_ns >= next_ui_ns || sim_control_paused(&sim_ctl)) {
                 if (!sim_control_paused(&sim_ctl)) next_ui_ns = sim_ns + ui_interval_ns;
@@ -3405,6 +3461,16 @@ sim_restart:
                                   rf_byte_count, uart_byte_count);
     }
 
+    /* --ui-record: the main loop has ended — the run's end, a test verdict,
+     * a wall timeout or a restart — so close the recording now, with what
+     * happened since the last broadcast. */
+    ui_service_set_stats(&ui_svc, rf_byte_count, uart_byte_count,
+                         (int)radio_medium.next_frame_id + stat_rf_frames,
+                         radio_bus.stats.frame_collided);
+    ui_service_record_finish(&ui_svc, sim_ns,
+                             (ui_service_restart_requested(&ui_svc) ||
+                              g_restart_requested) ? "restart" : "end of run");
+
     /* Handle restart request from UI */
     if ((ui_service_restart_requested(&ui_svc) && ui_service_active(&ui_svc)) ||
         g_restart_requested) {
@@ -3448,6 +3514,7 @@ sim_restart:
         ui_service_reset(&ui_svc);  /* clear console rings + arm full-state */
         shell_service_on_restart(&shell_svc);
         memset(node_states, 0, sizeof(node_states));
+        memset(obs_radio_state, 0, sizeof(obs_radio_state));
         tl_init(&timeline_svc.tl);
         extern void cc2538_rfcore_reset_rxfifo_overflows(void);
         cc2538_rfcore_reset_rxfifo_overflows();
@@ -3632,8 +3699,12 @@ sim_restart:
 
     ss_cleanup();
 
-    /* Cleanup UI server */
+    /* Cleanup UI server (and finish a --ui-record document).  A recording
+     * that could not be written fails the run, like a failed --save-config:
+     * the file is not the run it claims to be. */
     ui_service_destroy(&ui_svc);
+    if (ui_service_record_failed(&ui_svc) && test_exit_code == 0)
+        test_exit_code = 1;
 
     if (phase_timing_on()) {
         printf("\n--- Phase Timing (CSIM_PHASE_TIMING=1) ---\n");
