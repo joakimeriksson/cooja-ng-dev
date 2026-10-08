@@ -267,6 +267,12 @@ static sim_external_command_t external_cmd;
 static timeline_service_t timeline_svc;
 static sim_node_state_t node_states[MAX_NODES];
 static sim_node_state_t prev_node_states[MAX_NODES]; /* previous delta state for change detection */
+/* The radio state last reported on the observer stream, per node.  Kept
+ * apart from node_states[].radio_state, which the UI's own paths also set
+ * (a frame's end shows the radio back ON): an energy service's view must
+ * not depend on whether a web UI or a recording is watching.  Without
+ * either, the two never differ. */
+static sim_radio_state_t obs_radio_state[MAX_NODES];
 static int64_t prev_last_tx_ns[MAX_NODES];           /* previous TX timestamps for change detection */
 /* "suppress chip state callbacks during synchronous delivery" moved to
  * radio_bus.in_delivery (M27). */
@@ -309,6 +315,14 @@ static inline void emit_radio_state_obs(int mote_index, int64_t time_ns,
     ev.u.radio_state.state = (int)state;
     sim_runtime_emit(&sim_rt, &ev);
 }
+/* Report a radio state on the observer stream if it differs from the last
+ * one reported for this node (obs_radio_state). */
+static void report_radio_state(int mote_index, int64_t time_ns,
+                               sim_radio_state_t state) {
+    if (state == obs_radio_state[mote_index]) return;
+    obs_radio_state[mote_index] = state;
+    emit_radio_state_obs(mote_index, time_ns, state);
+}
 /* Emit a per-mote CPU power-time snapshot (cumulative active/LPM ns) for an
  * energy service.  Called once per mote at end-of-run; totals are exact. */
 static inline void emit_cpu_state_obs(int mote_index, int64_t time_ns,
@@ -343,10 +357,8 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
     /* Skip TX/RX timeline events — explicit timeline events handle those with
      * proper frame duration.  The energy stream still wants every transition. */
     if (sim_state == SIM_RADIO_TX || sim_state == SIM_RADIO_RX) {
-        if (sim_state != node_states[idx].radio_state) {
-            node_states[idx].radio_state = sim_state;
-            emit_radio_state_obs(idx, ts, sim_state);
-        }
+        node_states[idx].radio_state = sim_state;
+        report_radio_state(idx, ts, sim_state);
         return;
     }
 
@@ -357,8 +369,8 @@ static void mixed_rf_state_handler(void *user_data, int old_state, int new_state
                 (sim_state == SIM_RADIO_ON) ? TL_RADIO_ON : TL_RADIO_OFF;
             tl_radio_event(&timeline_svc.tl, node->id, ts, etype);
         }
-        emit_radio_state_obs(idx, ts, sim_state);
     }
+    report_radio_state(idx, ts, sim_state);
 }
 
 /* Track per-node radio state for timeline events */
@@ -385,8 +397,8 @@ static void update_radio_state(int idx) {
             }
             tl_radio_event(&timeline_svc.tl, nodes[idx].id, ts, etype);
         }
-        emit_radio_state_obs(idx, ts, new_state);
     }
+    report_radio_state(idx, sim_runtime_now_ns(&sim_rt), new_state);
 }
 
 /* Track LED state changes (M16: ui_leds op; platform mapping lives in
@@ -2476,6 +2488,35 @@ int run_mixed_multinode_test(int argc, char **argv) {
         ui_svc.rt = &sim_rt;   /* plugin UI panels source */
     }
 
+    /* --ui-record: the web UI's stream to a file for the browser's replay
+     * player (docs/ui-replay.md).  Begun here, where a --ui server starts —
+     * before the motes boot, so their first output is in it — and only on
+     * this first pass (a restart finishes the recording, and it is not
+     * begun again).  It observes only; with no --ui the run stays headless
+     * and unpaced.  The end is set once known (ui_service_record_set_end). */
+    if (ui_record_path) {
+        cJSON *run = cJSON_CreateObject();
+        cJSON_AddStringToObject(run, "simulator", "cooja-ng");
+        cJSON_AddStringToObject(run, "version", CSIM_VERSION);
+        cJSON_AddStringToObject(run, "scenario",
+                                config_path ? config_path : "(firmware arguments)");
+        if (config_loaded && config.title[0])
+            cJSON_AddStringToObject(run, "title", config.title);
+        if (config.seed)   /* the config's, or --seed's on any run */
+            cJSON_AddNumberToObject(run, "seed", config.seed);
+        if (!shell_enabled)   /* a shell run ends at `exit` */
+            cJSON_AddNumberToObject(run, "duration_ms", sim_ms);
+        char *run_json = cJSON_PrintUnformatted(run);
+        cJSON_Delete(run);
+        ui_service_record_begin(&ui_svc, run_json, INT64_MAX,
+                                node_states, prev_node_states,
+                                node_last_tx_ns, prev_last_tx_ns,
+                                &radio_medium, &timeline_svc.tl,
+                                &node_count, ui_describe_node, &sim_ctl);
+        free(run_json);
+        ui_svc.rt = &sim_rt;   /* plugin UI panels source */
+    }
+
     /* A restart re-creates the configured nodes only; nodes added since
      * (shell `add`, JS addMote) are destroyed with the rest. */
     int base_node_count = node_count;
@@ -2690,6 +2731,7 @@ sim_restart:
                        &timeline_svc);
     memset(node_states, 0, sizeof(node_states));
     memset(prev_node_states, 0, sizeof(prev_node_states));
+    memset(obs_radio_state, 0, sizeof(obs_radio_state));
     memset(prev_last_tx_ns, 0, sizeof(prev_last_tx_ns));
 
 
@@ -2842,33 +2884,9 @@ sim_restart:
     g_save_elapsed = shell_enabled || script_path;
     g_sim_start_ns = sim_start_ns;
 
-    /* --ui-record: the web UI's stream to a file for the browser's replay
-     * player (docs/ui-replay.md).  Begun once the run's end is known, on the
-     * first pass only (a restart has finished the recording, and _begin is
-     * then a no-op); it observes only, and with no --ui the run stays
-     * headless and unpaced. */
-    if (ui_record_path) {
-        cJSON *run = cJSON_CreateObject();
-        cJSON_AddStringToObject(run, "simulator", "cooja-ng");
-        cJSON_AddStringToObject(run, "version", CSIM_VERSION);
-        cJSON_AddStringToObject(run, "scenario",
-                                config_path ? config_path : "(firmware arguments)");
-        if (config_loaded && config.title[0])
-            cJSON_AddStringToObject(run, "title", config.title);
-        if (config.seed)   /* the config's, or --seed's on any run */
-            cJSON_AddNumberToObject(run, "seed", config.seed);
-        if (end_ns != INT64_MAX)
-            cJSON_AddNumberToObject(run, "duration_ms", sim_ms);
-        char *run_json = cJSON_PrintUnformatted(run);
-        cJSON_Delete(run);
-        ui_service_record_begin(&ui_svc, run_json, end_ns,
-                                node_states, prev_node_states,
-                                node_last_tx_ns, prev_last_tx_ns,
-                                &radio_medium, &timeline_svc.tl,
-                                &node_count, ui_describe_node, &sim_ctl);
-        free(run_json);
-        ui_svc.rt = &sim_rt;   /* plugin UI panels source */
-    }
+    /* --ui-record: the run's end is settled now (see where the recording
+     * begins, before the motes boot). */
+    ui_service_record_set_end(&ui_svc, end_ns);
     /* M34: the per-tick progress report is a service now.  Cadence state +
      * the print move into progress_service; the explicit tick stays at the
      * original loop position so the line interleaves with mote UART output
@@ -3446,6 +3464,16 @@ sim_restart:
                                   rf_byte_count, uart_byte_count);
     }
 
+    /* --ui-record: the main loop has ended — the run's end, a test verdict,
+     * a wall timeout or a restart — so close the recording now, with what
+     * happened since the last broadcast. */
+    ui_service_set_stats(&ui_svc, rf_byte_count, uart_byte_count,
+                         (int)radio_medium.next_frame_id + stat_rf_frames,
+                         radio_bus.stats.frame_collided);
+    ui_service_record_finish(&ui_svc, sim_ns,
+                             (ui_service_restart_requested(&ui_svc) ||
+                              g_restart_requested) ? "restart" : "end of run");
+
     /* Handle restart request from UI */
     if ((ui_service_restart_requested(&ui_svc) && ui_service_active(&ui_svc)) ||
         g_restart_requested) {
@@ -3485,6 +3513,7 @@ sim_restart:
         ui_service_reset(&ui_svc);  /* clear console rings + arm full-state */
         shell_service_on_restart(&shell_svc);
         memset(node_states, 0, sizeof(node_states));
+        memset(obs_radio_state, 0, sizeof(obs_radio_state));
         tl_init(&timeline_svc.tl);
         extern void cc2538_rfcore_reset_rxfifo_overflows(void);
         cc2538_rfcore_reset_rxfifo_overflows();

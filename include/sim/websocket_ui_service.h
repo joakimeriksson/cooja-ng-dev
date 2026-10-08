@@ -103,7 +103,13 @@ typedef struct websocket_ui_service {
     long    record_deltas;        /* deltas written; -1 = no full state yet */
     int64_t record_end_ns;        /* stop recording here (the run's end)  */
     int64_t record_last_ns;       /* sim time of the last recorded tick   */
-    bool    record_failed;        /* a write or the close failed          */
+    bool    record_failed;        /* a write, the close, or a delta failed */
+    int     record_bad_panels;    /* panel publishes that were not JSON   */
+    /* Every console line since the recording began, until its first full
+     * state is written: that full state carries them all, where a live
+     * client's gets the last UI_CONSOLE_LINES of each node. */
+    char  **record_boot[UI_SVC_MAX_NODES];
+    int     record_boot_n[UI_SVC_MAX_NODES];
 } websocket_ui_service_t;
 
 /* Start the UI: open the ws_server on `bind_addr`:`port` (NULL = loopback,
@@ -155,8 +161,26 @@ void ui_service_record_begin(websocket_ui_service_t *svc,
                              const int *node_count,
                              ui_describe_fn describe, sim_control_t *ctl);
 
-/* True if writing the recording failed (full disk, I/O error): the file
- * is incomplete, and the runner fails the run rather than report it. */
+/* Close the recording at simulation time sim_ns: one last tick for the
+ * recorder only — what happened since the last broadcast, and a full state
+ * for a run too short to have had one — then the end of the document.  The
+ * runner calls it when the main loop ends (run end, test verdict, restart),
+ * so the file has the run's last interval.  `why` goes in the status line.
+ * A no-op if nothing is being recorded. */
+void ui_service_record_finish(websocket_ui_service_t *svc, int64_t sim_ns,
+                              const char *why);
+
+/* The simulation time the recording stops at, once the runner knows it
+ * (the document begins before the motes boot, so it captures their first
+ * output, but the run's end is only settled after). */
+static inline void ui_service_record_set_end(websocket_ui_service_t *svc,
+                                             int64_t end_ns) {
+    svc->record_end_ns = end_ns;
+}
+
+/* True if writing the recording failed (full disk, I/O error, a delta
+ * that did not transcode): the file is not the run, and the runner fails
+ * the run rather than report it. */
 static inline bool ui_service_record_failed(const websocket_ui_service_t *svc) {
     return svc->record_failed;
 }

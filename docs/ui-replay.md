@@ -3,13 +3,15 @@
 `ui/index.html?replay=FILE.json` plays a recorded run from a static file: no simulator, no
 WebSocket, no server beyond whatever serves the two files. Play/Pause, the speed slider and a
 scrubber in the header drive the player; Restart seeks to the start. Dragging nodes and the
-live commands are inert in this mode.
+live commands are inert in this mode. The player only loads files from its own origin (a path
+relative to the page, or an absolute URL on the same host): a link cannot point it at a file
+someone else controls.
 
 The file is the UI's own wire protocol as one JSON document:
 
 ```json
 { "format": "cooja-ng-ui-replay/1",
-  "run":    { "simulator": "cooja-ng", "version": "…", "seed": 42, "verdict": "pass", "scenario": "…" },
+  "run":    { "simulator": "cooja-ng", "version": "…", "scenario": "…", "title": "…", "seed": 42, "duration_ms": 90000 },
   "full":   { "type": "full", "sim_time_ms": 0, "nodes": [...], "radio": {...}, "stats": {...} },
   "deltas": [ { "0": 100, "1": [rf, uart, frames, collisions, speed_x10, paused],
                 "2": {"3": 1}, "3": {"3": [1,0,0]}, "4": {"1": 4628},
@@ -31,15 +33,25 @@ Producing the file:
   Without `--ui` the run stays headless and unpaced — a 90 s three-ISA RPL run records in well under
   a second — and the simulation is unchanged: stdout is byte-identical with and without the flag,
   and the recorder's two status lines (`--ui-record: recording …`, `UI recording: N deltas written
-  …`) go to stderr. With `--ui` the browser and the file see the same stream.
+  …`) go to stderr. One exception: the packet-frame and radio TX/RX start/end observer events are
+  produced only while a UI or a recording is watching (they cost a packet decode per frame), so a
+  plugin that subscribes to them (`plugins/packet_sink.c`) sees them with `--ui-record` as it does
+  with `--ui`. The radio-state stream an energy service uses does not depend on either. With
+  `--ui` the browser and the file see the same stream.
 
-  The file is created before the run starts, so a path that cannot be written ends the run there.
-  The recording stops at the run's end (`-t`/`timeout_ms`), at the first restart — the document
-  keeps the run before it, since a replay has no way to rewind simulation time — or at exit, and
-  the document is always closed. A tick in which simulation time has not moved (a paused run, an
-  idle shell prompt) adds nothing to the file. `run.seed` is the run's seed from the config or
-  `--seed`. If writing the file fails (a full disk), the run says so and exits 1: the file is not
-  the run.
+  The path is checked (created if missing, not yet truncated) before the run starts, so one that
+  cannot be written ends the run there, and a run that fails before recording begins leaves an
+  existing recording at that path as it was. The recording ends when the run does — its end
+  (`-t`/`timeout_ms`), a test's verdict, a wall timeout, the first restart (the document keeps the
+  run before it, since a replay has no way to rewind simulation time) — with a last delta for what
+  happened since the previous one, and a full state even for a run too short to have had a
+  broadcast. A tick in which simulation time has not moved (a paused run, an idle shell prompt)
+  adds nothing; a browser connecting, or the shell's `ui` command, loses nothing from the file.
+  Console text is written as UTF-8 (invalid bytes become U+FFFD), and plugin panels that are not
+  valid JSON are left out of the recording with a warning. `run.seed` is the run's seed from the
+  config or `--seed`. If writing the file fails (a full disk) or a delta cannot be transcoded, the
+  run says so and exits 1: the file is not the run. A run killed by a signal leaves the document
+  unterminated.
 
   ```sh
   ./build/test_runner test configs/test-mixed-platform-rpl.yaml -q --ui-record mixed.json
@@ -47,8 +59,7 @@ Producing the file:
 
   What a recording cannot show yet: node moves and nodes added or removed at run time (positions
   travel only in the full state, and the recording keeps the first one), and the per-node cycle
-  counters, which are also full-state only.  A browser that connects to a recorded `--ui` run asks
-  for a full state, and that tick's delta is missing from the file.
+  counters, which are also full-state only.
 - `tools/rundir2ui.py RUN_DIR` in the agent-sim-protocol repo converts a `--run-dir` directory
   (`events.ndjson`, `scenario.replay.yaml`, `result.json`) into the same document, one delta per
   100 ms of simulation time that had events.

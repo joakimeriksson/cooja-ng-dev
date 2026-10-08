@@ -268,6 +268,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 
   // Pan with mouse drag / node drag
   canvas.addEventListener('mousedown', (e) => {
+    if (replay) return;   // a replay is read-only: no moving nodes
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -646,12 +647,15 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
         if (sn) sn.last_tx_ms = ms;
       }
     }
-    // Key 5: console { node_id: [lines...] }
+    // Key 5: console { node_id: [lines...] } — also queued on the node for
+    // the sidebar, which appends (and consumes) node.console.
     if (d[5]) {
       for (const [nid, lines] of Object.entries(d[5])) {
         if (!consoleHistory[nid]) consoleHistory[nid] = [];
         const hist = consoleHistory[nid];
         for (const line of lines) { hist.push(line); if (hist.length > MAX_CONSOLE) hist.shift(); }
+        const sn = state.nodes.find(n => n.id == nid);
+        if (sn) sn.console = (sn.console || []).concat(lines);
       }
     }
     // Key 6: timeline array of [t_us, node_id, type, value, summary?]
@@ -713,15 +717,18 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   function replayApplyTo(ms) {
     if (ms < replay.clock) {
       handleFullState(JSON.parse(JSON.stringify(replay.doc.full)));
+      renderPluginPanels({});
       replay.idx = 0;
     }
     const ds = replay.doc.deltas;
+    let panels = null;                    // the latest panels in this step
     while (replay.idx < ds.length && ds[replay.idx]['0'] <= ms) {
       const d = ds[replay.idx];
       handleCBORDelta(d);
-      if (d.p) renderPluginPanels(d.p);   // the tick's plugin panels (--ui-record)
+      if (d.p) panels = d.p;              // plugin panels (--ui-record)
       replay.idx++;
     }
+    if (panels) renderPluginPanels(panels);
     replay.clock = ms;
     if (state) { state.sim_time_ms = ms; state.stats.paused = replay.paused; state.stats.speed = replay.speed; }
     replaySeekEl.value = Math.round(1000 * ms / Math.max(1, replay.end));
@@ -750,22 +757,37 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   document.addEventListener('visibilitychange', () => { if (replay) replay.last = 0; });
   async function loadReplay(url) {
     connDot.className = ''; connDot.title = 'Replay: ' + url;
+    // Only files from this page's own origin: a replay's contents end up in
+    // the page, and a link must not be able to point it at someone else's.
+    let target;
+    try { target = new URL(url, window.location.href); } catch (e) { target = null; }
+    if (!target || target.origin !== window.location.origin) {
+      console.error('replay: only same-origin files are played', url);
+      connDot.title = 'Replay: not a file on this site'; return;
+    }
     let doc;
     try {
-      const r = await fetch(url);
+      const r = await fetch(target.href);
       if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
       doc = await r.json();
     } catch (e) { console.error('replay: cannot load', url, e); connDot.title = 'Replay failed: ' + e; return; }
     if (!doc || doc.format !== 'cooja-ng-ui-replay/1' || !doc.full || !Array.isArray(doc.deltas)) {
       console.error('replay: not a cooja-ng-ui-replay/1 file'); connDot.title = 'Replay: bad file'; return;
     }
-    const end = doc.deltas.length ? doc.deltas[doc.deltas.length - 1]['0'] : (doc.full.sim_time_ms || 0);
-    replay = { doc, idx: 0, clock: 0, end, speed: parseInt(speedSlider.value) || 10, paused: false, last: 0 };
+    // Keep only deltas with a time, in time order (a damaged entry would
+    // otherwise stop playback inside the animation loop).
+    doc.deltas = doc.deltas.filter(d => d && typeof d === 'object' && Number.isFinite(d['0']))
+                           .sort((a, b) => a['0'] - b['0']);
+    const start = Number.isFinite(doc.full.sim_time_ms) ? doc.full.sim_time_ms : 0;
+    const end = doc.deltas.length ? Math.max(start, doc.deltas[doc.deltas.length - 1]['0']) : start;
+    replay = { doc, idx: 0, clock: 0, end, speed: parseInt(speedSlider.value) || 10,
+               paused: doc.deltas.length === 0, last: 0 };
     replayBar.style.display = 'flex';
     document.title = 'Cooja-NG replay: ' + (doc.run && doc.run.scenario || url);
     replaySeekEl.addEventListener('input', () => replaySeek(replay.end * parseInt(replaySeekEl.value) / 1000));
     handleFullState(JSON.parse(JSON.stringify(doc.full)));
     replayApplyTo(0);
+    if (replay.paused) replaySetPaused(true);   // nothing to play: say so
     replayRedraw();
     requestAnimationFrame(replayTick);
   }
@@ -823,6 +845,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     nodeLedBaseState = {};
     packetLog = [];
     pktLogRendered = 0;
+    pktSeqNo = 0;
     // Rebuild packet log header
     const header = pktLog.querySelector('.pkt-header');
     pktLog.innerHTML = '';
@@ -1019,18 +1042,19 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     // One-time full build of sidebar structure
     let html = '';
     for (const node of s.nodes) {
-      html += '<div class="node-card" id="card-' + node.id + '">';
+      const id = esc(node.id);
+      html += '<div class="node-card" id="card-' + id + '">';
       html += '<div class="node-header">';
-      html += '<span class="node-id">Node ' + node.id + '</span>';
-      html += '<span class="' + badgeClass(node.type) + '">' + node.type + '</span>';
-      html += '<span class="badge-radio badge-radio-off" id="radio-' + node.id + '">OFF</span>';
-      html += '<div class="led-row" id="leds-' + node.id + '">';
+      html += '<span class="node-id">Node ' + id + '</span>';
+      html += '<span class="' + esc(badgeClass(node.type)) + '">' + esc(node.type) + '</span>';
+      html += '<span class="badge-radio badge-radio-off" id="radio-' + id + '">OFF</span>';
+      html += '<div class="led-row" id="leds-' + id + '">';
       for (let l = 0; l < 3; l++)
-        html += '<div class="led led-off" id="led-' + node.id + '-' + l + '" title="LED ' + l + '"></div>';
+        html += '<div class="led led-off" id="led-' + id + '-' + l + '" title="LED ' + l + '"></div>';
       html += '</div>';
       html += '</div>';
-      html += '<div class="node-stats" id="stats-' + node.id + '"></div>';
-      html += '<div class="console-box" id="con-' + node.id + '"></div>';
+      html += '<div class="node-stats" id="stats-' + id + '"></div>';
+      html += '<div class="console-box" id="con-' + id + '"></div>';
       html += '</div>';
     }
     nodesTab.innerHTML = html;
@@ -1058,7 +1082,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 
       // Update stats
       const st = document.getElementById('stats-' + node.id);
-      if (st) st.innerHTML = fmtCycles(node.cycles) + ' cycles &middot; ' + fmtFreq(node.freq);
+      if (st) st.textContent = fmtCycles(node.cycles) + ' cycles \u00b7 ' + fmtFreq(node.freq);
 
       // Append only new console lines
       const hist = consoleHistory[node.id] || [];
@@ -1075,6 +1099,8 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
           box.removeChild(box.firstChild);
         box.scrollTop = box.scrollHeight;
       }
+      // Appended: a redraw with nothing new must not append them again.
+      node.console = [];
     }
   }
 
@@ -1185,8 +1211,11 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     return f + ' Hz';
   }
 
+  // HTML-escape any value for text or a quoted attribute.  Node fields come
+  // from the server or, in replay, from a file.
   function esc(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
   // --- Timeline drawing ---

@@ -132,6 +132,9 @@ jobs:
       - name: UI recorder transcoder unit tests (CBOR -> JSON)
         run: ./build/test_runner cbor-json
 
+      - name: --ui-record end to end (unchanged stdout, the whole run in the file)
+        run: tools/check-ui-record.sh
+
       - name: External mote — Python sniffer receives + decodes 802.15.4
         # Gates the whole RX path for external motes: the peer must actually
         # receive frames from the emulated Sky pair and decode their MAC

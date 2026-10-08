@@ -124,12 +124,44 @@ static void ui_message_handler(const char *data, int len, void *userdata) {
     cJSON_Delete(root);
 }
 
+/* Copy src into dst (size n) as valid UTF-8: a byte that does not start a
+ * complete, well-formed sequence becomes U+FFFD, and a sequence that would
+ * not fit is left out rather than cut.  Console lines are raw UART bytes;
+ * the full state travels as a WebSocket text frame and both it and a
+ * recording are JSON, all of which must be UTF-8. */
+static void utf8_sanitize(char *dst, size_t n, const char *src) {
+    const unsigned char *p = (const unsigned char *)src;
+    size_t o = 0;
+    while (*p && o + 1 < n) {
+        unsigned char c = p[0];
+        int len = c < 0x80 ? 1 : (c >= 0xC2 && c <= 0xDF) ? 2
+                : (c >= 0xE0 && c <= 0xEF) ? 3 : (c >= 0xF0 && c <= 0xF4) ? 4 : 0;
+        for (int k = 1; k < len; k++)
+            if ((p[k] & 0xC0) != 0x80) { len = 0; break; }
+        if (len == 3 && ((c == 0xE0 && p[1] < 0xA0) || (c == 0xED && p[1] > 0x9F)))
+            len = 0;                       /* overlong, or a UTF-16 surrogate */
+        if (len == 4 && ((c == 0xF0 && p[1] < 0x90) || (c == 0xF4 && p[1] > 0x8F)))
+            len = 0;                       /* overlong, or above U+10FFFF */
+        if (len == 0) {
+            if (o + 3 >= n) break;
+            dst[o++] = (char)0xEF; dst[o++] = (char)0xBF; dst[o++] = (char)0xBD;
+            p++;
+            continue;
+        }
+        if (o + (size_t)len >= n) break;
+        for (int k = 0; k < len; k++) dst[o++] = (char)p[k];
+        p += len;
+    }
+    dst[o] = '\0';
+}
+
 void ui_service_add_console_line(websocket_ui_service_t *svc, int idx,
                                  int64_t sim_ns, const char *line) {
     /* Prepend simulation timestamp */
-    char stamped[UI_CONSOLE_LINELEN];
+    char raw[UI_CONSOLE_LINELEN], stamped[UI_CONSOLE_LINELEN];
     double sim_s = (double)sim_ns / 1e9;
-    snprintf(stamped, sizeof(stamped), "[%7.3f] %s", sim_s, line);
+    snprintf(raw, sizeof(raw), "[%7.3f] %s", sim_s, line);
+    utf8_sanitize(stamped, sizeof(stamped), raw);
 
     /* Add to ring buffer */
     int slot = (svc->console_head[idx] + svc->console_count[idx]) % UI_CONSOLE_LINES;
@@ -139,6 +171,21 @@ void ui_service_add_console_line(websocket_ui_service_t *svc, int idx,
         svc->console_head[idx] = (svc->console_head[idx] + 1) % UI_CONSOLE_LINES;
     strncpy(svc->console[idx][slot], stamped, UI_CONSOLE_LINELEN - 1);
     svc->console[idx][slot][UI_CONSOLE_LINELEN - 1] = '\0';
+
+    /* The recording's first full state carries every line since it began. */
+    if (svc->record && svc->record_begun && svc->record_deltas < 0 &&
+        svc->record_boot_n[idx] < 100000) {
+        char **a = realloc(svc->record_boot[idx],
+                           (size_t)(svc->record_boot_n[idx] + 1) * sizeof *a);
+        char *line_copy = strdup(stamped);
+        if (a && line_copy) {
+            a[svc->record_boot_n[idx]++] = line_copy;
+            svc->record_boot[idx] = a;
+        } else {
+            if (a) svc->record_boot[idx] = a;
+            free(line_copy);
+        }
+    }
 
     /* Add to new-lines buffer for next broadcast */
     if (svc->console_new_count[idx] < UI_CONSOLE_LINES) {
@@ -197,9 +244,14 @@ bool ui_service_start(websocket_ui_service_t *svc, const char *bind_addr, int po
  * goes to stderr only, so stdout stays byte-identical with the flag. */
 
 bool ui_service_record_open(websocket_ui_service_t *svc, const char *path) {
-    FILE *f = fopen(path, "w");
+    /* Create it (or check an existing one can be written) without
+     * truncating: a run that fails before the recording begins leaves an
+     * earlier recording at this path as it was.  _begin truncates. */
+    int fd = open(path, O_WRONLY | O_CREAT, 0644);
+    FILE *f = fd >= 0 ? fdopen(fd, "w") : NULL;
     if (!f) {
         fprintf(stderr, "--ui-record: cannot create %s: %s\n", path, strerror(errno));
+        if (fd >= 0) close(fd);
         return false;
     }
     svc->record = f;
@@ -222,6 +274,8 @@ void ui_service_record_begin(websocket_ui_service_t *svc,
         return;     /* not asked for, finished (a restart), or begun already */
     bind_state(svc, node_states, prev_node_states, node_last_tx_ns,
                prev_last_tx_ns, medium, tl, node_count, describe, ctl);
+    if (ftruncate(fileno(svc->record), 0) != 0)
+        svc->record_failed = true;
     fprintf(svc->record, "{\"format\":\"cooja-ng-ui-replay/1\",\"run\":%s,",
             run_json && run_json[0] ? run_json : "{}");
     svc->record_begun = true;
@@ -233,6 +287,16 @@ void ui_service_record_begin(websocket_ui_service_t *svc,
             svc->record_path);
 }
 
+static void record_boot_free(websocket_ui_service_t *svc) {
+    for (int i = 0; i < UI_SVC_MAX_NODES; i++) {
+        for (int c = 0; c < svc->record_boot_n[i]; c++)
+            free(svc->record_boot[i][c]);
+        free(svc->record_boot[i]);
+        svc->record_boot[i] = NULL;
+        svc->record_boot_n[i] = 0;
+    }
+}
+
 /* Finish the document, once.  A write error anywhere (ferror is sticky) or
  * a failing close means the file is not the run: say so, and flag it for
  * the runner's exit code. */
@@ -240,6 +304,7 @@ static void record_finish(websocket_ui_service_t *svc, const char *why) {
     if (!svc->record) return;
     FILE *f = svc->record;
     svc->record = NULL;
+    record_boot_free(svc);
     if (!svc->record_begun) {
         if (fclose(f) != 0) svc->record_failed = true;
         fprintf(stderr, "UI recording: none — the run ended before it began "
@@ -249,18 +314,63 @@ static void record_finish(websocket_ui_service_t *svc, const char *why) {
     if (svc->record_deltas < 0)
         fputs("\"full\":null,\"deltas\":[", f);
     fputs("]}\n", f);
-    bool bad = ferror(f) != 0;
-    if (fclose(f) != 0) bad = true;
-    if (bad) {
+    /* ferror is sticky but says nothing of why; only a failing fclose
+     * leaves a reason in errno. */
+    const char *reason = ferror(f) ? "write error" : NULL;
+    if (fclose(f) != 0) reason = strerror(errno);
+    if (reason || svc->record_failed) {
         svc->record_failed = true;
         fprintf(stderr, "--ui-record: writing %s failed (%s): the recording "
                         "is incomplete\n", svc->record_path,
-                errno ? strerror(errno) : "I/O error");
+                reason ? reason : "a delta was left out");
         return;
     }
     fprintf(stderr, "UI recording: %ld deltas written to %s (%s)\n",
             svc->record_deltas < 0 ? 0 : svc->record_deltas,
             svc->record_path, why);
+}
+
+/* This tick's delta — what changed since the previous one — in
+ * delta_cbor_buf; consumes the new console lines and timeline events and
+ * advances the previous-state snapshot.  Returns its length (0 = none). */
+static uint8_t delta_cbor_buf[524288];
+static int build_delta(websocket_ui_service_t *svc, const sim_stats_t *st, int n) {
+    int ids[UI_SVC_MAX_NODES];
+    const char *con_new_ptrs[UI_SVC_MAX_NODES][UI_CONSOLE_LINES];
+    const char **con_ptr_arr[UI_SVC_MAX_NODES];
+    int con_counts[UI_SVC_MAX_NODES];
+
+    for (int i = 0; i < n; i++) {
+        int id = 0; const char *type = ""; int64_t cycles = 0;
+        uint32_t freq = 0; int64_t simt = 0;
+        if (svc->describe) svc->describe(i, &id, &type, &cycles, &freq, &simt);
+        ids[i] = id;
+        con_counts[i] = svc->console_new_count[i];
+        for (int c = 0; c < svc->console_new_count[i]; c++)
+            con_new_ptrs[i][c] = svc->console_new[i][c];
+        con_ptr_arr[i] = con_new_ptrs[i];
+        svc->console_new_count[i] = 0;
+    }
+
+    static uint8_t tl_cbor_buf[262144];
+    int tl_cbor_len = tl_events_to_cbor(
+        (struct timeline_s *)svc->tl, tl_cbor_buf, (int)sizeof(tl_cbor_buf));
+    tl_flush_new(svc->tl);
+
+    int cbor_len = sim_state_delta_cbor(
+        delta_cbor_buf, (int)sizeof(delta_cbor_buf),
+        st, svc->node_states, svc->prev_node_states,
+        n, ids,
+        svc->node_last_tx_ns, svc->prev_last_tx_ns,
+        (const char ***)con_ptr_arr, con_counts,
+        tl_cbor_buf, tl_cbor_len);
+
+    /* Save current state as previous for next delta */
+    memcpy(svc->prev_node_states, svc->node_states,
+           sizeof(sim_node_state_t) * UI_SVC_MAX_NODES);
+    memcpy(svc->prev_last_tx_ns, svc->node_last_tx_ns,
+           sizeof(int64_t) * UI_SVC_MAX_NODES);
+    return cbor_len;
 }
 
 /* One delta: the CBOR map as JSON, with the tick's panels spliced in
@@ -280,19 +390,32 @@ static void record_delta(websocket_ui_service_t *svc, const uint8_t *cbor,
     if (used == len && js_len >= 2 && js[0] == '{' && js[js_len - 1] == '}') {
         if (svc->record_deltas > 0) fputc(',', svc->record);
         fwrite(js, 1, js_len - 1, svc->record);
-        if (panels) fprintf(svc->record, ",\"p\":%s", panels);
+        /* Panels come from plugins as JSON text; one that does not parse
+         * would make the whole document unreadable, so it is left out of
+         * this delta (the live UI only loses that one frame either). */
+        if (panels) {
+            cJSON *pj = cJSON_Parse(panels);
+            if (pj) fprintf(svc->record, ",\"p\":%s", panels);
+            else if (!svc->record_bad_panels++)
+                fprintf(stderr, "--ui-record: a plugin published panels that "
+                                "are not JSON; left out of the recording\n");
+            cJSON_Delete(pj);
+        }
         fputc('}', svc->record);
         svc->record_deltas++;
     } else {
         fprintf(stderr, "--ui-record: a %d-byte delta did not transcode; "
                         "left out of the recording\n", len);
+        svc->record_failed = true;
     }
     free(js);
 }
 
-void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns) {
-    if (svc->record && svc->record_begun && sim_ns > svc->record_end_ns)
-        record_finish(svc, "end of run");
+/* One broadcast tick.  recorder_only: the closing tick of a recording,
+ * which live clients do not get; force: record it even if simulated time has
+ * not moved since the last recorded tick (events may have come in since). */
+static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
+                           int recorder_only, int force) {
     if (!svc->server && !svc->record) return;
     int n = svc->node_count ? *svc->node_count : 0;
 
@@ -310,8 +433,10 @@ void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns) {
      * moved.  A paused run (a shell prompt, the UI's pause button) comes
      * here every ~50 ms of wall time with simulated time standing still;
      * each pass would otherwise be one more identical delta in the file. */
-    int live = svc->server && ws_server_client_count(svc->server) > 0;
-    int rec = svc->record && svc->record_begun && sim_ns != svc->record_last_ns;
+    int live = !recorder_only && svc->server &&
+               ws_server_client_count(svc->server) > 0;
+    int rec = svc->record && svc->record_begun &&
+              (force || sim_ns != svc->record_last_ns);
     int has_clients = live || rec;
     char *json = NULL;
     /* Plugin panels for this tick: the live frame below, and key "p" of the
@@ -319,7 +444,22 @@ void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns) {
     char *panels = (has_clients && svc->rt) ? sim_runtime_ui_panels_json(svc->rt)
                                             : NULL;
 
-    if (svc->full_state_requested && has_clients) {
+    /* A full state is for a client that has none: a browser connecting,
+     * or the recording before its first one.  A recording that has its
+     * full state already gets this tick as a delta first — building the
+     * full state flushes the tick's console lines and timeline events, and
+     * they would otherwise be in neither. */
+    int want_full = svc->full_state_requested &&
+                    (live || (rec && svc->record_deltas < 0));
+    if (want_full && rec && svc->record_deltas >= 0) {
+        int cbor_len = build_delta(svc, &st, n);
+        if (cbor_len > 0) {
+            record_delta(svc, delta_cbor_buf, cbor_len, panels);
+            svc->record_last_ns = sim_ns;
+        }
+    }
+
+    if (want_full) {
         /* === Full state: on connect/reload === */
         svc->full_state_requested = 0;
 
@@ -337,10 +477,19 @@ void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns) {
             ni[i].freq_hz = freq;
             ni[i].sim_time_ns = simt;
             ni[i].last_tx_ns = svc->node_last_tx_ns[i];
-            /* Send ALL console history for full state */
+            /* Send ALL console history for full state — for the
+             * recording's first one, every line since it began. */
+            if (rec && svc->record_deltas < 0 &&
+                svc->record_boot_n[i] > svc->console_count[i]) {
+                ni[i].console_count = svc->record_boot_n[i];
+                ni[i].console = (const char **)svc->record_boot[i];
+                continue;
+            }
             ni[i].console_count = svc->console_count[i];
-            int base = (svc->console_head[i] - svc->console_count[i]
-                        + UI_CONSOLE_LINES) % UI_CONSOLE_LINES;
+            /* console_head is the oldest line (add_console_line writes at
+             * head + count); reading from head - count returned empty
+             * slots until the ring had wrapped. */
+            int base = svc->console_head[i];
             for (int c = 0; c < svc->console_count[i]; c++)
                 con_ptrs[i][c] = svc->console[i][(base + c) % UI_CONSOLE_LINES];
             ni[i].console = con_ptrs[i];
@@ -371,61 +520,27 @@ void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns) {
 
     } else if (has_clients) {
         /* === Delta: CBOR binary, change-only === */
-        int ids[UI_SVC_MAX_NODES];
-        const char *con_new_ptrs[UI_SVC_MAX_NODES][UI_CONSOLE_LINES];
-        const char **con_ptr_arr[UI_SVC_MAX_NODES];
-        int con_counts[UI_SVC_MAX_NODES];
-
-        for (int i = 0; i < n; i++) {
-            int id = 0; const char *type = ""; int64_t cycles = 0;
-            uint32_t freq = 0; int64_t simt = 0;
-            if (svc->describe) svc->describe(i, &id, &type, &cycles, &freq, &simt);
-            ids[i] = id;
-            con_counts[i] = svc->console_new_count[i];
-            for (int c = 0; c < svc->console_new_count[i]; c++)
-                con_new_ptrs[i][c] = svc->console_new[i][c];
-            con_ptr_arr[i] = con_new_ptrs[i];
-            svc->console_new_count[i] = 0;
-        }
-
-        static uint8_t tl_cbor_buf[262144];
-        int tl_cbor_len = tl_events_to_cbor(
-            (struct timeline_s *)svc->tl, tl_cbor_buf, (int)sizeof(tl_cbor_buf));
-        tl_flush_new(svc->tl);
-
-        static uint8_t cbor_buf[524288];
-        int cbor_len = sim_state_delta_cbor(
-            cbor_buf, (int)sizeof(cbor_buf),
-            &st, svc->node_states, svc->prev_node_states,
-            n, ids,
-            svc->node_last_tx_ns, svc->prev_last_tx_ns,
-            (const char ***)con_ptr_arr, con_counts,
-            tl_cbor_buf, tl_cbor_len);
-
+        int cbor_len = build_delta(svc, &st, n);
         if (cbor_len > 0 && live)
-            ws_server_broadcast_binary(svc->server, cbor_buf, cbor_len);
+            ws_server_broadcast_binary(svc->server, delta_cbor_buf, cbor_len);
         if (cbor_len > 0 && rec && svc->record_deltas >= 0) {
-            record_delta(svc, cbor_buf, cbor_len, panels);
+            record_delta(svc, delta_cbor_buf, cbor_len, panels);
             svc->record_last_ns = sim_ns;
         }
-
-        /* Save current state as previous for next delta */
-        memcpy(svc->prev_node_states, svc->node_states,
-               sizeof(sim_node_state_t) * UI_SVC_MAX_NODES);
-        memcpy(svc->prev_last_tx_ns, svc->node_last_tx_ns,
-               sizeof(int64_t) * UI_SVC_MAX_NODES);
     }
 
     if (json) {
         if (live)
             ws_server_broadcast(svc->server, json, (int)strlen(json));
         /* The recording takes the first full state only: the replay player
-         * rebuilds from it, and a later one (a browser connecting, which
-         * also skips this tick's delta) has no place in the document. */
+         * rebuilds from it, and a later one (a browser connecting; this
+         * tick went into the file as a delta above) has no place in the
+         * document. */
         if (rec && svc->record_deltas < 0) {
             fprintf(svc->record, "\"full\":%s,\"deltas\":[", json);
             svc->record_deltas = 0;
             svc->record_last_ns = sim_ns;
+            record_boot_free(svc);
         }
         free(json);
     }
@@ -444,6 +559,22 @@ void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns) {
         }
     }
     free(panels);
+
+    /* A --ui run goes on past its end; the recording does not. */
+    if (svc->record && svc->record_begun && sim_ns > svc->record_end_ns)
+        record_finish(svc, "end of run");
+}
+
+void ui_service_broadcast(websocket_ui_service_t *svc, int64_t sim_ns) {
+    broadcast_tick(svc, sim_ns, 0, 0);
+}
+
+void ui_service_record_finish(websocket_ui_service_t *svc, int64_t sim_ns,
+                              const char *why) {
+    if (!svc->record) return;
+    if (svc->record_begun)
+        broadcast_tick(svc, sim_ns, 1, 1);   /* the run's last interval */
+    record_finish(svc, why);
 }
 
 void ui_service_reset(websocket_ui_service_t *svc) {
@@ -454,7 +585,9 @@ void ui_service_reset(websocket_ui_service_t *svc) {
     memset(svc->console_new_count, 0, sizeof(svc->console_new_count));
     svc->full_state_requested = 1;
     /* A restart starts simulation time over, which a replay document has
-     * no way to say: the recording ends with the run that came before. */
+     * no way to say: the recording ends with the run that came before.  The
+     * runner closes it with ui_service_record_finish first, which records
+     * the run's last interval; this only catches a caller that did not. */
     record_finish(svc, "restart");
 }
 
