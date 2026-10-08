@@ -106,6 +106,11 @@ static sim_mote_t mote_store[MAX_NODES];
  * EB-process / queue-add counters) moved into src/motes/msp430_elf_mote.c —
  * the runner installs it type-blind and reads the counts via getters. */
 static int num_nodes = 0;
+/* Set once a native node has been initialized, never cleared: the wakeup
+ * path skips its per-native loops until then.  Conservative on removal —
+ * a run that has had a native keeps paying for the loops — so it can never
+ * skip work that matters. */
+static bool have_native = false;
 static int verbose = 1;
 /* M9.2: RF routing state lives in the kernel-owned radio bus.  The
  * aliases keep call sites unchanged until the dispatch functions
@@ -566,7 +571,6 @@ static void ui_describe_node(int i, int *node_id, const char **type,
 /* --- RF TX/RX bridging --- */
 
 /* Forward declarations */
-static void mixed_deliver_rf_bytes(int idx);
 
 /* Check available RXFIFO space for an emulated node. Firefly nodes have
  * two radios; we report the more constrained side so back-pressure
@@ -622,7 +626,8 @@ static void deliver_rx_byte(const sim_event_t *ev) {
         }
     }
 
-    int64_t returned_us = m->ops->sync_to_time(m, ev->time_ns);
+    /* The returned lead is not needed: see the wakeup below. */
+    (void)m->ops->sync_to_time(m, ev->time_ns);
 
     const char *old_state_name = NULL;
     if (cc) {
@@ -652,9 +657,12 @@ static void deliver_rx_byte(const sim_event_t *ev) {
 
     /* Match Cooja's MspMoteTimeEvent + requestImmediateWakeup:
      * execute(t, 0) first, then receivedByte(), then a same-time mote
-     * wakeup request. Also retain the next wakeup returned by execute. */
-    int64_t next_ns = ev->time_ns + returned_us * 1000LL;
-    sim_schedule_mote_wakeup_if_earlier(&sim_rt, idx, next_ns);
+     * wakeup request.  This used to request execute's next wakeup
+     * (t + returned lead) first.  The lead is never negative, so that
+     * request was never earlier than t, and with the if-earlier semantics
+     * the pair leaves the same queue entry as the same-time request alone:
+     * min(existing, t).  Nothing is scheduled between them, so the earlier
+     * one only spent a sequence number, and pop order is unchanged. */
     sim_schedule_mote_wakeup_if_earlier(&sim_rt, idx, ev->time_ns);
 }
 
@@ -682,16 +690,6 @@ static void deliver_radio_timer(const sim_event_t *ev) {
 
 /* (M13 sync_to_time + M25 rx_byte_sync/rx_pre_sync adapters moved to
  * src/motes/{msp430,arm}_elf_mote.c — M38.) */
-
-/* Deliver buffered bytes to an emulated node's radio — body moved to
- * sim_radio_bus_deliver_bytes (M26); thin forwarder keeps call sites
- * unchanged.  The RX timeline emit moved to the bus's on_rx hook
- * (bus_host_on_rx). */
-static void emu_deliver_bytes(int idx, const uint8_t *data, int len,
-                               int8_t rssi, int64_t air_time_ns, bool subghz) {
-    sim_radio_bus_deliver_bytes(&radio_bus, &sim_rt, idx, data, len, rssi,
-                                air_time_ns, subghz);
-}
 
 /* Per-chip TX listener contexts live in node->rf_ctx[2] (M18 — the
  * rf_listener_ctx_t definition and rationale are in mote_impl.h).
@@ -1109,17 +1107,10 @@ static void mixed_rf_frame_handler(void *user_data, const uint8_t *frame, int le
     sim_radio_bus_tx_frame(&radio_bus, &sim_rt, sender_idx, frame, len);
 }
 
-/* Deliver buffered RF bytes to a native node's assembler.
- * Only called for native nodes — emulated nodes' bytes stay in rf_pending
- * until the per-sender frame assembler detects a complete frame.
- * Native nodes use the 2.4 GHz framing in this test runner. */
-static void mixed_deliver_rf_bytes(int idx) {
-    rf_buffer_t *buf = &rf_pending[idx];
-    if (buf->count == 0) return;
-    emu_deliver_bytes(idx, buf->bytes, buf->count, 0, sim_runtime_now_ns(&sim_rt),
-                      /*subghz=*/false);
-    buf->count = 0;
-}
+/* (mixed_deliver_rf_bytes and its emu_deliver_bytes forwarder are gone:
+ * they delivered rf_pending[] bytes to a native, but natives are SYNC
+ * receivers, fed by the bus as each byte is sent, and rf_pending[] is only
+ * staged for BATCH receivers — so there was never anything to deliver.) */
 
 /* Drain queued RX frames for an emulated node — body moved to
  * sim_radio_bus_drain_rx (M26); thin forwarder keeps call sites
@@ -1337,8 +1328,6 @@ static void native_yield_callback(void *user_data) {
         }
     }
 
-    /* Also check for byte-stream ACK delivery (emulated→native path) */
-    mixed_deliver_rf_bytes(sender_idx);
     if (*sender->plat.native.simInSize == 0)
         native_dequeue_rx_frame(&sender->plat.native);
 }
@@ -1462,6 +1451,8 @@ static int init_node(int idx, const char *firmware_path,
     const sim_mote_kind_t *kind =
         sim_registry_mote_kind_for(&g_registry, node->board->kind);
     node->type = kind->node_type;
+    if (node->type == NODE_NATIVE)
+        have_native = true;
     node->id = node_id;
     node->slot = idx;
     node->env = &mixed_mote_env;
@@ -1934,8 +1925,8 @@ static int is_json_file(const char *path) { return sim_config_is_file(path); }
  * ============================================================ */
 
 /* NODE_WAKEUP: tick one mote, then run the post-tick RF distribution
- * (receiver wakeups, queued-frame drains, native assembler delivery) —
- * the Cooja requestImmediateWakeup() + connection-finish equivalents. */
+ * (native receiver wakeups, queued-frame drains) — the Cooja
+ * requestImmediateWakeup() + connection-finish equivalents. */
 static void dispatch_mote_wakeup(const sim_event_t *ev) {
     int i = ev->node_idx;
     if (i < 0 || i >= num_nodes || !node_active(i))
@@ -1943,18 +1934,23 @@ static void dispatch_mote_wakeup(const sim_event_t *ev) {
 
     int64_t ev_time = ev->time_ns;
 
-    /* Snapshot ALL nodes' state to detect frame delivery.
-     * Must be fresh for each event — ACK chains require
-     * detecting frames delivered during the current event. */
+    /* Snapshot every native's receive state, to detect frames delivered
+     * during this event (ACK chains need it fresh for each event).  With no
+     * native in the run — the common case — both all-nodes loops are
+     * skipped: with 1 µs slices they ran once per active microsecond per
+     * mote, O(N²) in the node count. */
+    const bool natives = have_native;  /* one value for both loops */
     int rx_before[MAX_NODES];
     int insize_before[MAX_NODES];
-    for (int r = 0; r < num_nodes; r++) {
-        if (nodes[r].type == NODE_NATIVE) {
-            rx_before[r] = nodes[r].plat.native.rx_queue.count;
-            insize_before[r] = *nodes[r].plat.native.simInSize;
-        } else {
-            rx_before[r] = 0;
-            insize_before[r] = 0;
+    if (natives) {
+        for (int r = 0; r < num_nodes; r++) {
+            if (nodes[r].type == NODE_NATIVE) {
+                rx_before[r] = nodes[r].plat.native.rx_queue.count;
+                insize_before[r] = *nodes[r].plat.native.simInSize;
+            } else {
+                rx_before[r] = 0;
+                insize_before[r] = 0;
+            }
         }
     }
 
@@ -1973,7 +1969,7 @@ static void dispatch_mote_wakeup(const sim_event_t *ev) {
      * Their signal strength, which is what keeps a neighbour's CCA from
      * transmitting over this frame, is derived from the frame's on-air time
      * on the receiver's own next tick. */
-    for (int r = 0; r < num_nodes; r++) {
+    for (int r = 0; natives && r < num_nodes; r++) {
         if (r == i || !node_active(r)) continue;
         if (nodes[r].type == NODE_NATIVE) {
             bool got_frame =
@@ -1993,15 +1989,17 @@ static void dispatch_mote_wakeup(const sim_event_t *ev) {
      * 1ms of CPU time (~4000 cycles at 4MHz) which covers ISR +
      * one process_run() iteration. */
     for (int r = 0; r < num_nodes; r++) {
+        /* An empty queue drains to nothing; testing it here saves the bus
+         * call, which was most of this loop's cost. */
+        if (emu_rx_queue[r].count == 0) continue;
         if (!node_active(r) || nodes[r].type == NODE_NATIVE) continue;
         emu_rx_queue_drain(r);
     }
 
-    /* Deliver pending bytes to native assemblers */
-    for (int r = 0; r < num_nodes; r++) {
-        if (!node_active(r) || nodes[r].type != NODE_NATIVE) continue;
-        mixed_deliver_rf_bytes(r);
-    }
+    /* (No native byte delivery here: natives are SYNC receivers, fed each
+     * byte by the bus as it is sent; rf_pending is only staged for BATCH
+     * receivers, so the per-native mixed_deliver_rf_bytes loop that stood
+     * here never had anything to deliver.) */
 
     /* (debug stepping removed — was causing cascade on Node 1
      * via unguarded step_node_until on Node 2) */
@@ -2955,8 +2953,7 @@ sim_restart:
     int64_t ui_interval_ns = 100LL * MS_TO_NS;  /* 100ms sim time between UI updates */
     int64_t next_ui_ns = sim_ns + ui_interval_ns;
 
-    /* Initialize event queue for Cooja-model sequential stepping.
-     * File-scope so emu_deliver_bytes() can schedule receivers. */
+    /* Initialize event queue for Cooja-model sequential stepping. */
     sim_eq_init(&sim_eq);
     for (int i = 0; i < node_count; i++) {
         if (node_start_ns[i] >= INT64_MAX) continue;  /* removed node */
@@ -3421,6 +3418,10 @@ sim_restart:
             destroy_node(i);
         node_count = base_node_count;
         num_nodes = node_count;
+        /* init_node sets it again if the restarted run has a native; one
+         * that only an added node brought in should not keep the wakeup
+         * path's native loops running. */
+        have_native = false;
 
         /* Reset all global state */
         rf_byte_count = 0;
