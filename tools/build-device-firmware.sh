@@ -43,6 +43,9 @@ USE_DOCKER=1
 EXTRA_MAKE_ARGS=""
 WRITE_PROVENANCE=1
 DOCKER_IMAGE="contiker/contiki-ng:latest"
+# GNU make: On the host, Contiki-NG's makefiles are GNU syntax, and "make" is BSD make
+# on the BSDs.
+case $(uname -s) in *BSD|DragonFly) MAKE=${MAKE:-gmake} ;; *) MAKE=${MAKE:-make} ;; esac
 SRC_FILE_ARG=""
 
 # ---- args ----
@@ -134,8 +137,8 @@ echo "  Toolchain:    $([ $USE_DOCKER -eq 1 ] && echo "Docker ($DOCKER_IMAGE)" |
 echo ""
 
 build_in_dir() {
-    local cmd="make TARGET=$TARGET $BOARD_ARG $EXTRA_MAKE_ARGS WERROR=0 -C $SRC_DIR distclean >/dev/null 2>&1 || true; \
-                make TARGET=$TARGET $BOARD_ARG $EXTRA_MAKE_ARGS WERROR=0 -j\$(nproc 2>/dev/null || sysctl -n hw.ncpu) -C $SRC_DIR $SRC_NAME.$TARGET"
+    local cmd="$MAKE TARGET=$TARGET $BOARD_ARG $EXTRA_MAKE_ARGS WERROR=0 -C $SRC_DIR distclean >/dev/null 2>&1 || true; \
+                $MAKE TARGET=$TARGET $BOARD_ARG $EXTRA_MAKE_ARGS WERROR=0 -j\$(nproc 2>/dev/null || sysctl -n hw.ncpu) -C $SRC_DIR $SRC_NAME.$TARGET"
     bash -c "$cmd"
 }
 

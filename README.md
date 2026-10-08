@@ -29,7 +29,7 @@ firmware/*.cooja       ──►│  Native Cooja motes (dlopen)                
 
 **Multi-ISA:** MSP430, ARM Cortex-M3/M4F/M33, and **RISC-V** — the latter via the nRF54L15's FLPR (an RV32EMC coprocessor) running unmodified Contiki-NG, dual-core alongside the M33 over shared SRAM. (RV32EMC is `rv32emc_zicsr_zifencei` — base integer + M (mul/div/rem) + C (compressed) + CSR + fence.i, in the coprocessor role; not yet a standalone RISC-V networking node.)
 
-Designed for: headless CI for the Contiki-NG test suite, network research with hundreds of mixed-architecture nodes, and single-firmware debugging with deterministic seeds.  Roughly an order of magnitude faster than Cooja + MSPSim, no JVM dependency, builds with `make` on Linux and macOS.  Not a full Cooja replacement — no GTK GUI, no Java plugin ecosystem, no closed-source motes.
+Designed for: headless CI for the Contiki-NG test suite, network research with hundreds of mixed-architecture nodes, and single-firmware debugging with deterministic seeds.  Roughly an order of magnitude faster than Cooja + MSPSim, no JVM dependency, builds with `make` on Linux and macOS and `gmake` on FreeBSD.  Not a full Cooja replacement — no GTK GUI, no Java plugin ecosystem, no closed-source motes.
 
 ## Quick start
 
@@ -67,6 +67,8 @@ make cooja-tests VERBOSE=1
 | `make clean` | Remove `build/` |
 
 Optional dependencies: **GNU Lightning** (MSP430 JIT, silent fallback if missing), **QuickJS / cJSON / cbor** (bundled under `lib/`), **Contiki-NG** (`csim.conf`, `CONTIKI_DIR` env, or `../contiki-ng`).  Runtime needs only libc/libm/libpthread, plus `iproute2` + `tunslip6` on Linux for the TUN tests.
+
+**FreeBSD** (tested on 15.1, amd64): the Makefile is GNU make syntax, so build with `gmake` (`pkg install gmake`, plus `lightning` for the JIT) wherever this README says `make` — `gmake`, `gmake pgo`, `gmake plugins`.  The scripts under `tools/` pick `gmake` themselves.  Simulation output is byte-identical to Linux.  Native Cooja motes (`.cooja`) are built on the host from Contiki-NG, whose Cooja platform does not yet compile on FreeBSD (`pthread_getattr_np` is `pthread_attr_get_np` there, and `putchar` is a `<stdio.h>` macro); with those two fixed in Contiki-NG they load and run.
 
 `make configure CONTIKI_DIR=/abs/path` sets the persistent path used by `make cooja-tests` / `tools/build-test-firmware.sh`.  Pre-built firmware ships under `firmware/` for direct use without Contiki.
 

@@ -86,9 +86,12 @@ WORKLOADS=(
 # exit codes — must match exactly.
 FILTER='^ *(Wall-clock time|Speed ratio|Throughput|PC trace):|^ *FW cc2420_transmit='
 
+# GNU make: the Makefile is GNU syntax, and "make" is BSD make on the BSDs.
+case $(uname -s) in *BSD|DragonFly) MAKE=${MAKE:-gmake} ;; *) MAKE=${MAKE:-make} ;; esac
+
 build() {  # build <srcdir> <label>
     echo "  building $2 ..."
-    if ! make -C "$1" -j"$(nproc 2>/dev/null || echo 4)" >"$WORK/build-$2.log" 2>&1; then
+    if ! $MAKE -C "$1" -j"$(nproc 2>/dev/null || echo 4)" >"$WORK/build-$2.log" 2>&1; then
         echo "FAIL: $2 does not build; see $WORK/build-$2.log" >&2
         [ "$2" = ref ] && echo "      (a reference older than a build fix cannot be" \
              "compared against — try a newer one, e.g. upstream/main after a fetch)" >&2
