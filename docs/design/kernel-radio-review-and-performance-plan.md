@@ -2,8 +2,8 @@
 
 Status: **review complete** (2026-09-25, revised 2026-09-27 after review on
 PR #62). Tier 0 (items 1–4) and Tier 2 item 1 have landed (Tier 0 item 3
-in PR #61, items 1, 2 and 4 on `perf/tier0-wakeup-loops`; Tier 2 item 1 in
-PR #60); the current sequencing is in §7.
+in PR #61, items 1, 2 and 4 in PR #64; Tier 2 item 1 in PR #60); the
+current sequencing is in §7.
 
 Revisions: the §4 measurements and the Tier 0 prototype were taken on this
 machine (Apple Silicon, stock `make`, GNU Lightning present) at `252fc0e`;
@@ -207,7 +207,7 @@ misses" shortcuts.
 
 ### F7 (C) — smaller items
 
-- `deliver_rx_byte` schedules `if_earlier(next)` then `if_earlier(t)`
+- (**fixed by PR #64**, Tier 0 item 4) `deliver_rx_byte` schedules `if_earlier(next)` then `if_earlier(t)`
   (`runner :683–684`). `sync_to_time` returns a non-negative lead
   (`msp430_cpu.c:973–986`, `arm_cpu.c:4801–4814`), so `t ≤ next` and the
   second call always wins: the **first** one (`next_ns`) is redundant. The
@@ -228,7 +228,7 @@ misses" shortcuts.
 
 ## 3. Findings — event-queue usage and time-keeping
 
-### F8 (perf, A-class for scale) — O(N) work on every `NODE_WAKEUP`
+### F8 (perf, A-class for scale) — O(N) work on every `NODE_WAKEUP` (**addressed by PR #64**, Tier 0 items 1–2)
 
 `dispatch_mote_wakeup` (`runner :1971–2040`) runs four loops over all
 nodes on every wakeup: a native rx-count snapshot (`:1982–1991`), a
@@ -379,7 +379,7 @@ output (see there). Tier 3 is not, and gets its own gate.
 The prototype combined items 1–3 at `252fc0e`. Item 3 alone has since
 measured no change, so the gain is items 1–2.
 
-Measured on `perf/tier0-wakeup-loops` (items 1, 2 and 4) against `main` at
+Measured on PR #64 (items 1, 2 and 4) against `main` at
 `521d32c` (#60 and #61 in both), min of three sequential runs, stock `make`,
 Apple Silicon. stdout (minus the wall-clock lines), stderr and the exit code
 were identical in every run:
@@ -394,12 +394,14 @@ Also byte-identical: `check-baseline.sh 521d32c` (all nine workloads),
 `test-tsch-cc2538dk`, `mixed-sky-native` (Sky + native motes), and the
 Contiki-NG Cooja suite (85/93 pass, 0 fail; the 8 skips are the TUN cases).
 
-1. **DONE** `dispatch_mote_wakeup`: compute `have_native` once per topology change
-   (add/remove/reboot) and skip the snapshot, got-frame and
-   `mixed_deliver_rf_bytes` loops when false; delete the
-   `mixed_deliver_rf_bytes` loop outright (dead — natives are `SYNC`).
-   As built, `have_native` is set by `init_node` and never cleared, so a
-   removal can only leave the loops running, never skip one that matters.
+1. **DONE** `dispatch_mote_wakeup`: skip the snapshot and got-frame loops
+   unless the run has a native, and delete the `mixed_deliver_rf_bytes`
+   loop outright (dead — natives are `SYNC`); `mixed_deliver_rf_bytes`
+   itself, its one other (equally dead) call in `native_yield_callback` and
+   the `emu_deliver_bytes` forwarder went with it.  As built, `have_native`
+   is set by `init_node` whenever it boots a native and cleared only on a
+   restart, so a removal can only leave the loops running, never skip one
+   that matters.
    **Not done:** for the native case, replace the all-nodes snapshot with
    the sender's neighbour list from the medium — only native-heavy
    workloads would gain, and it changes which nodes are inspected, so it
@@ -418,9 +420,10 @@ Contiki-NG Cooja suite (85/93 pass, 0 fail; the 8 skips are the TUN cases).
    with `next_ns` (F7). Not the second: that is the same-time wakeup after
    `receive_byte`, and without it every receiver reacts to a radio byte one
    slice late, which moves every radio workload.  Pop order cannot change:
-   anything below `now` is clamped to `now` (= the event's time), and with
-   nothing scheduled between the two calls the first only spent a sequence
-   number.
+   the lead is never negative, so the first request was never earlier than
+   `t`, and with the if-earlier semantics the pair leaves the same queue
+   entry as the second alone (`min(existing, t)`); nothing is scheduled
+   between them, so the first only spent a sequence number.
 
 Cost: a day. Risk: low. The prototype of items 1–3 diffed clean on 2686 + 173
 output lines; item 4 was not in it and is gated like the rest.
@@ -628,8 +631,8 @@ in-slice time. Both are additive.
 
 ## 7. Sequencing
 
-State on 2026-10-07: Tier 0 is done — item 3 in PR #61, items 1, 2 and 4 on
-`perf/tier0-wakeup-loops` (5.78x on the grid, byte-identical) — and Tier 2
+State on 2026-10-07: Tier 0 is done — item 3 in PR #61, items 1, 2 and 4 in
+PR #64 (5.78x on the grid, byte-identical) — and Tier 2
 item 1 in PR #60. R1 is next; it came after Tier 0, not in parallel with
 it, since both change the per-wakeup drain loop.
 
