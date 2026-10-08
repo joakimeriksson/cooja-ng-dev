@@ -726,8 +726,14 @@ void arm_cpu_destroy(arm_cpu_t *cpu) {
                 if (cpu->jit_cache[i]) live++;
             struct rusage ru;
             getrusage(RUSAGE_SELF, &ru);
+            /* ru_maxrss is in bytes on macOS, kilobytes on Linux and BSD. */
+#ifdef __APPLE__
+            double rss_kb = (double)ru.ru_maxrss / 1024.0;
+#else
+            double rss_kb = (double)ru.ru_maxrss;
+#endif
             fprintf(stderr, "  [arm-jit] blocks_live=%u  peak_rss=%.1f MB\n",
-                    live, (double)ru.ru_maxrss / (1024.0 * 1024.0));
+                    live, rss_kb / 1024.0);
         }
     }
     arm_jit_flush(cpu);
