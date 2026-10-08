@@ -503,7 +503,7 @@ static void start_tx(cc1200_t *c) {
      *   4 preamble + 4 sync + saved_tx_count (= PHR + payload) + 2 CRC.
      *
      * This pairs with the per-byte delivery fix (first_byte_ns armed
-     * for the 0x55 preamble in test_mixed_multinode.c). Real hardware:
+     * for the 0x55 preamble in sim_radio_bus_tx_byte). Real hardware:
      *   - sender TX-end fires at +air_time
      *   - receiver finishes RX at +air_time
      *   - CSMA ACK_WAIT (5 ms default) starts at +air_time

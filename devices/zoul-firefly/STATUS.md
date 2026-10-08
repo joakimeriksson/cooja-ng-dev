@@ -12,8 +12,8 @@
 > model bunches sub-GHz frames") is found and fixed — the radio bus restarted
 > a CC1200 frame's byte clock on every `0x55` preamble byte, so a quick soft
 > ACK's sync word reached the sender before its radio was back in RX.  With
-> it fixed, the 4-node sub-GHz chain (`configs/chain-4node-firefly-subghz.json`)
-> passes and is a CI gate.  Details: F17 in
+> it fixed (PR #67), the 4-node sub-GHz chain
+> (`configs/chain-4node-firefly-subghz.json`) passes and is a CI gate.  Details: F17 in
 > [`kernel-radio-review-and-performance-plan.md`](../../docs/design/kernel-radio-review-and-performance-plan.md).
 
 **The port is complete. L6 RPL-UDP converges in csim with corrected
