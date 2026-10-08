@@ -29,9 +29,17 @@ Producing the file:
   web UI would receive: the first full state, then every delta (100 ms of simulation time apart)
   transcoded from its CBOR, with the plugin panels of the same tick (energest, …) as key `"p"`.
   Without `--ui` the run stays headless and unpaced — a 90 s three-ISA RPL run records in well under
-  a second — and the simulation is unchanged (stdout and stderr are byte-identical with and without
-  the flag). With `--ui` the browser and the file see the same stream; the recording stops at the
-  run's end (`-t`/`timeout_ms`), on a restart, or at exit.
+  a second — and the simulation is unchanged: stdout is byte-identical with and without the flag,
+  and the recorder's two status lines (`--ui-record: recording …`, `UI recording: N deltas written
+  …`) go to stderr. With `--ui` the browser and the file see the same stream.
+
+  The file is created before the run starts, so a path that cannot be written ends the run there.
+  The recording stops at the run's end (`-t`/`timeout_ms`), at the first restart — the document
+  keeps the run before it, since a replay has no way to rewind simulation time — or at exit, and
+  the document is always closed. A tick in which simulation time has not moved (a paused run, an
+  idle shell prompt) adds nothing to the file. `run.seed` is the run's seed from the config or
+  `--seed`. If writing the file fails (a full disk), the run says so and exits 1: the file is not
+  the run.
 
   ```sh
   ./build/test_runner test configs/test-mixed-platform-rpl.yaml -q --ui-record mixed.json
@@ -46,7 +54,8 @@ Producing the file:
   100 ms of simulation time that had events.
 
 The player plays at the speed slider's ratio while the tab is visible; a hidden tab pauses it (the
-browser stops animation frames), and it carries on when shown.
+browser stops animation frames), and it carries on from where it stopped when shown. Play after the
+end starts over.
 
 Serving a demo: put `ui/index.html` and the replay file in one directory and serve it
 statically (`python3 -m http.server`, GitHub Pages, any file host).

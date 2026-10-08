@@ -2337,6 +2337,11 @@ int run_mixed_multinode_test(int argc, char **argv) {
         fprintf(stderr, "--paused: nothing could resume the simulation (add --shell, --script or --ui)\n");
         return SHELL_EXIT_INVALID;
     }
+    /* --ui-record: create the file now, while nothing has started — a path
+     * that cannot be written ends the run before it begins, and the restart
+     * path (which comes back below sim_restart:) never re-opens it. */
+    if (ui_record_path && !ui_service_record_open(&ui_svc, ui_record_path))
+        return SHELL_EXIT_INVALID;
     /* Shell or script through a pipe: make command echo, prompts and
      * script output visible promptly.  Here, before anything has been
      * written to stdout — setvbuf after the first output is undefined. */
@@ -2838,8 +2843,10 @@ sim_restart:
     g_sim_start_ns = sim_start_ns;
 
     /* --ui-record: the web UI's stream to a file for the browser's replay
-     * player (docs/ui-replay.md).  Started once the run's end is known; it
-     * observes only, and with no --ui the run stays headless and unpaced. */
+     * player (docs/ui-replay.md).  Begun once the run's end is known, on the
+     * first pass only (a restart has finished the recording, and _begin is
+     * then a no-op); it observes only, and with no --ui the run stays
+     * headless and unpaced. */
     if (ui_record_path) {
         cJSON *run = cJSON_CreateObject();
         cJSON_AddStringToObject(run, "simulator", "cooja-ng");
@@ -2848,22 +2855,19 @@ sim_restart:
                                 config_path ? config_path : "(firmware arguments)");
         if (config_loaded && config.title[0])
             cJSON_AddStringToObject(run, "title", config.title);
-        if (config_loaded)
+        if (config.seed)   /* the config's, or --seed's on any run */
             cJSON_AddNumberToObject(run, "seed", config.seed);
         if (end_ns != INT64_MAX)
             cJSON_AddNumberToObject(run, "duration_ms", sim_ms);
         char *run_json = cJSON_PrintUnformatted(run);
         cJSON_Delete(run);
-        bool ok = ui_service_record(&ui_svc, ui_record_path, run_json, end_ns,
-                                    node_states, prev_node_states,
-                                    node_last_tx_ns, prev_last_tx_ns,
-                                    &radio_medium, &timeline_svc.tl,
-                                    &node_count, ui_describe_node, &sim_ctl);
+        ui_service_record_begin(&ui_svc, run_json, end_ns,
+                                node_states, prev_node_states,
+                                node_last_tx_ns, prev_last_tx_ns,
+                                &radio_medium, &timeline_svc.tl,
+                                &node_count, ui_describe_node, &sim_ctl);
         free(run_json);
-        if (!ok)
-            return SHELL_EXIT_INVALID;
         ui_svc.rt = &sim_rt;   /* plugin UI panels source */
-        printf("  --ui-record: recording the web UI stream to %s\n", ui_record_path);
     }
     /* M34: the per-tick progress report is a service now.  Cadence state +
      * the print move into progress_service; the explicit tick stays at the
@@ -2889,6 +2893,7 @@ sim_restart:
                                sim_registry_find_service(&g_registry, "renode"),
                                &renode_svc) < 0) {
             fprintf(stderr, "renode: co-simulation could not start\n");
+            ui_service_destroy(&ui_svc);   /* closes a --ui-record document */
             return SHELL_EXIT_INVALID;
         }
     }
@@ -3664,8 +3669,12 @@ sim_restart:
 
     ss_cleanup();
 
-    /* Cleanup UI server */
+    /* Cleanup UI server (and finish a --ui-record document).  A recording
+     * that could not be written fails the run, like a failed --save-config:
+     * the file is not the run it claims to be. */
     ui_service_destroy(&ui_svc);
+    if (ui_service_record_failed(&ui_svc) && test_exit_code == 0)
+        test_exit_code = 1;
 
     if (phase_timing_on()) {
         printf("\n--- Phase Timing (CSIM_PHASE_TIMING=1) ---\n");

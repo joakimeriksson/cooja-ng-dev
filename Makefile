@@ -223,6 +223,7 @@ TEST_SOURCES = $(TEST_DIR)/test_main.c \
                $(TEST_DIR)/test_arm_firmware.c \
                $(TEST_DIR)/test_mixed_multinode.c \
                $(TEST_DIR)/test_timeline.c \
+               $(TEST_DIR)/test_cbor_json.c \
                $(TEST_DIR)/test_mock_host.c \
                $(TEST_DIR)/test_cc1200.c \
                $(TEST_DIR)/test_nrf54l15_spim.c \

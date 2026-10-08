@@ -701,6 +701,9 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     updateHeader(state); updateSidebar(state); updatePacketLog(); drawCanvas(state); drawTimeline();
   }
   function replaySetPaused(p) {
+    // Play at the end starts over: there is nothing left to advance through.
+    if (!p && replay.clock >= replay.end) replayApplyTo(0);
+    replay.last = 0;
     replay.paused = p; isPaused = p;
     pauseBtn.textContent = p ? 'Play' : 'Pause';
     if (state) state.stats.paused = p;
@@ -728,9 +731,13 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     replayApplyTo(Math.max(0, Math.min(replay.end, ms)));
     replayRedraw();
   }
+  // Wall time between two animation frames, capped: the browser stops
+  // frames in a hidden tab, and the first frame back would otherwise
+  // advance by the whole time it was hidden (times the speed).
+  const REPLAY_MAX_FRAME_MS = 100;
   function replayTick(now) {
     if (!replay) return;
-    const dt = replay.last ? (now - replay.last) : 0;
+    const dt = replay.last ? Math.min(now - replay.last, REPLAY_MAX_FRAME_MS) : 0;
     replay.last = now;
     if (!replay.paused && replay.clock < replay.end) {
       replayApplyTo(Math.min(replay.end, replay.clock + dt * replay.speed));
@@ -739,6 +746,8 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     }
     requestAnimationFrame(replayTick);
   }
+  // Coming back to the tab carries on from where it stopped.
+  document.addEventListener('visibilitychange', () => { if (replay) replay.last = 0; });
   async function loadReplay(url) {
     connDot.className = ''; connDot.title = 'Replay: ' + url;
     let doc;
