@@ -96,6 +96,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   <span id="replay-bar" class="stat" style="display:none; align-items:center; gap:6px; flex-shrink:0;" title="Replaying a recorded run from a file">
     Replay: <input type="range" id="replay-seek" min="0" max="1000" value="0" style="width:200px;">
     <b id="replay-pos">0 / 0 ms</b>
+    <span id="replay-title" style="color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px;"></span>
   </span>
   <button id="tl-btn" title="Toggle timeline panel">Timeline</button>
   <button id="tl-zoom-in" class="tl-ctrl" title="Zoom in timeline" style="display:none;">TL +</button>
@@ -783,7 +784,17 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     replay = { doc, idx: 0, clock: 0, end, speed: parseInt(speedSlider.value) || 10,
                paused: doc.deltas.length === 0, last: 0 };
     replayBar.style.display = 'flex';
-    document.title = 'Cooja-NG replay: ' + (doc.run && doc.run.scenario || url);
+    document.title = 'Cooja-NG replay: ' + (doc.run && (doc.run.title || doc.run.scenario) || url);
+    document.getElementById('replay-title').textContent = doc.run && (doc.run.title || doc.run.scenario) || '';
+    // Replays are usually opened from a page that lists them (the project site):
+    // the header title leads back to it.
+    const h1 = document.querySelector('header h1');
+    if (h1 && !h1.querySelector('a')) {
+      const a = document.createElement('a');
+      a.href = './'; a.textContent = h1.textContent; a.title = 'Back to the demos';
+      a.style.color = 'inherit'; a.style.textDecoration = 'none';
+      h1.textContent = ''; h1.appendChild(a);
+    }
     replaySeekEl.addEventListener('input', () => replaySeek(replay.end * parseInt(replaySeekEl.value) / 1000));
     handleFullState(JSON.parse(JSON.stringify(doc.full)));
     replayApplyTo(0);
