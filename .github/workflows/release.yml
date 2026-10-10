@@ -34,7 +34,8 @@
 #
 # And from what the first releases taught:
 #
-#  - A tag publishes only what main has already proven.  `verify` refuses a
+#  - A tag publishes only what main has already proven (vX.Y.Z; vX.Y.Z-rcN
+#    is the same path published as a prerelease, for rehearsing a release).  `verify` refuses a
 #    tag that is not on main, whose `tests` run did not succeed, whose number
 #    differs from CSIM_VERSION, or that has no CHANGELOG.md section of its
 #    own — before three platforms spend half an hour building it.
@@ -80,6 +81,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       pkg_version: ${{ steps.version.outputs.pkg_version }}
       publish: ${{ steps.version.outputs.publish }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
@@ -90,11 +92,17 @@ jobs:
         run: |
           version=$(sed -n 's/^#define CSIM_VERSION "\(.*\)"$/\1/p' include/sim/csim_version.h)
           [ -n "$version" ] || { echo "::error::no CSIM_VERSION in include/sim/csim_version.h"; exit 1; }
+          prerelease=false
           if [ "$GITHUB_REF_TYPE" = tag ]; then
-            if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
-              echo "::error::tag $GITHUB_REF_NAME, but CSIM_VERSION is $version: bump include/sim/csim_version.h before tagging"
-              exit 1
-            fi
+            # vX.Y.Z is the release; vX.Y.Z-rcN is a release candidate of it,
+            # published as a prerelease (never "Latest") so the whole tag
+            # path can be rehearsed. Both need CSIM_VERSION = X.Y.Z.
+            case "${GITHUB_REF_NAME#v}" in
+              "$version") ;;
+              "$version"-rc[1-9]|"$version"-rc[1-9][0-9]) prerelease=true ;;
+              *) echo "::error::tag $GITHUB_REF_NAME, but CSIM_VERSION is $version: tag v$version or v$version-rcN, after bumping include/sim/csim_version.h"
+                 exit 1 ;;
+            esac
             section=$version publish=true pkg=$GITHUB_REF_NAME
           else
             section=Unreleased publish=false pkg="v${version}-dryrun-${GITHUB_SHA::8}"
@@ -113,9 +121,11 @@ jobs:
             echo "version=$version"
             echo "pkg_version=$pkg"
             echo "publish=$publish"
+            echo "prerelease=$prerelease"
           } >> "$GITHUB_OUTPUT"
           {
-            if [ "$publish" = true ]; then echo "## Releasing $GITHUB_REF_NAME"
+            if [ "$prerelease" = true ]; then echo "## Release candidate $GITHUB_REF_NAME (a prerelease)"
+            elif [ "$publish" = true ]; then echo "## Releasing $GITHUB_REF_NAME"
             else echo "## Dry run: $pkg (nothing is published)"; echo
                  echo "A tag would publish CHANGELOG.md's \`## [$version]\` section; the Unreleased section below is what it holds now."
             fi
@@ -380,8 +390,12 @@ jobs:
       - name: Create the release as a draft, check it, publish it
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
           repo=$GITHUB_REPOSITORY tag=$GITHUB_REF_NAME
+          # A release candidate is a prerelease and never becomes "Latest".
+          kind=()
+          if [ "$PRERELEASE" = true ]; then kind=(--prerelease --latest=false); fi
           # A draft left by an earlier, failed attempt at this tag is replaced;
           # a published release is never touched.
           if state=$(gh release view "$tag" -R "$repo" --json isDraft --jq .isDraft 2>/dev/null); then
@@ -391,7 +405,7 @@ jobs:
               echo "::error::release $tag is already published"; exit 1
             fi
           fi
-          gh release create "$tag" -R "$repo" --draft --verify-tag \
+          gh release create "$tag" -R "$repo" --draft --verify-tag "${kind[@]}" \
             --title "Cooja-NG $tag" \
             --notes-file release-notes.md --generate-notes \
             dist/*.tar.gz dist/SHA256SUMS

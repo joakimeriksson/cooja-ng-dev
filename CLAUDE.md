@@ -63,9 +63,12 @@ tag equals `CSIM_VERSION`, and `CHANGELOG.md` has a section for it — so:
 # 2. Dry run on main after it merges (same builds and tests, nothing published;
 #    tarballs as workflow artifacts, the release notes in the job summary):
 gh workflow run release.yml -R mikroverk/cooja-ng --ref main
-# 3. Tag the merged commit; the workflow waits for its tests run, builds three
-#    platforms, runs real firmware on each unpacked binary (JIT on = off, and
-#    all three platforms byte-identical), then drafts, checks and publishes.
+# 3. Rehearse with a release candidate: vX.Y.Z-rcN takes the whole tag path
+#    and publishes a prerelease (never "Latest"); its binary reports X.Y.Z.
+git tag -a vX.Y.Z-rc1 -m "Cooja-NG vX.Y.Z-rc1" <sha> && git push origin vX.Y.Z-rc1
+# 4. Tag the release. The workflow waits for the commit's tests run, builds
+#    three platforms, runs real firmware on each unpacked binary (JIT on = off,
+#    and all three platforms byte-identical), then drafts, checks, publishes.
 git tag -a vX.Y.Z -m "Cooja-NG vX.Y.Z" <sha> && git push origin vX.Y.Z
 ```
 
