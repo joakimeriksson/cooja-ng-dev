@@ -160,6 +160,22 @@
   .byo p { color: var(--byo-ink); max-width: 680px; margin-top: 6px; }
   .byo pre { margin: 12px 0 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--byo-line); border-radius: 8px; font-size: 13px; overflow-x: auto; color: var(--ink); }
 
+  /* ----- news ----- */
+  .pill { display: flex; width: fit-content; align-items: center; gap: 10px; max-width: 100%; margin-bottom: 18px; padding: 5px 14px 5px 5px; border: 1px solid var(--line-2); border-radius: 100px; background: var(--card); color: var(--text); font-size: 14px; text-decoration: none; }
+  .pill b { flex: 0 0 auto; background: var(--gold); color: #171a24; border-radius: 100px; padding: 2px 10px; font: 700 11px/1.6 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  .pill span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill:hover { border-color: var(--link); color: var(--ink); }
+  .news { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+  .news li { display: grid; grid-template-columns: 150px 1fr; gap: 6px 24px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 22px; }
+  .news li > div { min-width: 0; }
+  .news time { color: var(--dim); font: 600 12px/1.9 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+  .news .tag { display: block; color: var(--link); font: 700 15px/1.5 var(--mono); }
+  .news p { color: var(--text-2); font-size: 14.5px; margin-top: 6px; max-width: 760px; }
+  .news .go { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 14px; }
+  .news .go a:first-child { font-weight: 700; text-decoration: none; }
+  .news .latest { border-color: var(--byo-line); background: var(--byo-bg); }
+  .news .latest p { color: var(--byo-ink); }
+
   footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--dim); font-size: 13.5px; }
   footer .row { display: flex; flex-wrap: wrap; gap: 8px 22px; }
   footer a { color: var(--dim); }
@@ -174,6 +190,7 @@
     .links a:not(.gh) { display: none; }
     .grid, .chips { grid-template-columns: 1fr; }
     .byo { grid-template-columns: 1fr; }
+    .news li { grid-template-columns: 1fr; padding: 16px 18px; }
     .stage { padding: 14px 14px 60px; }
     .stage figcaption { display: none; }
     section { padding: 40px 0; }
@@ -193,6 +210,7 @@
     <a href="#demos">Demos</a>
     <a href="#testing">Contiki-NG testing</a>
     <a href="#inside">What's inside</a>
+    <a href="#news">News</a>
     <a href="https://github.com/mikroverk/cooja-ng#readme">Docs</a>
     <a class="gh" href="https://github.com/mikroverk/cooja-ng">GitHub ↗</a>
   </div>
@@ -203,6 +221,7 @@
 <div class="wrap">
   <div class="hero">
     <div>
+      <a class="pill" href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0"><b>New</b><span>v0.3.0: a command shell, TrustZone-M, Renode co-simulation →</span></a>
       <span class="kicker">MSP430 · Cortex-M · RISC-V — 802.15.4, 6LoWPAN, RPL</span>
       <h1>Real Contiki-NG firmware. <span>A whole network of it.</span></h1>
       <p class="lede">Cooja-NG emulates the motes Contiki-NG runs on — Tmote Sky, Z1, CC2538, nRF52840, nRF54L15 — instruction by instruction, on one simulated 802.15.4 radio medium with nanosecond time. It runs Contiki-NG's own Cooja tests headless, without a JVM, and the same seed gives the same run every time.</p>
@@ -411,6 +430,41 @@ $ <b>tools/run-cooja-tests.sh</b> 14-rpl-lite --seed 3</pre>
       <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/radio-medium.md">radio medium</a>
       <a href="https://github.com/mikroverk/cooja-ng/blob/main/docs/design/renode-cosim-plan.md">Renode co-simulation</a>
     </div>
+  </div>
+</section>
+
+<section id="news">
+  <div class="wrap">
+    <div class="sec-head">
+      <div><span class="kicker">News</span><h2>Releases.</h2></div>
+      <p>Each release ships prebuilt binaries for Linux x86-64 and macOS (Intel and Apple Silicon), with checksums and a build-provenance attestation per tarball.</p>
+    </div>
+    <ol class="news">
+      <li class="latest">
+        <time datetime="2026-10-11">11 Oct 2026</time>
+        <div>
+          <span class="tag">v0.3.0</span>
+          <p>A command shell and script engine for testing firmware through its own console, run recording and replay (this site), the nRF54L15's TrustZone-M enforced the way a Seeed XIAO enforces it, Renode co-simulation, the simulator as a library, FreeBSD, and a kernel wakeup path that no longer scales with the node count. The three release binaries give byte-identical simulation output.</p>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0">Release notes and downloads →</a><a href="https://github.com/mikroverk/cooja-ng/blob/main/CHANGELOG.md">changelog</a></div>
+        </div>
+      </li>
+      <li>
+        <time datetime="2026-09-05">5 Sep 2026</time>
+        <div>
+          <span class="tag">v0.2.3</span>
+          <p>YAML as the primary config format, external motes for emulators that keep their own clock (esp32sim's ESP32-C6), and a kernel fix that made the border-router traceroute test pass on Linux.</p>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.3">Release notes →</a></div>
+        </div>
+      </li>
+      <li>
+        <time datetime="2026-08-21">21 Aug 2026</time>
+        <div>
+          <span class="tag">v0.2.0</span>
+          <p>The first prebuilt binaries, the first release to pass Contiki-NG 5.2's complete Cooja suite (93 of 93), and a JIT for Cortex-M.</p>
+          <div class="go"><a href="https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.0">Release notes →</a></div>
+        </div>
+      </li>
+    </ol>
   </div>
 </section>
 
