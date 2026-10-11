@@ -14,13 +14,16 @@ and script engine for testing firmware through its own console, the simulator
 as a library, Renode as a co-simulation clock master, and recorded runs that
 replay in the browser. The nRF54L15's TrustZone-M is enforced the way a Seeed
 XIAO nRF54L15 enforces it; three CPU architectures share one RPL network; and
-the kernel's wakeup path no longer scales with the node count. Release
-binaries now produce byte-identical simulation output on linux-x86_64,
-macos-x64 and macos-arm64, and the release workflow checks that they do.
+the kernel's wakeup path no longer scales with the node count (in networks
+without native motes). Release binaries for linux-x86_64, macos-x64 and
+macos-arm64 produce byte-identical simulation output: builds no longer fuse
+multiply-adds on arm64 (#72), and the release workflow checks the identity on
+real firmware with every JIT on and off.
 
-Contributors to this release: @nfi (shell, nRF54L15, TrustZone-M enforcement)
-and @nvt (hardening, FreeBSD, the JIT divide-trap fix, and review of most of
-the rest).
+Contributors to this release: @nfi (the shell, the nRF54L15 console, radio and
+TrustZone-M enforcement), and @nvt (hardening, native-mote CCA, the firmware
+cache, FreeBSD, the JIT divide-trap fix, and reviews of the kernel,
+performance, library, UI-replay, Firefly and release work).
 
 ### Changed — check these before upgrading
 - **The web UI listens on loopback only.** `--ui PORT` binds 127.0.0.1;
@@ -31,8 +34,29 @@ the rest).
   `FW cc2420_transmit=… eb_process=… queue_add=…` line appears only with
   `CSIM_PC_TRACE=1`; the per-instruction hook it needed is gone from every
   other run (#61).
-- **Off-SoC chip drivers moved to `src/chips/`** (CC2420, CC1200,
-  MX25R6435F, ENC28J60): they are not architecture-specific (#33).
+- **Off-SoC chip drivers moved to `src/chips/` and `include/chips/`** (CC2420,
+  CC1200, MX25R6435F, ENC28J60): they are not architecture-specific.
+  Out-of-tree code that includes their headers needs `-I include/chips` (#33).
+- **Simulation output moves relative to 0.2.3** where a model was fixed, so a
+  regression baseline recorded with 0.2.3 differs in these places:
+  - nRF54L15 `node_id` is the configured mote id (it was a hash, 8251 / 16758
+    for motes 1 / 2), so link-layer addresses change (#30);
+  - nRF54L15 radio DISABLE→DISABLED latency is 3 µs instead of 8 µs
+    (`NRF54L_DISABLED_DEFER_NS` overrides; the working window is 2.5–4 µs),
+    and the DK firmware images were rebuilt for the hardware-ACK path (#34);
+  - native-mote CCA follows on-air time: a duty-cycled sixteen-node rpl-udp
+    network went from 33–89 % of round trips delivered to 99.9–100 % (#56);
+  - CC1200 (Zolertia Firefly sub-GHz) frame timing (#67);
+  - ARM output with the JIT on, wherever firmware calls the 64-bit divide
+    helpers (nRF52840 TSCH among them) — it now equals JIT-off output (#69).
+- **Refusals that used to pass silently:** an ELF whose segments place no
+  bytes fails at init instead of running a zero-filled image to exit 0 (#50);
+  a GDB client must answer within 5 s and an external-node peer must advance
+  its clock within 10000 exchanges, or it is dropped (#52); a web-UI client
+  that stops reading for 200 ms is dropped (#53).
+- **Firmware cache names include the source directory** (relative to the
+  Contiki-NG root), so existing local builds are rebuilt once; `--clean`
+  removes only untracked builds, never shipped firmware (#57).
 
 ### Added — interactive shell and command scripts (#43, #45, #47, #54)
 - **`--shell`** gives a live simulation a command line (line editing,
@@ -62,8 +86,8 @@ the rest).
 ### Added — the simulator as a library (#63)
 - `make lib` builds `build/libcsim.a` without `test/`; `make lib-link-check`
   (in CI) links it with a `main` of its own, so a kernel, chip or service
-  object that needs a symbol only the runner defines fails the build. Closing
-  that gap fixed three leaks.
+  object that needs a symbol only the runner defines fails the build. Three
+  such dependencies on runner-only symbols were removed to get there.
 
 ### Added — Renode co-simulation: csim as a clock slave (#36, #39, #41)
 - **Renode can drive csim's simulation clock.** New
@@ -113,10 +137,14 @@ the rest).
   Renode (and esp32sim).
 
 ### Added — nRF54L15 (#30, #31, #32, #34, #38, #42, #44, #46, #51, #58, #59)
-- **TrustZone-M under the simulation kernel.** A node can carry a Secure-world
-  ELF (`secure_firmware`) beside its Non-secure one; boot starts in the Secure
-  world, and the end-of-run report adds SG / BXNS / secure-exception counters.
-- **Attribution and peripheral permissions enforced as on silicon.** The SPU's
+- **TrustZone-M under the simulation kernel**, on a new board,
+  `nrf54l15-xiao` (Seeed Studio XIAO nRF54L15). A node can carry a
+  Secure-world ELF (`secure_firmware`) beside its Non-secure one; boot starts
+  in the Secure world, and the end-of-run report adds SG / BXNS /
+  secure-exception counters.
+- **Attribution and peripheral permissions enforced as on silicon.** The
+  per-SoC attribution hook is new: before it, every address answered
+  Non-secure, so nothing was refused. The SPU's
   per-peripheral permissions refuse Non-secure accesses with a precise
   BusFault taken by the Secure world, and SecureFault AUVIOL is precise too
   (the frame names the access, and a refused load or store changes nothing).
@@ -133,8 +161,8 @@ the rest).
   seeded so `node_id` equals the configured mote id (#30).
 
 ### Added — platforms, tests and tools
-- **FreeBSD** (tested on 15.1, amd64): build with `gmake`; the scripts under
-  `tools/` pick it themselves (#68).
+- **FreeBSD** (tested by hand on 15.1, amd64; not in CI): build with `gmake`;
+  the scripts under `tools/` pick it themselves (#68).
 - **Three CPU architectures and three radio models on one RPL DAG**
   (`configs/test-mixed-platform-rpl.yaml`): Tmote Sky, CC2538DK and
   nRF52840-DK, in CI (#35).
@@ -145,16 +173,19 @@ the rest).
   platforms' simulation output to be byte-identical, and attaches a
   build-provenance attestation to every tarball
   (`gh attestation verify FILE -R mikroverk/cooja-ng`). A manual run is a dry
-  run (#70).
+  run; a `vX.Y.Z-rcN` tag publishes a prerelease (#70).
 
 ### Performance
-- **Tier 0: no O(N) loops on the wakeup path** — 5.78x on 100 nodes,
-  byte-identical output (#64). The measurements and the tiers after it are in
+- **Tier 0: no O(N) loops on the wakeup path** — the 100-node Sky grid runs
+  5.78x faster on Apple Silicon and 3.36x on x86-64 Linux, byte-identical
+  output. Networks with a native mote still take a per-wakeup snapshot of
+  every node (#64). The measurements and the tiers after it are in
   [`docs/design/kernel-radio-review-and-performance-plan.md`](docs/design/kernel-radio-review-and-performance-plan.md) (#62).
 - The event queue reschedules a wakeup in place and sifts with a hole,
   instead of a remove plus an insert of three-copy swaps — the operation an
   active mote does once per simulated microsecond (#60).
-- MSP430 runs no longer pay for the PC-trace hook (#61, above).
+- MSP430 runs no longer call the PC-trace hook per instruction (#61, above;
+  not measurable on its own: 685 vs 689 ms on `chain-4node-sky`).
 
 ### Fixed
 - **Zolertia Firefly sub-GHz chain** (`configs/chain-4node-firefly-subghz.json`,
@@ -175,6 +206,10 @@ the rest).
 - `tools/run-cooja-tests.sh` never reuses another directory's firmware build,
   and `--clean` keeps shipped firmware (#57).
 - Builds with gcc 14 (`nanosleep` needed `<time.h>`) (#41).
+- clang fused `a + b*c` into one multiply-add on arm64, so macOS arm64
+  builds rounded differently from the other platforms, and the VFP's
+  VMLA/VMLS were fused where a Cortex-M4F rounds twice. Built with
+  `-ffp-contract=off` now; no measured output changed (#72).
 
 ### Hardening
 - Bounds and defined-behaviour fixes in shared infrastructure (#48); a
@@ -185,6 +220,12 @@ the rest).
 - The web UI: see *Changed* above (#53).
 
 ### Known limitations
+- Open findings of the kernel/radio review
+  ([`docs/design/kernel-radio-review-and-performance-plan.md`](docs/design/kernel-radio-review-and-performance-plan.md)):
+  JS app motes do not hear emulated senders (F2); the CC2538's auto-ACK goes
+  on air synchronously, 192 µs earlier than on hardware (F3); the CC2538
+  receives while its RF is off and its CCA is never busy, and nRF52840 CCA is
+  always idle (F6); pcap and the packet analyzer misread sub-GHz frames (F18).
 - Renode as an RPL *client* of a csim root does not yet complete RPL; Renode
   as the root does.
 - No FreeBSD binary is published: build from source there. Native Cooja
@@ -204,17 +245,20 @@ which list every PR.
   schema and one validator for both (unknown or duplicate keys, wrong types
   and YAML-1.1 booleans are errors), and `--save-config FILE` writes the live
   setup back as canonical YAML (#27).
-- **External motes for emulators that keep their own clock**: the ESP32-C6
-  (esp32sim) runs as an external node, and a peer's transmission goes on the
-  air at its timestamp (#24, #25). Plan for external data-driven nodes, with a
-  worked disturber example (#22, #26).
+- **External motes**: a `.py` firmware entry runs a separate process as a
+  node, speaking NDJSON with exact-time stepping and ns-stamped frames, with
+  example peers in `examples/ext/` (`jammer.py`, `sniffer.py`). Emulators that
+  keep their own clock run the same way — the ESP32-C6 (esp32sim,
+  `esp32c6.py`) — and a peer's transmission goes on the air at its timestamp
+  (#23 via #24, #25). The plan and a worked disturber example are in
+  `docs/design/external-nodes-plan.md` (#22, #26).
 
 ### Fixed
 - Serial bytes injected into a native mote woke it at its own stale clock
   instead of the kernel's, so the kernel accepted a past event and simulated
-  time ran backwards (629 rewinds in one ping test); the kernel now refuses
-  wakeups in the past. This was the Linux `17-tun-rpl-br` traceroute failure
-  (#29).
+  time ran backwards (629 rewinds in one ping test). The kernel now clamps a
+  wakeup in the past to the present, counts it and warns once per run. This
+  was the Linux `17-tun-rpl-br` traceroute failure (#29).
 
 ## [0.2.2] — 2026-09-03
 
@@ -237,15 +281,15 @@ Includes 0.2.1, which was versioned but not tagged.
 - Native motes boot at their scheduled start and receive frames the way
   Cooja's ContikiRadio does (#19).
 - Release tarballs carry `tools/test-border-router.sh`, without which six of
-  the eight `17-tun-rpl-br` tests failed at host start (#14), and fetch GNU
-  Lightning verified and mirrored (#13).
+  the eight `17-tun-rpl-br` tests failed at host start (#14). The release
+  build fetches GNU Lightning from mirrors with a verified checksum (#13).
 
 ## [0.2.0] — 2026-08-21
 
 The first release shipped as **prebuilt binaries** —
 `cooja-ng-v0.2.0-{linux-x86_64,macos-x64,macos-arm64}.tar.gz` plus
-`SHA256SUMS`, GNU Lightning statically linked — and the first to pass the
-complete Contiki-NG 5.2 Cooja simulation suite, **93/93**, on Linux/x86-64 and
+`SHA256SUMS`, GNU Lightning statically linked. It passes the complete
+Contiki-NG 5.2 Cooja simulation suite, **93/93**, on Linux/x86-64 and
 macOS/arm64 (#10, #11, #12).
 
 ### Added — ARM performance: interpreter and JIT (#9)
@@ -266,7 +310,8 @@ macOS/arm64 (#10, #11, #12).
 ### Added — ARMv8-M TrustZone-M on the nRF54L15 Cortex-M33 (#8)
 - **The M33 runs secure/non-secure partitioned firmware**, not just non-secure.
   New `src/arm/arm_trustzone.c` implements the security-attribution engine —
-  SAU regions plus SPU-as-IDAU, `arm_security_attr()`, the memory-mapped SAU
+  SAU regions plus an IDAU hook (attributing nothing yet: the nRF54L15's
+  security unit behind it came in 0.3.0), `arm_security_attr()`, the memory-mapped SAU
   registers at `0xE000EDD0` (Secure-only; RAZ/WI from Non-secure), and
   `arm_tz_blocks()` hot-path access enforcement feeding `SecureFault`/SFSR.
   Enabled per MCU by `has_trustzone` — nRF54L15 only, so every other platform
@@ -292,7 +337,8 @@ macOS/arm64 (#10, #11, #12).
   pass is app-independent. The split images live in the `contiki-ng-nrf54l15`
   checkout, not this tree, so `tz-boot` is a manual harness and not part of the
   default gate.
-- **71 new TrustZone tests** in `arm-correctness`, which goes 153 → **224**:
+- **71 new TrustZone tests** in `arm-correctness`, which goes 153 → **224**
+  (230 by the time 0.2.0 was released):
   SAU/IDAU attribution (14), SAU MMIO (9), access enforcement (9), TT (3),
   SG/BXNS (11), SecureFault (6), `NVIC_ITNS` (6), transition counters (3),
   BLXNS/FNC_RETURN (10).
