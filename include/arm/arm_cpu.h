@@ -224,6 +224,12 @@ typedef struct arm_cpu {
     bool      io_ns_alias;           /* config->periph_ns_alias: fold 0x4 onto 0x5 in IO dispatch */
     bool      io_txn_ns;             /* last IO access came through the Non-secure alias */
     bool      io_blocked;            /* last IO lookup was refused by io_access_check */
+    /* Byte width (1/2/4) of the IO access being dispatched, set just before
+     * the region's read/write callback runs. A sub-word store reaches the
+     * callback as (address, narrow value), so without it a byte store and a
+     * word store of the same value to an aligned address look alike; the
+     * CC13x2 ADI's 8-bit registers need to tell them apart. */
+    uint8_t   io_width;
     /* Non-secure fetch cache: [fetch_ok_base, fetch_ok_base + fetch_ok_len)
      * is the window around the last verified PC over which attribution
      * cannot change (its 4 KB page clamped to the SAU region boundaries),

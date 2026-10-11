@@ -217,13 +217,16 @@ uint32_t arm_read32(arm_cpu_t *cpu, uint32_t addr) {
     /* Bit-band alias for peripheral region */
     if (addr >= ARM_BITBAND_BASE && addr < ARM_BITBAND_BASE + 0x02000000) {
         uint32_t bb_off = addr - ARM_BITBAND_BASE;
-        uint32_t base_addr = ARM_IO_BASE + (bb_off >> 5) * 4;
+        /* Alias word = byte_offset * 32 + bit * 4 (ARMv7-M ARM B3.1.2), so
+         * bb_off >> 5 is the target *byte* address: its word holds the bit,
+         * and (bb_off >> 2) & 31 is the bit within that word. */
+        uint32_t base_addr = ARM_IO_BASE + ((bb_off >> 5) & ~3u);
         int bit = (bb_off >> 2) & 0x1F;
         uint32_t val = arm_read32(cpu, base_addr);
         return (val >> bit) & 1;
     }
     arm_io_region_t *r = io_lookup(cpu, &addr, false);
-    if (r) return r->read(r->user_data, addr);
+    if (r) { cpu->io_width = 4; return r->read(r->user_data, addr); }
     if (!cpu->io_blocked) trace_unmapped_mmio(addr, 0, 0);
     return 0;
 }
@@ -499,7 +502,7 @@ uint16_t arm_read16(arm_cpu_t *cpu, uint32_t addr) {
         return cpu->sram[off] | (cpu->sram[off+1]<<8);
     }
     arm_io_region_t *r = io_lookup(cpu, &addr, false);
-    if (r) return (uint16_t)r->read(r->user_data, addr);
+    if (r) { cpu->io_width = 2; return (uint16_t)r->read(r->user_data, addr); }
     return 0;
 }
 
@@ -510,7 +513,7 @@ uint8_t arm_read8(arm_cpu_t *cpu, uint32_t addr) {
     if (addr >= cpu->sram_base && addr < cpu->sram_end)
         return cpu->sram[addr - cpu->sram_base];
     arm_io_region_t *r = io_lookup(cpu, &addr, false);
-    if (r) return (uint8_t)r->read(r->user_data, addr);
+    if (r) { cpu->io_width = 1; return (uint8_t)r->read(r->user_data, addr); }
     return 0;
 }
 
@@ -549,7 +552,10 @@ void arm_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
     /* Bit-band alias for peripheral region */
     if (addr >= ARM_BITBAND_BASE && addr < ARM_BITBAND_BASE + 0x02000000) {
         uint32_t bb_off = addr - ARM_BITBAND_BASE;
-        uint32_t base_addr = ARM_IO_BASE + (bb_off >> 5) * 4;
+        /* Alias word = byte_offset * 32 + bit * 4 (ARMv7-M ARM B3.1.2), so
+         * bb_off >> 5 is the target *byte* address: its word holds the bit,
+         * and (bb_off >> 2) & 31 is the bit within that word. */
+        uint32_t base_addr = ARM_IO_BASE + ((bb_off >> 5) & ~3u);
         int bit = (bb_off >> 2) & 0x1F;
         uint32_t old = arm_read32(cpu, base_addr);
         if (val & 1)
@@ -559,7 +565,7 @@ void arm_write32(arm_cpu_t *cpu, uint32_t addr, uint32_t val) {
         return;
     }
     arm_io_region_t *r = io_lookup(cpu, &addr, true);
-    if (r) r->write(r->user_data, addr, val);
+    if (r) { cpu->io_width = 4; r->write(r->user_data, addr, val); }
     else if (!cpu->io_blocked) trace_unmapped_mmio(addr, 1, val);
 }
 
@@ -573,7 +579,7 @@ void arm_write16(arm_cpu_t *cpu, uint32_t addr, uint16_t val) {
     }
     if (addr >= cpu->flash_base && addr < cpu->flash_end) return;
     arm_io_region_t *r = io_lookup(cpu, &addr, true);
-    if (r) r->write(r->user_data, addr, val);
+    if (r) { cpu->io_width = 2; r->write(r->user_data, addr, val); }
     else if (!cpu->io_blocked) trace_unmapped_mmio(addr, 1, val);
 }
 
@@ -585,7 +591,7 @@ void arm_write8(arm_cpu_t *cpu, uint32_t addr, uint8_t val) {
     }
     if (addr >= cpu->flash_base && addr < cpu->flash_end) return;
     arm_io_region_t *r = io_lookup(cpu, &addr, true);
-    if (r) r->write(r->user_data, addr, val);
+    if (r) { cpu->io_width = 1; r->write(r->user_data, addr, val); }
     else if (!cpu->io_blocked) trace_unmapped_mmio(addr, 1, val);
 }
 
