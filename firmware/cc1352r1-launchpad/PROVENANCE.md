@@ -83,3 +83,27 @@
 - **Built**: 2026-10-11T21:52:59Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/rpl-udp --output firmware/cc1352r1-launchpad/udp-client-ieee.cc1352r1-launchpad --source-file udp-client --make-args "DEFINES=RF_CONF_MODE=RF_MODE_2_4_GHZ" --local`
 
+## tsch-node.cc1352r1-launchpad
+
+- **Source**: contiki-ng commit `735e87c3e5060e9c427b214e55c372967f595c04`
+- **Source path**: `examples/6tisch/simple-node` (file: `node.c`)
+- **TARGET**: `simplelink`
+- **BOARD**: `launchpad/cc1352r1`
+- **Make args**: `MAKE_MAC=MAKE_MAC_TSCH`
+- **Local patch**: `node.c` coordinator guard removed — `if(node_id == 1) NETSTACK_ROUTING.root_start();` compiled on all targets (upstream gates it to COOJA/Z1), so node 1 self-selects TSCH coordinator in the emulator. Same patch as `firmware/nrf52840-dk/tsch-node.nrf52840-dk`.
+- **Toolchain**: host
+- **Built**: 2026-10-11T22:02:12Z by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/6tisch/simple-node --output firmware/cc1352r1-launchpad/tsch-node.cc1352r1-launchpad --source-file node --make-args "MAKE_MAC=MAKE_MAC_TSCH" --local`
+
+## tsch-node-ieee.cc1352r1-launchpad
+
+- **Source**: contiki-ng commit `735e87c3e5060e9c427b214e55c372967f595c04`
+- **Source path**: `examples/6tisch/simple-node` (file: `node.c`)
+- **TARGET**: `simplelink`
+- **BOARD**: `launchpad/cc1352r1`
+- **Make args**: `MAKE_MAC=MAKE_MAC_TSCH DEFINES=RF_CONF_MODE=RF_MODE_2_4_GHZ`
+- **Local patch**: `node.c` coordinator guard removed — `if(node_id == 1) NETSTACK_ROUTING.root_start();` compiled on all targets (upstream gates it to COOJA/Z1), so node 1 self-selects TSCH coordinator in the emulator. Same patch as `firmware/nrf52840-dk/tsch-node.nrf52840-dk`.
+- **Toolchain**: host
+- **Built**: 2026-10-11T22:10:56Z by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/6tisch/simple-node --output firmware/cc1352r1-launchpad/tsch-node-ieee.cc1352r1-launchpad --source-file node --make-args "MAKE_MAC=MAKE_MAC_TSCH DEFINES=RF_CONF_MODE=RF_MODE_2_4_GHZ" --local`
+

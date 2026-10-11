@@ -218,6 +218,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
                                    &node->rf_ctx[1], &node->rf_ctx[0]);
         cc13x2_rfc_set_channel_busy_query(&cc13_soc->rfc,
                                           env->cc1200_channel_busy, node);
+        cc13_soc->rfc.node_id = node_id;
         if (*env->verbose)
             printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
                    node_id, eui[0], eui[1], eui[2], eui[3], eui[4], eui[5],

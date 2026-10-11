@@ -502,11 +502,14 @@ static uint32_t prcm_read(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off) {
 
 static void prcm_write_impl(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val);
 
+static void wdt_set_standby(cc13x2_soc_t *soc, bool standby);
+
 static void prcm_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
     bool was = rfc_powered(soc);
     prcm_write_impl(soc, p, off, val);
     bool on = rfc_powered(soc);
     if (on != was) cc13x2_rfc_domain_changed(&soc->rfc, on);
+    wdt_set_standby(soc, !(soc->pd0 & 4u));    /* PERIPH domain off = standby */
 }
 
 static void prcm_write_impl(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
@@ -650,50 +653,85 @@ static void rtc_update_irq(cc13x2_soc_t *soc) {
     if (hit) irq_raise(soc, CC13X2_IRQ_AON_RTC_COMB);
 }
 
-static void rtc_arm_channel(cc13x2_soc_t *soc, int ch);
+static void rtc_arm_channel(cc13x2_soc_t *soc, int ch, bool armed_now);
+
+/* CC13X2_RTC_TRACE=1: compare writes, arming decisions and channel events. */
+static bool rtc_trace(void) {
+    static int t = -1;
+    if (t < 0) t = getenv("CC13X2_RTC_TRACE") ? 1 : 0;
+    return t != 0;
+}
 
 static void rtc_ch_cb(void *user, cpu_event_t *ev) {
     cc13x2_soc_t *soc = user;
     int ch = (int)(ev - soc->rtc.ch_event);
     if (!(soc->rtc.chctl & rtc_ch_bit[ch])) return;
+    if (rtc_trace())
+        fprintf(stderr, "[rtc %d %10.6f] ch%d event (time 0x%08x cmp 0x%08x)\n", soc->rfc.node_id,
+                (double)live_ns(soc) / 1e9, ch, rtc_time1616(rtc_ticks(soc)),
+                soc->rtc.cmp[ch]);
     soc->rtc.evflags |= rtc_ch_bit[ch];
     if (ch == 2 && (soc->rtc.chctl & (1u << 18))) {      /* CH2_CONT_EN */
         soc->rtc.cmp[2] += soc->rtc.ch2cmpinc;
-        rtc_arm_channel(soc, 2);
+        rtc_arm_channel(soc, 2, false);
     }
     rtc_update_irq(soc);
 }
 
-/* A channel matches on the SCLK_LF edge at which the 16.16 time reaches
- * the compare value (the counter steps by 2 in that view, so an odd value
- * matches at the edge that crosses it), and the event is registered on the
- * following edge, as synchronous compare logic latches it.  That one-edge
- * lag is not stated in the TRM; it is what TI's TimerP arithmetic needs:
- * it programs compare = threshold >> 16 and, in the ISR, treats the wakeup
- * as spurious unless RTC64 / period64 has reached the service tick —
- * which an event on the matching edge itself, up to 0xFFFF below the
- * threshold, fails by one ClockP tick (observed: the UART drain timeout
- * dropped and the node slept forever). TimerP's COMPARE_MARGIN of two
- * RTC ticks fits the same pipeline.  A value written while the counter
- * already equals it matches at once; one behind the current time is not
- * reached until the 32-bit view wraps (~18 h).
- * TODO(hardware): confirm the one-edge lag on the LaunchPad. */
-static void rtc_arm_channel(cc13x2_soc_t *soc, int ch) {
+/* A channel event is generated when the 16.16 time "is reaching or
+ * exceeding" the compare value, and "an event will be scheduled to occur as
+ * soon as possible when writing to CH0CMP provided that the channel is
+ * enabled and the new value matches any time between next RTC value and
+ * 1 second in the past" (inc/hw_aon_rtc.h, CH0CMP / EVFLAGS.CH0).
+ *
+ * So: a future compare fires when the counter reaches it (the counter steps
+ * by 2 in the 16.16 view, so an odd value fires on the edge crossing it); a
+ * compare armed up to one second behind the counter fires at once; one
+ * further behind is treated as future and waits for the 32-bit view to wrap.
+ * "Armed" is a CHxCMP write or the channel being enabled: driverlib's
+ * rtimer path writes the compare and then enables the channel
+ * (rtimer-arch.c), and TI's TimerP race — a higher-priority ISR running
+ * between its read of the counter and its compare write — lands compares in
+ * the past exactly this way. That the enable counts too is inferred.
+ *
+ * Every event is registered one SCLK_LF edge after the match. Not stated in
+ * the TRM; it is what TimerP's arithmetic needs (compare = threshold >> 16,
+ * and its ISR treats a wakeup as spurious unless RTC64 / period64 has reached
+ * the service tick, which an event on the matching edge fails).
+ * TODO(hardware): confirm the lag on the LaunchPad. */
+static void rtc_arm_channel(cc13x2_soc_t *soc, int ch, bool armed_now) {
     arm_cpu_t *cpu = &soc->plat->cpu;
     cpu_event_t *ev = &soc->rtc.ch_event[ch];
     arm_cancel_event(cpu, ev);
     if (!soc->rtc.enabled || !(soc->rtc.chctl & rtc_ch_bit[ch])) return;
     uint64_t now = rtc_ticks(soc);
-    uint32_t diff = soc->rtc.cmp[ch] - rtc_time1616(now);
-    if (diff > 0x80000000u) return;
-    uint64_t target = now + (diff + 1u) / 2u + 1u;   /* match edge + 1 */
+    uint32_t t1616 = rtc_time1616(now);
+    uint32_t diff = soc->rtc.cmp[ch] - t1616;
+    uint64_t target;
+    const char *why = "";
+    if (diff != 0 && diff <= 0x80000000u) {
+        target = now + (diff + 1u) / 2u + 1u;             /* reach, + 1 edge */
+    } else if (armed_now && (uint32_t)(t1616 - soc->rtc.cmp[ch]) <= 0x10000u) {
+        target = now + 1u;                                 /* as soon as possible */
+        why = " past: as soon as possible";
+    } else {
+        if (rtc_trace())
+            fprintf(stderr, "[rtc %d %10.6f] ch%d cmp 0x%08x now 0x%08x: behind, not re-armed\n",
+                    soc->rfc.node_id, (double)live_ns(soc) / 1e9, ch,
+                    soc->rtc.cmp[ch], t1616);
+        return;
+    }
+    if (rtc_trace())
+        fprintf(stderr, "[rtc %d %10.6f] ch%d arm cmp 0x%08x now 0x%08x%s\n",
+                soc->rfc.node_id, (double)live_ns(soc) / 1e9, ch,
+                soc->rtc.cmp[ch], t1616, why);
     ev->callback = rtc_ch_cb;
     ev->user_data = soc;
     schedule_at(soc, ev, rtc_tick_ns(soc, target));
 }
 
 static void rtc_rearm_all(cc13x2_soc_t *soc) {
-    for (int i = 0; i < 3; i++) rtc_arm_channel(soc, i);
+    for (int i = 0; i < 3; i++) rtc_arm_channel(soc, i, false);
 }
 
 static uint32_t aon_rtc_read(cc13x2_soc_t *soc, uint32_t off) {
@@ -727,7 +765,8 @@ static void aon_rtc_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
     switch (a) {
     case RTC_CTL: {
         uint32_t v = merge_write(soc, soc->rtc.ctl, off, val);
-        if (v & RTC_CTL_RESET) {
+        bool reset = (v & RTC_CTL_RESET) != 0;
+        if (reset) {
             /* RESET: the counter returns to 0; the bit self-clears. */
             soc->rtc.zero_ns = live_ns(soc);
             v &= ~RTC_CTL_RESET;
@@ -739,22 +778,34 @@ static void aon_rtc_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
         } else if (!en) {
             soc->rtc.enabled = false;
         }
+        bool timebase = reset || ((soc->rtc.ctl ^ v) & RTC_CTL_EN);
         soc->rtc.ctl = v;
-        rtc_rearm_all(soc);
+        if (timebase) rtc_rearm_all(soc);   /* counter started, stopped or zeroed */
         rtc_update_irq(soc);
         return;
     }
     case RTC_EVFLAGS:
         soc->rtc.evflags &= ~merge_write(soc, 0, off, val);
         return;
-    case RTC_CHCTL:
+    case RTC_CHCTL: {
+        /* Only a channel whose enable changes is affected: re-evaluating an
+         * untouched one could cancel an event already due (the rtimer ISR
+         * disables channel 1 at the instant channel 0's counter reached its
+         * compare, and the re-evaluation dropped channel 0's pending event —
+         * TI's ClockP then never woke again and the watchdog reset the node). */
+        uint32_t was = soc->rtc.chctl;
         soc->rtc.chctl = merge_write(soc, soc->rtc.chctl, off, val);
-        rtc_rearm_all(soc);
+        for (int i = 0; i < 3; i++) {
+            bool on_before = (was & rtc_ch_bit[i]) != 0;
+            bool on_now = (soc->rtc.chctl & rtc_ch_bit[i]) != 0;
+            if (on_before != on_now) rtc_arm_channel(soc, i, on_now);
+        }
         return;
+    }
     case RTC_CH0CMP: case RTC_CH1CMP: case RTC_CH2CMP: {
         int ch = (int)(a - RTC_CH0CMP) / 4;
         soc->rtc.cmp[ch] = merge_write(soc, soc->rtc.cmp[ch], off, val);
-        rtc_arm_channel(soc, ch);
+        rtc_arm_channel(soc, ch, true);
         return;
     }
     case RTC_CH2CMPINC:
@@ -1012,7 +1063,7 @@ static void wdt_arm(cc13x2_soc_t *soc);
 static uint32_t wdt_value(cc13x2_soc_t *soc) {
     cc13x2_wdt_t *w = &soc->wdt;
     if (!(w->ctl & WDT_CTL_INTEN)) return w->load;
-    int64_t el = live_ns(soc) - w->anchor_ns;
+    int64_t el = (w->paused ? w->paused_ns : live_ns(soc)) - w->anchor_ns;
     if (el < 0) el = 0;
     uint64_t ticks = ((uint64_t)el * WDT_HZ) / 1000000000u;
     return ticks >= w->load ? 0 : w->load - (uint32_t)ticks;
@@ -1026,6 +1077,9 @@ static void wdt_cb(void *user, cpu_event_t *ev) {
     cc13x2_soc_t *soc = user;
     cc13x2_wdt_t *w = &soc->wdt;
     if (w->ris && (w->ctl & WDT_CTL_RESEN)) {
+        /* A watchdog reset is always worth knowing about in a simulation. */
+        fprintf(stderr, "[cc13x2] watchdog reset at %.6f s (pc 0x%08x)\n",
+                (double)live_ns(soc) / 1e9, soc->plat->cpu.reg[ARM_PC]);
         cc13x2_page_t *p = find_page(soc, "AON_PMCTL");
         if (p) REG(p, AON_PMCTL_RESETCTL) = (REG(p, AON_PMCTL_RESETCTL) & ~0xEu) | 0xEu; /* WARMRESET */
         arm_request_reset(&soc->plat->cpu);
@@ -1040,11 +1094,31 @@ static void wdt_cb(void *user, cpu_event_t *ev) {
 static void wdt_arm(cc13x2_soc_t *soc) {
     cc13x2_wdt_t *w = &soc->wdt;
     arm_cancel_event(&soc->plat->cpu, &w->event);
-    if (!(w->ctl & WDT_CTL_INTEN)) return;
+    if (!(w->ctl & WDT_CTL_INTEN) || w->paused) return;
     w->event.callback = wdt_cb;
     w->event.user_data = soc;
     int64_t period = (int64_t)(((uint64_t)w->load * 1000000000u + WDT_HZ - 1) / WDT_HZ);
     schedule_at(soc, &w->event, w->anchor_ns + period);
+}
+
+/* Standby pauses the watchdog (TI WatchdogCC26XX: "the Watchdog Timer is
+ * paused when the device enters standby"; Contiki's clock-arch.c relies on
+ * it, capping only *idle* sleeps at the watchdog timeout). Standby is the
+ * state SysCtrlStandby() enters by powering off the PERIPH (and SERIAL)
+ * domains before deep sleep, which SysCtrlIdle() does not; the Power driver
+ * powers them back on after the wakeup. */
+static void wdt_set_standby(cc13x2_soc_t *soc, bool standby) {
+    cc13x2_wdt_t *w = &soc->wdt;
+    if (standby == w->paused) return;
+    if (standby) {
+        w->paused = true;
+        w->paused_ns = live_ns(soc);
+        arm_cancel_event(&soc->plat->cpu, &w->event);
+    } else {
+        w->paused = false;
+        w->anchor_ns += live_ns(soc) - w->paused_ns;
+        wdt_arm(soc);
+    }
 }
 
 static uint32_t wdt_read(cc13x2_soc_t *soc, uint32_t off) {
@@ -1069,7 +1143,7 @@ static void wdt_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
     switch (a) {
     case WDT_LOAD:                             /* writing LOAD reloads */
         w->load = val;
-        w->anchor_ns = live_ns(soc);
+        w->anchor_ns = w->paused ? w->paused_ns : live_ns(soc);
         break;
     case WDT_CTL: {
         bool was = (w->ctl & WDT_CTL_INTEN) != 0;
@@ -1079,7 +1153,7 @@ static void wdt_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
     }
     case WDT_ICR:                              /* clears RIS and reloads */
         w->ris = false;
-        w->anchor_ns = live_ns(soc);
+        w->anchor_ns = w->paused ? w->paused_ns : live_ns(soc);
         break;
     default:
         return;

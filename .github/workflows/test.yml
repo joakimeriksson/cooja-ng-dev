@@ -334,6 +334,16 @@ jobs:
       - name: CC1352R1 (IEEE mode) on one DAG with Sky, CC2538 and nRF52840 (90 s sim)
         run: ./build/test_runner test configs/test-mixed-platform-cc1352r1.yaml
 
+      - name: CC1352R1 TSCH association + held sync, prop and IEEE mode
+        # Sub-GHz TSCH (40 ms slots, 4-channel hopping) is also the regression
+        # for the 802.15.4g frame tracker's per-frame channel reset, the AON
+        # RTC's documented as-soon-as-possible compare, and the watchdog
+        # pausing in standby.
+        run: |
+          ./build/test_runner test configs/test-tsch-cc1352r1-launchpad.yaml
+          ./build/test_runner test configs/test-tsch-ieee-cc1352r1-launchpad.yaml
+          tools/check-determinism.sh test configs/test-tsch-ieee-cc1352r1-launchpad.yaml
+
       - name: Determinism guard (sky RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 20000
 

@@ -13,6 +13,7 @@
 #   default OUT.c: src/arm/cc13x2_rom_image.c
 #   default DIR:   $CONTIKI_DIR, else ../contiki-ng (needs the
 #                  coresdk_cc13xx_cc26xx submodule checked out)
+#   ROM_ELF=path   also keep the linked ROM ELF (addr2line a ROM PC)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -55,6 +56,8 @@ done
 $CC -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostdlib -Wl,--gc-sections \
     -T "$HERE/rom.ld" -Wl,-Map,"$TMP/rom.map" "${OBJS[@]}" -lgcc -o "$TMP/rom.elf"
 $OBJCOPY -O binary "$TMP/rom.elf" "$TMP/rom.bin"
+# ROM_ELF=path keeps the linked ELF, to map a ROM PC to its driverlib function.
+[ -n "${ROM_ELF:-}" ] && cp "$TMP/rom.elf" "$ROM_ELF"
 
 SDK_VER="$(git -C "$SDK" describe --always --dirty 2>/dev/null || echo unknown)"
 python3 - "$TMP/rom.bin" "$OUT" "$SDK_VER" <<'EOF'

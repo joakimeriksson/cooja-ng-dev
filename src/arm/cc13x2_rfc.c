@@ -183,13 +183,15 @@ static void wr32(cc13x2_rfc_t *r, uint32_t a, uint32_t v) {
     wr16(r, a, (uint16_t)v); wr16(r, a + 2, (uint16_t)(v >> 16));
 }
 
-static int trace_on(void) {
+/* CC13X2_RFC_TRACE=1: commands, status, frames; =2 adds every RX byte. */
+static int trace_level(void) {
     static int t = -1;
-    if (t < 0) t = getenv("CC13X2_RFC_TRACE") ? 1 : 0;
+    if (t < 0) { const char *e = getenv("CC13X2_RFC_TRACE"); t = e ? atoi(e) : 0; }
     return t;
 }
+static int trace_on(void) { return trace_level() > 0; }
 #define RTRC(rfc, ...) do { if (trace_on()) { \
-    fprintf(stderr, "[rfc %10.6f] ", (double)now_ns(rfc) / 1e9); \
+    fprintf(stderr, "[rfc %d %10.6f] ", (rfc)->node_id, (double)now_ns(rfc) / 1e9); \
     fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
 static void update_irqs(cc13x2_rfc_t *rfc) {
@@ -866,6 +868,9 @@ static void prop_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
 }
 
 void cc13x2_rfc_receive_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
+    if (trace_level() > 1)
+        RTRC(rfc, "byte %02x rssi %d booted %d rx %d state %d", byte, rssi,
+             rfc->booted, rfc->rx.active, rfc->rx.state);
     if (!rfc->booted) return;
     if (rfc->prop) {
         if (rfc->rx.active) prop_rx_byte(rfc, byte, rssi);
@@ -1440,7 +1445,7 @@ static void rfc_clear(cc13x2_rfc_t *rfc) {
     cc13x2_rfc_busy_fn bcb = rfc->busy_cb;
     void *bu = rfc->busy_user;
     struct cc13x2_soc *soc = rfc->soc;
-    int ch = rfc->channel, idx = rfc->radio_idx;
+    int ch = rfc->channel, idx = rfc->radio_idx, nid = rfc->node_id;
     uint64_t st[5] = { rfc->stat_tx, rfc->stat_rx_ok, rfc->stat_rx_crc_err,
                        rfc->stat_rx_buf_full, rfc->stat_cmds };
     if (soc) {
@@ -1452,7 +1457,7 @@ static void rfc_clear(cc13x2_rfc_t *rfc) {
     rfc->soc = soc;
     rfc->tx_cb = cb; rfc->tx_user[0] = u0; rfc->tx_user[1] = u1;
     rfc->busy_cb = bcb; rfc->busy_user = bu;
-    rfc->channel = ch; rfc->radio_idx = idx;
+    rfc->channel = ch; rfc->radio_idx = idx; rfc->node_id = nid;
     rfc->stat_tx = st[0]; rfc->stat_rx_ok = st[1]; rfc->stat_rx_crc_err = st[2];
     rfc->stat_rx_buf_full = st[3]; rfc->stat_cmds = st[4];
 }

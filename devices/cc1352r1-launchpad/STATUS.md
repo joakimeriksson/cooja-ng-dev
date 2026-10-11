@@ -22,6 +22,8 @@ modes: the sub-GHz proprietary mode Contiki uses by default on this board
 | L5 radio, IEEE | `configs/test-nullnet-ieee-cc1352r1-launchpad.yaml` |
 | L6 full stack, IEEE | `configs/test-rpl-udp-ieee-cc1352r1-launchpad.yaml` — ~900x real time |
 | Interop, IEEE | `configs/test-mixed-platform-cc1352r1.yaml` — joins a Sky-rooted DAG with a CC2538 and an nRF52840 |
+| TSCH, prop | `configs/test-tsch-cc1352r1-launchpad.yaml` — association + ≥3 drift reports (40 ms slots) |
+| TSCH, IEEE | `configs/test-tsch-ieee-cc1352r1-launchpad.yaml` — association + ≥3 drift reports |
 
 How the radio is modelled: `src/arm/cc13x2_rfc.c` is a command-level model
 of the RF core (the CPE Cortex-M0 and its modem behind the doorbell), not an
@@ -45,14 +47,25 @@ watches the background RX for its ACK and that RX also stores the ACK —
 Contiki's CSMA (no CSMA_USE_RADIO_ACK) reads it from the queue; only
 CMD_IEEE_TX suspends the background RX.
 
+TSCH runs in both modes and holds sync (drift settles at 0-5 ppm). What it
+needed: the 802.15.4g frame tracker clearing its per-frame channel snapshot
+when a new preamble starts (a hopping sender's preamble and sync word were
+filtered against the previous frame's channel); the AON RTC compare firing
+"as soon as possible" when armed up to 1 s in the past, as hw_aon_rtc.h
+documents, and CHCTL writes leaving channels whose enable does not change
+alone (one cancelled TI ClockP's due event, the node slept until the
+watchdog reset it); and the watchdog pausing in standby. Per-slot timing
+errors are ±8-12 rtimer ticks (~±150 µs), inside the guard time but larger
+than exact oscillators explain — the inferred RF core latencies and RTC
+lag are the suspects.
+
 ## Next
 
 1. **Hardware comparison** (below): FCFG1 dump, RTC compare lag, RF core
-   latencies, boot log timing.
+   latencies, boot log timing, and TSCH slot timing (`edr`) against a pair
+   of boards.
 2. **Sub-GHz capture.** pcap and the packet analyzer decode 2.4 GHz frames
    only (CC1200 frames are not captured either).
-3. **TSCH.** Prop-mode TSCH (`cc13xx-50kbps-tsch`) and IEEE-mode TSCH use
-   RAT timestamps and poll MDMSOFT; the timestamp positions are inferred.
 
 ## Hardware checks (LaunchPad available)
 
@@ -65,7 +78,8 @@ openocd 0.12 talks to the on-board XDS110):
   (the last word is PRCM.RFCMODEHWOPT, also guessed).
 - **RTC compare lag** — whether a channel event lands on the matching
   SCLK_LF edge or the one after (csim models the latter, which TI's TimerP
-  arithmetic requires).
+  arithmetic requires), and whether enabling a channel with a just-passed
+  compare fires it (csim: yes, like a CHxCMP write).
 - **Boot log timing** — compare hello-world's console against the board.
 
 ## Deliberate approximations
@@ -87,6 +101,8 @@ openocd 0.12 talks to the on-board XDS110):
   CC26xx correction implies); Contiki's own +800 µs CC13xx correction is
   left as it is. No source-address matching (autoPend) and no slotted ACKs.
 - The watchdog interrupt is always the maskable IRQ (CTL.INTTYPE's NMI
-  routing is not modelled); it does not pause in standby.
+  routing is not modelled). It pauses while the PERIPH domain is off, which
+  is how SysCtrlStandby() differs from SysCtrlIdle(). A watchdog reset is
+  reported on stderr (`[cc13x2] watchdog reset at ...`).
 - SSI, GPT, uDMA, TRNG, crypto and the AUX ADC are plain register stores; the
   AUX TDC measures exact oscillators, so the RC calibration trims nothing.

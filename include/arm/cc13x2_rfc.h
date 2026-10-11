@@ -109,6 +109,8 @@ typedef struct cc13x2_rfc {
     cc13x2_rfc_busy_fn busy_cb;
     void              *busy_user;
 
+    int         node_id;           /* for CC13X2_RFC_TRACE lines */
+
     /* Counters for the end-of-run report and tests. */
     uint64_t    stat_tx, stat_rx_ok, stat_rx_crc_err, stat_rx_buf_full, stat_cmds;
 } cc13x2_rfc_t;

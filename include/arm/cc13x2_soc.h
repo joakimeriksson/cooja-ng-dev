@@ -112,6 +112,8 @@ typedef struct cc13x2_wdt {
     bool        ris;
     bool        locked;
     int64_t     anchor_ns;     /* live ns at which VALUE read LOAD */
+    bool        paused;        /* standby: the MCU clock the WDT counts is off */
+    int64_t     paused_ns;     /* live ns the pause began */
     cpu_event_t event;         /* next expiry */
 } cc13x2_wdt_t;
 
