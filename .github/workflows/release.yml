@@ -44,9 +44,11 @@
 #    a generic-arch build that silently cannot boot ARM firmware (the
 #    -march=native miscompile on Apple Silicon) passes every instruction-level
 #    test.  Three networks — MSP430 + Cortex-M3 + M4F on one DAG, TrustZone-M
-#    RPL-UDP, nRF52840 TSCH — each with the JIT on and off, which must agree
+#    RPL-UDP, nRF52840 TSCH — each with the JITs on and off, which must agree
 #    byte for byte (the 64-bit divide trap divergence, PR #69, only showed on
 #    TSCH).  The three platforms' outputs are compared with each other too.
+#
+#  - Only a pushed tag publishes: a manual run is a dry run, even from a tag.
 #
 #  - The release is created as a draft, checked to carry every asset, and only
 #    then published, so a failed upload never leaves a public release with
@@ -93,7 +95,10 @@ jobs:
           version=$(sed -n 's/^#define CSIM_VERSION "\(.*\)"$/\1/p' include/sim/csim_version.h)
           [ -n "$version" ] || { echo "::error::no CSIM_VERSION in include/sim/csim_version.h"; exit 1; }
           prerelease=false
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
+          # Only a pushed tag publishes. A manual run is a dry run even from a
+          # tag ref (where GITHUB_REF_TYPE is "tag" too), so it can retry the
+          # builds of a failed release without publishing anything.
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = tag ]; then
             # vX.Y.Z is the release; vX.Y.Z-rcN is a release candidate of it,
             # published as a prerelease (never "Latest") so the whole tag
             # path can be rehearsed. Both need CSIM_VERSION = X.Y.Z.
@@ -106,6 +111,10 @@ jobs:
             section=$version publish=true pkg=$GITHUB_REF_NAME
           else
             section=Unreleased publish=false pkg="v${version}-dryrun-${GITHUB_SHA::8}"
+            # From a tag ref, preview the notes that tag would publish.
+            if [ "$GITHUB_REF_TYPE" = tag ] && grep -q "^## \[$version\]" CHANGELOG.md; then
+              section=$version
+            fi
           fi
           # The section runs from its "## [x.y.z]" heading to the next "## [".
           awk -v h="## [$section]" 'index($0, h) == 1 { f = 1; next } f && /^## \[/ { exit } f' \
@@ -127,7 +136,7 @@ jobs:
             if [ "$prerelease" = true ]; then echo "## Release candidate $GITHUB_REF_NAME (a prerelease)"
             elif [ "$publish" = true ]; then echo "## Releasing $GITHUB_REF_NAME"
             else echo "## Dry run: $pkg (nothing is published)"; echo
-                 echo "A tag would publish CHANGELOG.md's \`## [$version]\` section; the Unreleased section below is what it holds now."
+                 echo "A pushed tag would publish CHANGELOG.md's \`## [$version]\` section; below is \`[$section]\` as it stands."
             fi
             echo; echo "### Release notes (from CHANGELOG.md \`[$section]\`)"; echo
             cat release-notes.md
@@ -146,17 +155,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Tagging right after a merge is fine: wait for the run to finish.
-          for _ in $(seq 1 120); do
+          # Tagging right after a merge is fine: this waits up to an hour for
+          # the commit's run to finish (and up to 5 minutes for it to appear).
+          runs=
+          for i in $(seq 1 120); do
             runs=$(gh run list -R "$GITHUB_REPOSITORY" --workflow test.yml --commit "$GITHUB_SHA" \
-                     --json status,conclusion --jq '.[] | .status + "/" + .conclusion')
-            if echo "$runs" | grep -qx 'completed/success'; then
+                     --json databaseId,status,conclusion --jq '.[] | "\(.status)/\(.conclusion) \(.databaseId)"')
+            if echo "$runs" | grep -q '^completed/success '; then
               echo "tests passed on $GITHUB_SHA"; exit 0
             fi
-            if ! echo "$runs" | grep -qv '^completed/'; then break; fi   # none still running
+            if [ -z "$runs" ]; then
+              [ "$i" -ge 10 ] && break             # no run at all after 5 minutes
+            elif ! echo "$runs" | grep -qv '^completed/'; then
+              break                                # all finished, none succeeded
+            fi
             sleep 30
           done
-          echo "::error::no successful 'tests' run for $GITHUB_SHA (runs: ${runs:-none}). Tag a commit whose tests passed, or re-run them and then this workflow."
+          echo "runs of test.yml on $GITHUB_SHA: ${runs:-none}"
+          # main cancels a commit's tests when a newer commit lands, so a good
+          # commit can be left with only a cancelled run.
+          cancelled=$(echo "$runs" | awk '$1 == "completed/cancelled" { print $2; exit }')
+          if [ -n "$cancelled" ]; then
+            echo "::error::the tests run on $GITHUB_SHA was cancelled (a newer commit landed on main). Re-run it: gh run rerun $cancelled -R $GITHUB_REPOSITORY, and when it passes, re-run this workflow's failed jobs."
+          else
+            echo "::error::no successful tests run on $GITHUB_SHA. Tag a commit whose tests passed."
+          fi
           exit 1
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
@@ -285,8 +308,11 @@ jobs:
 
       # The tarball ships no firmware, so run the unpacked binary from the
       # checkout, where configs/ and firmware/ are.
-      - name: Real firmware on the unpacked binary (JIT on and off agree)
+      - name: Real firmware on the unpacked binary (JITs on and off agree)
         run: |
+          # The second pass turns off both JITs: the ARM one, and the MSP430
+          # one (a threshold no block reaches) for the Sky node in the mixed
+          # network. Each run takes seconds; 300 s of wall time is a hang.
           bin="/tmp/pkgtest/$PKG/build/test_runner"
           filter='Wall-clock|Speed ratio|Throughput|MIPS'
           mkdir -p simout
@@ -295,22 +321,27 @@ jobs:
                      configs/test-tsch-nrf52840-dk.json; do
             name=$(basename "${cfg%.*}")
             for jit in 1 0; do
-              if ! CSIM_ARM_JIT=$jit "$bin" test "$cfg" -v --wall-timeout 900 > "simout/$name.jit$jit.raw" 2>&1; then
-                echo "::error::$cfg failed with the release binary (CSIM_ARM_JIT=$jit)"
+              if [ $jit = 1 ]; then off=(); else off=(CSIM_ARM_JIT=0 MSPSIM_JIT_THRESHOLD=2147483647); fi
+              if ! env "${off[@]}" "$bin" test "$cfg" -v --wall-timeout 300 > "simout/$name.jit$jit.raw" 2>&1; then
+                echo "::error::$cfg failed with the release binary (JITs $([ $jit = 1 ] && echo on || echo off))"
                 tail -40 "simout/$name.jit$jit.raw"
                 exit 1
               fi
               grep -vE "$filter" "simout/$name.jit$jit.raw" > "simout/$name.jit$jit.out"
             done
-            grep -q "TEST PASSED" "simout/$name.jit1.out"
+            if ! grep -q "TEST PASSED" "simout/$name.jit1.out"; then
+              echo "::error::$cfg: no TEST PASSED from the release binary"
+              tail -40 "simout/$name.jit1.out"
+              exit 1
+            fi
             if ! cmp -s "simout/$name.jit1.out" "simout/$name.jit0.out"; then
-              echo "::error::$cfg: the JIT changes the simulation in the release binary"
+              echo "::error::$cfg: the JITs change the simulation in the release binary"
               diff "simout/$name.jit0.out" "simout/$name.jit1.out" | head -20
               exit 1
             fi
-            echo "$cfg: passed, JIT on = JIT off ($(wc -l < "simout/$name.jit1.out") lines)"
+            echo "$cfg: passed, JITs on = JITs off ($(wc -l < "simout/$name.jit1.out") lines)"
           done
-          rm -f simout/*.raw simout/*.jit0.out
+          rm -f simout/*.raw     # keep both passes: compare checks the interpreter path too
 
       - name: Summary
         run: |
