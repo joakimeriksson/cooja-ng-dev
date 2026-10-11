@@ -313,6 +313,18 @@ jobs:
       - name: Determinism guard (CC1352R1 boot run twice → byte-identical)
         run: tools/check-determinism.sh test configs/test-boot-cc1352r1-launchpad.yaml
 
+      - name: CC1352R1 LaunchPad nullnet broadcast, RF core prop mode (30 s sim)
+        # The command-level RF core model: power-up/BOOT_DONE, the doorbell,
+        # radio-operation chaining, CMD_PROP_TX_ADV/RX_ADV with TI's RX
+        # data-entry queue, and the TI prop-mode 802.15.4g framing on the bus.
+        run: ./build/test_runner test configs/test-nullnet-cc1352r1-launchpad.yaml
+
+      - name: CC1352R1 LaunchPad RPL-UDP, prop mode (60 s sim)
+        run: ./build/test_runner test configs/test-rpl-udp-cc1352r1-launchpad.yaml
+
+      - name: Determinism guard (CC1352R1 RPL-UDP run twice → byte-identical)
+        run: tools/check-determinism.sh test configs/test-rpl-udp-cc1352r1-launchpad.yaml
+
       - name: Determinism guard (sky RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 20000
 

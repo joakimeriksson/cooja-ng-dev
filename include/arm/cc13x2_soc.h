@@ -19,6 +19,7 @@
 #define CC13X2_SOC_H
 
 #include "arm_platform.h"
+#include "cc13x2_rfc.h"
 
 /* --- Memory map (TRM SWCU185, "Memory Map"; driverlib inc/hw_memmap.h) --- */
 #define CC13X2_ROM_BASE         0x10000000u
@@ -114,6 +115,16 @@ typedef struct cc13x2_wdt {
     cpu_event_t event;         /* next expiry */
 } cc13x2_wdt_t;
 
+/* AUX TDC (time-to-digital converter): TI's Power driver measures the RC
+ * oscillators against XOSC_HF with it. */
+typedef struct cc13x2_tdc {
+    uint32_t    result;
+    bool        done;
+    bool        running;
+    uint32_t    trigcntload;
+    cpu_event_t event;
+} cc13x2_tdc_t;
+
 /* Oscillator state behind DDI0 OSC: which source drives SCLK_HF / LF. */
 typedef struct cc13x2_osc {
     int         hf_src;        /* 0 = RCOSC_HF, 1 = XOSC_HF */
@@ -144,6 +155,10 @@ typedef struct cc13x2_soc {
     cc13x2_gpio_t   gpio;
     cc13x2_osc_t    osc;
     cc13x2_wdt_t    wdt;
+    cc13x2_tdc_t    tdc;
+    uint32_t        aux_evflags;   /* AUX_EVCTL:EVTOMCUFLAGS */
+    uint32_t        aux_combmask;  /* AUX_EVCTL:COMBEVTOMCUMASK */
+    cc13x2_rfc_t    rfc;
 
     /* PRCM power-domain and clock-load state. */
     uint32_t        pd0;       /* PDCTL0 bits: RFC|SERIAL|PERIPH */
@@ -159,6 +174,14 @@ static inline cc13x2_soc_t *arm_platform_cc13x2(arm_platform_t *plat) {
     return (plat && plat->config && plat->config->soc_ops == &cc13x2_soc_ops)
            ? (cc13x2_soc_t *)plat->soc : NULL;
 }
+
+/* Services the RF core model (cc13x2_rfc.c) takes from the SoC. */
+int64_t cc13x2_live_ns(cc13x2_soc_t *soc);
+int64_t cc13x2_rtc_ns_at(cc13x2_soc_t *soc, int64_t live_ns);   /* ns on the AON RTC */
+void    cc13x2_schedule_at(cc13x2_soc_t *soc, cpu_event_t *ev, int64_t fire_ns);
+void    cc13x2_cancel(cc13x2_soc_t *soc, cpu_event_t *ev);
+void    cc13x2_irq(cc13x2_soc_t *soc, int irq);
+bool    cc13x2_rfc_domain_on(cc13x2_soc_t *soc);
 
 /* Console input into UART0's RX FIFO. */
 void cc13x2_uart_feed_rx(cc13x2_soc_t *soc, const uint8_t *buf, int len);

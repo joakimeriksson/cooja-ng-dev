@@ -207,6 +207,17 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
                            (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF),
                            (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF) };
         cc13x2_soc_set_ieee_addr(cc13_soc, eui);
+        /* One RF core, two medium slots by band: proprietary (sub-GHz)
+         * frames leave on slot 1, IEEE (2.4 GHz) on slot 0 — the
+         * convention sim_radio_bus_push_channel registers spectra by. */
+        node->rf_ctx[0].node_idx  = idx;
+        node->rf_ctx[0].radio_idx = 0;
+        node->rf_ctx[1].node_idx  = idx;
+        node->rf_ctx[1].radio_idx = 1;
+        cc13x2_rfc_set_tx_listener(&cc13_soc->rfc, env->chip_tx_byte,
+                                   &node->rf_ctx[1], &node->rf_ctx[0]);
+        cc13x2_rfc_set_channel_busy_query(&cc13_soc->rfc,
+                                          env->cc1200_channel_busy, node);
         if (*env->verbose)
             printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
                    node_id, eui[0], eui[1], eui[2], eui[3], eui[4], eui[5],
@@ -330,6 +341,11 @@ static int arm_radio_rxfifo_available(void *m) {
          * not in RX state. */
         return 128;
     }
+    if (arm_platform_cc13x2(&node->plat.arm)) {
+        /* The RF core writes frames into RAM data entries; a full queue
+         * is its own RX_BUF_FULL, not bus backpressure. */
+        return 255;
+    }
     return 0;
 }
 static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
@@ -348,6 +364,8 @@ static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
     }
     if (nrf_soc)  nrf_radio_receive_byte(nrf_soc, byte);
     if (nrfl_soc) nrf54l_radio_receive_byte(nrfl_soc, byte);
+    cc13x2_soc_t *cc13 = arm_platform_cc13x2(&node->plat.arm);
+    if (cc13) cc13x2_rfc_receive_byte(&cc13->rfc, byte, rssi);
 }
 static bool arm_radio_rx_busy(void *m) { (void)m; return false; }
 static const mote_radio_ops_t arm_radio_ops = {
@@ -380,6 +398,18 @@ static void armnrf_radio_rx_stall(void *m) {
     nrf52840_soc_t *nrf_soc = arm_platform_nrf52840(&node->plat.arm);
     if (nrf_soc) nrf_radio_rx_stall(nrf_soc);
 }
+/* cc13x2 variant: the RF core abandons a frame whose stream died. */
+static void armcc13_radio_rx_stall(void *m) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    cc13x2_soc_t *soc = arm_platform_cc13x2(&node->plat.arm);
+    if (soc) cc13x2_rfc_rx_stall(&soc->rfc);
+}
+static const mote_radio_ops_t armcc13_radio_ops = {
+    arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
+    armcc13_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
+    NULL /* on_air */, NULL /* receive_byte_at */
+};
+
 static const mote_radio_ops_t armnrf_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armnrf_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
@@ -409,8 +439,10 @@ void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
      * cc2538/nrf54l15. */
     sim_radio_delivery_mode_t mode = SIM_RADIO_DELIVERY_PER_BYTE;
     (void)0;
+    bool cc13 = arm_platform_cc13x2(&node->plat.arm) != NULL;
     const mote_radio_ops_t *ops = nrf54l ? &arm54l_radio_ops
                                 : nrf52  ? &armnrf_radio_ops
+                                : cc13   ? &armcc13_radio_ops
                                          : &arm_radio_ops;
     sim_radio_bus_register(bus, slot, ops, node, mode, /*caps=*/0);
 }

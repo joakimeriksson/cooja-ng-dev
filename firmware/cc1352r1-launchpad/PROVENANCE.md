@@ -20,3 +20,33 @@
 - **Built**: 2026-10-11T21:09:35Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/dev/leds --output firmware/cc1352r1-launchpad/leds-nullradio.cc1352r1-launchpad --make-args "DEFINES=NETSTACK_CONF_RADIO=nullradio_driver" --local`
 
+## nullnet-broadcast.cc1352r1-launchpad
+
+- **Source**: contiki-ng commit `735e87c3e5060e9c427b214e55c372967f595c04`
+- **Source path**: `examples/nullnet` (file: `nullnet-broadcast.c`)
+- **TARGET**: `simplelink`
+- **BOARD**: `launchpad/cc1352r1`
+- **Toolchain**: host
+- **Built**: 2026-10-11T21:44:33Z by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/nullnet --output firmware/cc1352r1-launchpad/nullnet-broadcast.cc1352r1-launchpad --source-file nullnet-broadcast --local`
+
+## udp-server.cc1352r1-launchpad
+
+- **Source**: contiki-ng commit `735e87c3e5060e9c427b214e55c372967f595c04`
+- **Source path**: `examples/rpl-udp` (file: `udp-server.c`)
+- **TARGET**: `simplelink`
+- **BOARD**: `launchpad/cc1352r1`
+- **Toolchain**: host
+- **Built**: 2026-10-11T21:46:05Z by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/rpl-udp --output firmware/cc1352r1-launchpad/udp-server.cc1352r1-launchpad --source-file udp-server --local`
+
+## udp-client.cc1352r1-launchpad
+
+- **Source**: contiki-ng commit `735e87c3e5060e9c427b214e55c372967f595c04`
+- **Source path**: `examples/rpl-udp` (file: `udp-client.c`)
+- **TARGET**: `simplelink`
+- **BOARD**: `launchpad/cc1352r1`
+- **Toolchain**: host
+- **Built**: 2026-10-11T21:46:06Z by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/rpl-udp --output firmware/cc1352r1-launchpad/udp-client.cc1352r1-launchpad --source-file udp-client --local`
+

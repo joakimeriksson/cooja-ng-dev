@@ -103,8 +103,10 @@ The CC13x2 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
   RF core (L0–L4).
 - `firmware/cc1352r1-launchpad/leds-nullradio.cc1352r1-launchpad` —
   `examples/dev/leds`, the LED sequence (L3).
-- Radio firmware (prop-mode nullnet-broadcast, RPL-UDP): with the RF core
-  model, see STATUS.md.
+- `firmware/cc1352r1-launchpad/nullnet-broadcast.cc1352r1-launchpad` —
+  `examples/nullnet`, prop mode (L5).
+- `firmware/cc1352r1-launchpad/udp-server.cc1352r1-launchpad`,
+  `udp-client.cc1352r1-launchpad` — `examples/rpl-udp`, prop mode (L6).
 
 ## Definition of done
 
@@ -112,8 +114,8 @@ The CC13x2 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
 - [x] `./build/test_runner test configs/test-boot-cc1352r1-launchpad.yaml` (L0–L2, L4)
 - [x] L3: `CSIM_GPIO_TRACE=1 ./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/leds-nullradio.cc1352r1-launchpad -t 10000`
       shows the `leds-example.c` sequence on DIO6/DIO7
-- [ ] L5: 2-node prop-mode nullnet-broadcast, ≥1 RX per node
-- [ ] L6: 2-node RPL-UDP over prop mode
+- [x] L5: `./build/test_runner test configs/test-nullnet-cc1352r1-launchpad.yaml`
+- [x] L6: `./build/test_runner test configs/test-rpl-udp-cc1352r1-launchpad.yaml`
 - [ ] IEEE (2.4 GHz) mode, interoperating with the other 2.4 GHz boards
-- [x] `.github/workflows/test.yml` runs the boot test and its determinism guard
+- [x] `.github/workflows/test.yml` runs the boot, nullnet and RPL-UDP tests and two determinism guards
 - [ ] FCFG1 and the RTC compare lag checked against the LaunchPad

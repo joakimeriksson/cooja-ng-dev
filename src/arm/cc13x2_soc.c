@@ -96,6 +96,11 @@ enum {
     P_GPRAM,
     P_RFC_RAM,
     P_WDT,
+    P_RFC_PWR,
+    P_RFC_DBELL,
+    P_RFC_RAT,
+    P_AUX_TDC,
+    P_AUX_EVCTL,
 };
 
 typedef struct {
@@ -129,9 +134,9 @@ static const page_desc_t page_descs[] = {
     { 0x40030000, 0x4000, "FLASH",      P_FLASH,     false },
     { 0x40034000, 0x1000, "VIMS",       P_VIMS,      false },
     { 0x40035000, 0x1000, "SRAM_MMR",   P_STORE,     false },
-    { 0x40040000, 0x1000, "RFC_PWR",    P_STORE,     true  },
-    { 0x40041000, 0x1000, "RFC_DBELL",  P_STORE,     true  },
-    { 0x40043000, 0x1000, "RFC_RAT",    P_STORE,     true  },
+    { 0x40040000, 0x1000, "RFC_PWR",    P_RFC_PWR,   true  },
+    { 0x40041000, 0x1000, "RFC_DBELL",  P_RFC_DBELL, true  },
+    { 0x40043000, 0x1000, "RFC_RAT",    P_RFC_RAT,   true  },
     { 0x40044000, 0x1000, "RFC_FSCA",   P_STORE,     false },
     { 0x40080000, 0x1000, "WDT",        P_WDT,       false },
     { 0x40081000, 0x1000, "IOC",        P_STORE,     false },
@@ -147,8 +152,8 @@ static const page_desc_t page_descs[] = {
     { 0x40095000, 0x1000, "AON_BATMON", P_STORE,     false },
     { 0x400C1000, 0x1000, "AUX_SPIM",   P_STORE,     false },
     { 0x400C3000, 0x1000, "AUX_TIMER2", P_STORE,     false },
-    { 0x400C4000, 0x1000, "AUX_TDC",    P_STORE,     false },
-    { 0x400C5000, 0x1000, "AUX_EVCTL",  P_STORE,     false },
+    { 0x400C4000, 0x1000, "AUX_TDC",    P_AUX_TDC,   false },
+    { 0x400C5000, 0x1000, "AUX_EVCTL",  P_AUX_EVCTL, false },
     { 0x400C6000, 0x1000, "AUX_SYSIF",  P_AUX_SYSIF, false },
     { 0x400C7000, 0x1000, "AUX_TIMER01",P_STORE,     false },
     { 0x400C8000, 0x1000, "AUX_SMPH",   P_AUX_SMPH,  false },
@@ -244,11 +249,22 @@ void cc13x2_soc_set_ieee_addr(cc13x2_soc_t *soc, const uint8_t addr[8]) {
  * TI's Power driver allows for it by polling. 300 us is a mid value. */
 #define XOSC_HF_STARTUP_NS     300000
 
+/* PRCM oscillator interrupt (OSCIMSC 0x290 / OSCRIS 0x294 / OSCICR 0x298,
+ * inc/hw_prcm.h): HFSRCPEND [7] latches when an SCLK_HF switch becomes
+ * possible, LFSRCDONE [6] when SCLK_LF reaches its selected source. TI's
+ * Power driver commits the HF switch from the INT_OSC_COMB handler
+ * (PowerCC26X2.c oscillatorISR -> OSCHfSourceSwitch -> HAPI). */
+#define OSCRIS_HFSRCPEND  0x80u
+#define OSCRIS_LFSRCDONE  0x40u
+static void osc_irq_latch(cc13x2_soc_t *soc, uint32_t bits);
+static bool osc_switch_pending(cc13x2_soc_t *soc);
+
 static void osc_xosc_ready_cb(void *user, cpu_event_t *ev) {
     (void)ev;
     cc13x2_soc_t *soc = user;
     soc->osc.xosc_hf_starting = false;
     soc->osc.xosc_hf_ready = true;
+    if (osc_switch_pending(soc)) osc_irq_latch(soc, OSCRIS_HFSRCPEND);
 }
 
 /* A write to CTL0 that selects XOSC_HF as the SCLK_HF source starts the
@@ -274,7 +290,13 @@ static void osc_ctl0_changed(cc13x2_soc_t *soc) {
      * start-up is hundreds of ms and qualified by hardware; nothing in the
      * firmware waits on it except through STAT0.SCLK_LF_SRC, and csim's
      * RTC runs at exactly 32768 Hz whatever the source. */
-    soc->osc.lf_src = (int)((ctl0 >> CTL0_SCLK_LF_SRC_SEL_S) & 3u);
+    int lf = (int)((ctl0 >> CTL0_SCLK_LF_SRC_SEL_S) & 3u);
+    if (lf != soc->osc.lf_src) {
+        soc->osc.lf_src = lf;
+        osc_irq_latch(soc, OSCRIS_LFSRCDONE);
+    }
+    if (want_xosc && soc->osc.xosc_hf_ready && osc_switch_pending(soc))
+        osc_irq_latch(soc, OSCRIS_HFSRCPEND);
 }
 
 static bool osc_switch_pending(cc13x2_soc_t *soc) {
@@ -440,6 +462,23 @@ static bool rfc_powered(cc13x2_soc_t *soc) {
     return (soc->pd0 & 1u) || (soc->pd1 & 4u);
 }
 
+#define PRCM_OSCIMSC 0x290
+#define PRCM_OSCRIS  0x294
+#define PRCM_OSCICR  0x298
+
+static void osc_irq_update(cc13x2_soc_t *soc) {
+    cc13x2_page_t *p = find_page(soc, "PRCM");
+    if (p && (REG(p, PRCM_OSCRIS) & REG(p, PRCM_OSCIMSC)))
+        irq_raise(soc, CC13X2_IRQ_OSC_COMB);
+}
+
+static void osc_irq_latch(cc13x2_soc_t *soc, uint32_t bits) {
+    cc13x2_page_t *p = find_page(soc, "PRCM");
+    if (!p) return;
+    REG(p, PRCM_OSCRIS) |= bits;
+    osc_irq_update(soc);
+}
+
 static uint32_t prcm_read(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off) {
     switch (off & ~3u) {
     case PRCM_CLKLOADCTL: return 0x2u;                 /* LOAD_DONE */
@@ -461,7 +500,16 @@ static uint32_t prcm_read(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off) {
     return REG(p, off & ~3u) >> ((off & 3u) * 8u);
 }
 
+static void prcm_write_impl(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val);
+
 static void prcm_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
+    bool was = rfc_powered(soc);
+    prcm_write_impl(soc, p, off, val);
+    bool on = rfc_powered(soc);
+    if (on != was) cc13x2_rfc_domain_changed(&soc->rfc, on);
+}
+
+static void prcm_write_impl(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
     uint32_t a = off & ~3u;
     switch (a) {
     case PRCM_CLKLOADCTL: return;
@@ -473,6 +521,12 @@ static void prcm_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32
     case PRCM_PDCTL1CPU:  soc->pd1 = (soc->pd1 & ~2u) | ((val & 1u) << 1); return;
     case PRCM_PDCTL1RFC:  soc->pd1 = (soc->pd1 & ~4u) | ((val & 1u) << 2); return;
     case PRCM_PDCTL1VIMS: soc->pd1 = (soc->pd1 & ~8u) | ((val & 1u) << 3); return;
+    case PRCM_OSCRIS:     return;                          /* read-only */
+    case PRCM_OSCICR:     REG(p, PRCM_OSCRIS) &= ~val; return;
+    case PRCM_OSCIMSC:
+        REG(p, a) = merge_write(soc, REG(p, a), off, val) & 0xFFu;
+        osc_irq_update(soc);
+        return;
     }
     REG(p, a) = merge_write(soc, REG(p, a), off, val);
 }
@@ -555,6 +609,33 @@ static uint64_t rtc_ticks(cc13x2_soc_t *soc) {
 static int64_t rtc_tick_ns(cc13x2_soc_t *soc, uint64_t tick) {
     return soc->rtc.zero_ns + (int64_t)((tick * 125000000u + 4095u) / 4096u);
 }
+
+/* ============================================================
+ * Services for the RF core model
+ * ============================================================ */
+
+int64_t cc13x2_live_ns(cc13x2_soc_t *soc) { return live_ns(soc); }
+
+/* Nanoseconds on the AON RTC at a live time: what its 64-bit counter
+ * measures, unquantised — the RAT runs from the 48 MHz clock but is kept
+ * locked to the RTC (CMD_SYNC_START_RAT). */
+int64_t cc13x2_rtc_ns_at(cc13x2_soc_t *soc, int64_t ns) {
+    if (!soc->rtc.enabled) return ns;
+    int64_t el = ns - soc->rtc.zero_ns;
+    return el < 0 ? 0 : el;
+}
+
+void cc13x2_schedule_at(cc13x2_soc_t *soc, cpu_event_t *ev, int64_t fire_ns) {
+    schedule_at(soc, ev, fire_ns);
+}
+
+void cc13x2_cancel(cc13x2_soc_t *soc, cpu_event_t *ev) {
+    arm_cancel_event(&soc->plat->cpu, ev);
+}
+
+void cc13x2_irq(cc13x2_soc_t *soc, int irq) { irq_raise(soc, irq); }
+
+bool cc13x2_rfc_domain_on(cc13x2_soc_t *soc) { return rfc_powered(soc); }
 
 /* The 16.16 view the compare channels and rtimer use (counter bits 47:16). */
 static uint32_t rtc_time1616(uint64_t ticks) {
@@ -1007,6 +1088,113 @@ static void wdt_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
 }
 
 /* ============================================================
+ * AUX TDC + AUX event controller — inc/hw_aux_tdc.h, hw_aux_evctl.h;
+ * driven by kernel/.../power/PowerCC26X2_calibrateRCOSC.c
+ * ============================================================ */
+
+#define TDC_CTL          0x00
+#define TDC_STAT         0x04
+#define TDC_RESULT       0x08
+#define TDC_TRIGCNTLOAD  0x18
+#define TDC_CMD_CLR      0u
+#define TDC_CMD_RUN_SYNC 1u
+#define TDC_CMD_RUN      2u
+#define TDC_CMD_ABORT    3u
+#define TDC_STAT_DONE    0x40u
+#define TDC_STAT_IDLE    0x06u
+
+#define EVCTL_EVTOMCUFLAGS     0x30
+#define EVCTL_EVTOMCUFLAGSCLR  0x38
+#define EVCTL_COMBEVTOMCUMASK  0x3C
+#define EVCTL_AUX_TDC_DONE     0x08u
+
+static void aux_comb_update(cc13x2_soc_t *soc) {
+    if (soc->aux_evflags & soc->aux_combmask)
+        irq_raise(soc, CC13X2_IRQ_AUX_COMB);
+}
+
+/* The calibration measures TRIGCNTLOAD periods of ACLK_REF (DDI0 CTL0
+ * ACLK_REF_SRC_SEL [6:4]: 0 = RCOSC_HF/1536 = 31.25 kHz, 2 = RCOSC_LF)
+ * in 48 MHz units (both edges of XOSC_HF/2): an exact RCOSC_HF reads 1536
+ * (RCOSC_HF_PERFECT_TDC_VALUE) and 32 RCOSC_LF periods 46875, which
+ * updateSubSecInc turns into SUBSECINC 0x800000. csim's oscillators are
+ * exact, so the calibration finds nothing to trim. */
+static void tdc_done_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc13x2_soc_t *soc = user;
+    soc->tdc.running = false;
+    soc->tdc.done = true;
+    soc->aux_evflags |= EVCTL_AUX_TDC_DONE;
+    aux_comb_update(soc);
+}
+
+static void tdc_run(cc13x2_soc_t *soc, bool sync_start) {
+    uint32_t ref = (soc->ddi0[DDI0_CTL0 / 4] >> 4) & 7u;
+    double f_ref = (ref == 2 || ref == 3) ? 32768.0 : 31250.0;
+    uint32_t periods = soc->tdc.trigcntload ? soc->tdc.trigcntload : 1u;
+    soc->tdc.result = (uint32_t)((double)periods * 48000000.0 / f_ref + 0.5);
+    soc->tdc.done = false;
+    soc->tdc.running = true;
+    /* A synchronised start waits for the next reference edge first. */
+    double secs = ((double)periods + (sync_start ? 1.0 : 0.0)) / f_ref;
+    soc->tdc.event.callback = tdc_done_cb;
+    soc->tdc.event.user_data = soc;
+    schedule_at(soc, &soc->tdc.event, live_ns(soc) + (int64_t)(secs * 1e9));
+}
+
+static uint32_t tdc_read(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off) {
+    uint32_t a = off & ~3u, v;
+    switch (a) {
+    case TDC_STAT:   v = (soc->tdc.done ? TDC_STAT_DONE : 0) |
+                         (soc->tdc.running ? 0x08u : TDC_STAT_IDLE); break;
+    case TDC_RESULT: v = soc->tdc.result; break;
+    default:         v = REG(p, a); break;
+    }
+    return v >> ((off & 3u) * 8u);
+}
+
+static void tdc_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
+    uint32_t a = off & ~3u;
+    REG(p, a) = merge_write(soc, REG(p, a), off, val);
+    if (a == TDC_TRIGCNTLOAD) soc->tdc.trigcntload = REG(p, a);
+    if (a != TDC_CTL) return;
+    switch (val & 3u) {
+    case TDC_CMD_CLR:
+        soc->tdc.result = 0;
+        soc->tdc.done = false;
+        break;
+    case TDC_CMD_RUN_SYNC: tdc_run(soc, true); break;
+    case TDC_CMD_RUN:      tdc_run(soc, false); break;
+    case TDC_CMD_ABORT:
+        arm_cancel_event(&soc->plat->cpu, &soc->tdc.event);
+        soc->tdc.running = false;
+        break;
+    }
+}
+
+static uint32_t evctl_read(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off) {
+    uint32_t a = off & ~3u, v;
+    switch (a) {
+    case EVCTL_EVTOMCUFLAGS:    v = soc->aux_evflags; break;
+    case EVCTL_COMBEVTOMCUMASK: v = soc->aux_combmask; break;
+    default:                    v = REG(p, a); break;
+    }
+    return v >> ((off & 3u) * 8u);
+}
+
+static void evctl_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
+    uint32_t a = off & ~3u;
+    switch (a) {
+    case EVCTL_EVTOMCUFLAGSCLR: soc->aux_evflags &= ~merge_write(soc, 0, off, val); break;
+    case EVCTL_COMBEVTOMCUMASK:
+        soc->aux_combmask = merge_write(soc, soc->aux_combmask, off, val);
+        aux_comb_update(soc);
+        break;
+    default: REG(p, a) = merge_write(soc, REG(p, a), off, val); break;
+    }
+}
+
+/* ============================================================
  * Small blocks
  * ============================================================ */
 
@@ -1119,6 +1307,11 @@ static int page_read_impl(void *user, uint32_t addr) {
     case P_ADI4:      return (int)adi_read(soc->adi4, off);
     case P_VIMS:      return (int)vims_read(p, off);
     case P_WDT:       return (int)wdt_read(soc, off);
+    case P_RFC_PWR:   return (int)cc13x2_rfc_pwr_read(&soc->rfc, off);
+    case P_RFC_DBELL: return (int)cc13x2_rfc_dbell_read(&soc->rfc, off);
+    case P_RFC_RAT:   return (int)cc13x2_rfc_rat_read(&soc->rfc, off);
+    case P_AUX_TDC:   return (int)tdc_read(soc, p, off);
+    case P_AUX_EVCTL: return (int)evctl_read(soc, p, off);
     case P_FLASH:     return (int)flash_read(p, off);
     case P_SMPH:      return (int)smph_read(p, off, 32);
     case P_AUX_SMPH:  return (int)smph_read(p, off, 8);
@@ -1130,6 +1323,11 @@ static int page_read_impl(void *user, uint32_t addr) {
          * RCOSC_LF trim of the RTC rate — is accepted and not applied:
          * csim's RTC counts at exactly 32768 Hz. */
         if ((off & ~3u) == 0x04) return (int)REG(p, 0x00);
+        if ((off & ~3u) == 0x54 || (off & ~3u) == 0x58) {
+            /* TDCCLKCTL / TDCREFCLKCTL: ACK [1] follows REQ [0]. */
+            uint32_t r = REG(p, off & ~3u) & 1u;
+            return (int)((r | (r << 1)) >> ((off & 3u) * 8u));
+        }
         if ((off & ~3u) == 0x84) {
             uint32_t r = REG(p, 0x84) & 1u;
             return (int)((r | (r << 1)) >> ((off & 3u) * 8u));
@@ -1177,6 +1375,11 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_ADI3:      adi_write(soc, soc->adi3, off, val); return;
     case P_ADI4:      adi_write(soc, soc->adi4, off, val); return;
     case P_WDT:       wdt_write(soc, off, val); return;
+    case P_RFC_PWR:   cc13x2_rfc_pwr_write(&soc->rfc, off, val); return;
+    case P_RFC_DBELL: cc13x2_rfc_dbell_write(&soc->rfc, off, val); return;
+    case P_RFC_RAT:   return;
+    case P_AUX_TDC:   tdc_write(soc, p, off, val); return;
+    case P_AUX_EVCTL: evctl_write(soc, p, off, val); return;
     case P_SMPH:      smph_write(p, off, val, 32); return;
     case P_AUX_SMPH:  smph_write(p, off, val, 8); return;
     default: break;
@@ -1202,6 +1405,11 @@ static void soc_reset_state(cc13x2_soc_t *soc) {
     arm_cancel_event(cpu, &soc->uart0.tx_event);
     for (int i = 0; i < 3; i++) arm_cancel_event(cpu, &soc->rtc.ch_event[i]);
     arm_cancel_event(cpu, &soc->wdt.event);
+    arm_cancel_event(cpu, &soc->tdc.event);
+    memset(&soc->tdc, 0, sizeof(soc->tdc));
+    soc->aux_evflags = 0;
+    soc->aux_combmask = 0;
+    cc13x2_rfc_reset(&soc->rfc);
 
     for (int i = 0; i < soc->num_pages; i++) {
         cc13x2_page_t *p = &soc->pages[i];
@@ -1279,6 +1487,7 @@ static void cc13x2_soc_init(arm_platform_t *plat) {
     fcfg1_init(soc);
 
     plat->host.cpu = cpu;
+    cc13x2_rfc_init(&soc->rfc, soc);
     soc_reset_state(soc);
 }
 
