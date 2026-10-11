@@ -16,7 +16,7 @@ endif
 # a second hand-copied flag string is deliberate: the old PGO_CFLAGS drifted out
 # of sync with CFLAGS and `make pgo` stopped compiling entirely.
 PGO_FLAGS =
-CFLAGS = -O3 -Wall -Wextra -Wno-unused-parameter -std=c11 -D_GNU_SOURCE -I include/common -I include/sim -I include/chips -I include/msp430 -I include/arm -I include/riscv -I include/native -I include/ui -I src/motes -I lib -I lib/quickjs -I lib/yaml -I lib/linenoise $(NATIVE_FLAG) -flto -MMD -MP $(PGO_FLAGS)
+CFLAGS = -O3 -Wall -Wextra -Wno-unused-parameter -std=c11 -ffp-contract=off -D_GNU_SOURCE -I include/common -I include/sim -I include/chips -I include/msp430 -I include/arm -I include/riscv -I include/native -I include/ui -I src/motes -I lib -I lib/quickjs -I lib/yaml -I lib/linenoise $(NATIVE_FLAG) -flto -MMD -MP $(PGO_FLAGS)
 # -rdynamic exports the host's dynamic symbol table so a dlopen'd plugin can
 # resolve host library functions (e.g. the radio_medium accessors a medium
 # plugin uses).  Behavior-neutral (symbol visibility only).
@@ -327,7 +327,7 @@ $(LIB_BUILD_DIR)/%.o: $(LIB_SRC_DIR)/%.c | $(LIB_BUILD_DIR)
 
 # QuickJS needs relaxed warnings (upstream code)
 $(QUICKJS_BUILD_DIR)/%.o: $(QUICKJS_SRC_DIR)/%.c | $(QUICKJS_BUILD_DIR)
-	$(CC) -O2 -std=c11 -D_GNU_SOURCE -I lib/quickjs -DCONFIG_VERSION=\"2024-01-13\" -w $(PGO_FLAGS) -c $< -o $@
+	$(CC) -O2 -std=c11 -ffp-contract=off -D_GNU_SOURCE -I lib/quickjs -DCONFIG_VERSION=\"2024-01-13\" -w $(PGO_FLAGS) -c $< -o $@
 
 $(YAML_BUILD_DIR)/%.o: $(YAML_SRC_DIR)/%.c | $(YAML_BUILD_DIR)
 	$(CC) -O2 -std=c11 -D_GNU_SOURCE -I lib/yaml $(YAML_DEFS) -w $(PGO_FLAGS) -c $< -o $@
@@ -421,7 +421,7 @@ configure:
 	@echo "Wrote csim.conf: CONTIKI_DIR=$(CONTIKI_DIR)"
 
 # Debug build
-debug: CFLAGS = -O0 -g -Wall -Wextra -Wno-unused-parameter -std=c11 -D_GNU_SOURCE -I include/common -I include/sim -I include/chips -I include/msp430 -I include/arm -I include/riscv -I include/native -I include/ui -I src/motes -I lib -I lib/quickjs -I lib/yaml -I lib/linenoise -DDEBUG
+debug: CFLAGS = -O0 -g -Wall -Wextra -Wno-unused-parameter -std=c11 -ffp-contract=off -D_GNU_SOURCE -I include/common -I include/sim -I include/chips -I include/msp430 -I include/arm -I include/riscv -I include/native -I include/ui -I src/motes -I lib -I lib/quickjs -I lib/yaml -I lib/linenoise -DDEBUG
 debug: LDFLAGS = -lm -lpthread
 debug: clean $(BUILD_DIR)/test_runner
 
