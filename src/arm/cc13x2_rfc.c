@@ -9,6 +9,7 @@
 #include "cc13x2_rfc.h"
 #include "cc13x2_soc.h"
 #include "arm_cpu.h"
+#include "ieee_802154.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,8 @@
 #define IRQ_FG_COMMAND_DONE     (1u << 2)
 #define IRQ_LAST_FG_COMMAND_DONE (1u << 3)
 #define IRQ_TX_DONE             (1u << 4)
+#define IRQ_TX_ACK              (1u << 5)
+#define IRQ_RX_IGNORED          (1u << 18)
 #define IRQ_RX_OK               (1u << 16)
 #define IRQ_RX_NOK              (1u << 17)
 #define IRQ_RX_BUF_FULL         (1u << 22)
@@ -76,6 +79,14 @@
 #define CMD_PROP_RX_ADV         0x3804
 #define CMD_PROP_RADIO_SETUP    0x3806
 #define CMD_PROP_RADIO_DIV_SETUP 0x3807
+#define CMD_IEEE_RX             0x2801
+#define CMD_IEEE_TX             0x2C01
+#define CMD_IEEE_RX_ACK         0x2C03
+#define CMD_IEEE_MOD_CCA        0x2001
+#define CMD_IEEE_MOD_FILT       0x2002
+#define CMD_IEEE_ABORT_FG       0x2401
+#define CMD_IEEE_STOP_FG        0x2402
+#define CMD_IEEE_CCA_REQ        0x2403
 
 /* Status words */
 #define ST_IDLE                 0x0000
@@ -93,6 +104,13 @@
 #define PROP_ERROR_PAR          0x3800
 #define PROP_ERROR_RXBUF        0x3801
 #define PROP_ERROR_NO_SETUP     0x3803
+#define IEEE_DONE_OK            0x2400
+#define IEEE_DONE_STOPPED       0x2402
+#define IEEE_DONE_ACK           0x2403
+#define IEEE_DONE_ACKPEND       0x2404
+#define IEEE_DONE_TIMEOUT       0x2405
+#define IEEE_DONE_ABORT         0x2407
+#define IEEE_ERROR_NO_SETUP     0x2801
 
 /* Radio-operation header: commandNo @0, status @2, pNextOp @4,
  * startTime @8, startTrigger @12, condition @13. */
@@ -132,13 +150,16 @@
 #define RAT_SYNC_NS      31000    /* CMD_SYNC_START/STOP_RAT: one RTC edge */
 #define TX_START_NS     100000    /* TX ramp before the first preamble bit */
 #define SUBGHZ_BYTE_NS  160000    /* 8 bits at 50 kbps (CMD_PROP_RADIO_DIV_SETUP rateWord 0x8000) */
+#define IEEE_BYTE_NS     32000    /* 2 O-QPSK symbols at 62.5 ksym/s */
+#define IEEE_TURNAROUND_NS 192000 /* aTurnaroundTime: 12 symbols (802.15.4 PHY) */
+#define IEEE_MAX_PSDU      127    /* aMaxPHYPacketSize */
 
 /* RSSI the receiver reports without a frame: an idle channel at the
  * sensitivity floor, and a carrier it can sense but has not synced to. */
 #define RSSI_IDLE_DBM   (-110)
 #define RSSI_BUSY_DBM   (-60)
 
-enum { RX_HUNT = 0, RX_HDR, RX_PAYLOAD, RX_CRC };
+enum { RX_HUNT = 0, RX_HDR, RX_PAYLOAD, RX_CRC, RX_LEN };
 
 /* ============================================================
  * Helpers
@@ -288,6 +309,13 @@ static void op_finish(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint16_t status,
     }
     uint32_t done = fg ? IRQ_FG_COMMAND_DONE : IRQ_COMMAND_DONE;
     if (!next) done |= fg ? IRQ_LAST_FG_COMMAND_DONE : IRQ_LAST_COMMAND_DONE;
+    if (fg) rfc->ieee.ack_listen = false;
+    if (fg && !next) {
+        /* The foreground chain is over: a background RX resumes. */
+        rfc->ieee.bg_suspended = false;
+        rfc->rx.state = RX_HUNT;
+        rfc->rx.shift = 0;
+    }
     raise_cpe(rfc, done);
     if (next) {
         uint16_t ncmd = rd16(rfc, next);
@@ -321,6 +349,11 @@ static void op_start(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint32_t addr) {
     s->phase = 0;
     s->stop_req = false;
     rfc->stat_cmds++;
+    /* Transmitting takes the radio from a background RX until the frame
+     * is out. CMD_IEEE_RX_ACK does not: it watches the background RX's
+     * frames for its ACK (which that RX also stores — Contiki's CSMA,
+     * without CSMA_USE_RADIO_ACK, reads the ACK from the RX queue). */
+    if (s->cmd == CMD_IEEE_TX) rfc->ieee.bg_suspended = true;
     uint8_t trig = rd8(rfc, addr + OP_TRIGGER);
     int ttype = trig & 0x0F;
     RTRC(rfc, "op 0x%08x cmd 0x%04x start trig %d", addr, s->cmd, ttype);
@@ -353,6 +386,11 @@ static void op_start(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint32_t addr) {
 
 static void prop_tx_emit(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, int64_t *air_ns);
 static void prop_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s);
+static void prop_rx_stop(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, bool abort);
+static void ieee_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi);
+static int8_t current_rssi(cc13x2_rfc_t *rfc);
+static void ieee_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s);
+static void ieee_tx_emit(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, int64_t *air_ns);
 
 static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
     uint32_t op = s->addr;
@@ -460,6 +498,64 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
         }
         /* phase 1: endTrigger reached */
         op_finish(rfc, s, PROP_DONE_OK, true, true);
+        return;
+
+    case CMD_IEEE_RX:
+        if (!rfc->setup_done || rfc->prop) {
+            op_finish(rfc, s, IEEE_ERROR_NO_SETUP, false, false);
+            return;
+        }
+        if (s->phase == 0) {
+            ieee_rx_begin(rfc, s);
+            return;
+        }
+        op_finish(rfc, s, IEEE_DONE_OK, true, true);   /* endTrigger */
+        return;
+
+    case CMD_IEEE_TX:
+        if (!rfc->setup_done || rfc->prop) {
+            op_finish(rfc, s, IEEE_ERROR_NO_SETUP, false, false);
+            return;
+        }
+        if (s->phase == 0) {
+            /* RX -> TX turnaround before the first preamble symbol. */
+            s->phase = 1;
+            op_after(rfc, s, IEEE_TURNAROUND_NS);
+            return;
+        }
+        if (s->phase == 1) {
+            int64_t air = 0;
+            ieee_tx_emit(rfc, s, &air);
+            s->phase = 2;
+            op_after(rfc, s, air);
+            return;
+        }
+        raise_cpe(rfc, IRQ_TX_DONE);
+        rfc->stat_tx++;
+        rfc->ieee.bg_suspended = false;         /* the receiver is back */
+        rfc->rx.state = RX_HUNT;
+        rfc->rx.shift = 0;
+        op_finish(rfc, s, IEEE_DONE_OK, true, true);
+        return;
+
+    case CMD_IEEE_RX_ACK:
+        if (s->phase == 0) {
+            /* Listen for the ACK of the frame just sent; endTrigger
+             * (TRIG_REL_START, endTime in RAT ticks) bounds the wait. */
+            rfc->ieee.ack_listen = true;
+            rfc->ieee.ack_seq = rd8(rfc, op + 14);
+            rfc->rx.state = RX_HUNT;
+            rfc->rx.shift = 0;
+            uint8_t et = rd8(rfc, op + 15) & 0x0F;
+            uint32_t t = rd32(rfc, op + 16);
+            int64_t d = (et == TRIG_ABSTIME) ? (int64_t)(int32_t)(t - rat_now(rfc)) * 250
+                                             : (int64_t)t * 250;
+            s->phase = 1;
+            if (et != TRIG_NEVER) op_after(rfc, s, d > 0 ? d : 0);
+            return;
+        }
+        rfc->ieee.ack_listen = false;
+        op_finish(rfc, s, IEEE_DONE_TIMEOUT, false, true);
         return;
 
     default:
@@ -585,7 +681,10 @@ static void prop_rx_stop(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, bool abort) {
     }
     cc13x2_cancel(rfc->soc, &s->ev);
     rfc->rx.active = false;
-    op_finish(rfc, s, abort ? PROP_DONE_ABORT : PROP_DONE_STOPPED, false, false);
+    uint16_t st = (s->cmd == CMD_IEEE_RX)
+                  ? (abort ? IEEE_DONE_ABORT : IEEE_DONE_STOPPED)
+                  : (abort ? PROP_DONE_ABORT : PROP_DONE_STOPPED);
+    op_finish(rfc, s, st, false, false);
 }
 
 static void prop_rx_output(cc13x2_rfc_t *rfc, uint32_t op, int ok, int bufull,
@@ -767,18 +866,373 @@ static void prop_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
 }
 
 void cc13x2_rfc_receive_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
-    if (!rfc->booted || !rfc->rx.active) return;
-    if (rfc->prop) prop_rx_byte(rfc, byte, rssi);
+    if (!rfc->booted) return;
+    if (rfc->prop) {
+        if (rfc->rx.active) prop_rx_byte(rfc, byte, rssi);
+        return;
+    }
+    if (rfc->rx.active && !rfc->ieee.bg_suspended)
+        ieee_rx_byte(rfc, byte, rssi);
 }
 
 /* The bus saw the stream stop mid-frame (collision, sender gone): abandon
  * the frame as the modem's lost-sync detection would. */
 void cc13x2_rfc_rx_stall(cc13x2_rfc_t *rfc) {
-    if (!rfc->rx.active || rfc->rx.state == RX_HUNT) return;
+    if (rfc->rx.state == RX_HUNT) return;
+    if (!rfc->prop) {
+        RTRC(rfc, "IEEE RX stalled mid-frame, dropped");
+        rfc->rx.state = RX_HUNT;
+        rfc->rx.shift = 0;
+        return;
+    }
+    if (!rfc->rx.active) return;
     uint32_t e = rx_queue_entry(rfc, rfc->rx.op);
     if (e && rd8(rfc, e + 4) == DE_BUSY) wr8(rfc, e + 4, DE_ACTIVE);
     RTRC(rfc, "prop RX stalled mid-frame, dropped");
     prop_rx_frame_end(rfc);
+}
+
+/* ============================================================
+ * IEEE 802.15.4 mode (CMD_IEEE_RX / TX / RX_ACK, rf_ieee_cmd.h)
+ * ============================================================ */
+
+/* On air at 2.4 GHz a frame is what every csim 2.4 GHz radio sends: four
+ * 0x00 preamble bytes, SFD 0x7A, the PHY length byte, the MPDU, and the
+ * 802.15.4 FCS (ITU-T CRC-16, bit-reversed as the CC2538 model computes it,
+ * so frames from either verify on the other). */
+
+/* CMD_IEEE_RX rxConfig @15 */
+#define IRX_FLUSH_CRC   (1u << 0)
+#define IRX_FLUSH_IGN   (1u << 1)
+#define IRX_INC_PHYHDR  (1u << 2)
+#define IRX_INC_CRC     (1u << 3)
+#define IRX_APP_RSSI    (1u << 4)
+#define IRX_APP_CORRCRC (1u << 5)
+#define IRX_APP_SRCIND  (1u << 6)
+#define IRX_APP_TS      (1u << 7)
+/* frameFiltOpt @24 */
+#define FFO_FILT_EN     (1u << 0)
+#define FFO_AUTOACK_EN  (1u << 2)
+#define FFO_AUTOPEND_EN (1u << 4)
+#define FFO_DEFAULT_PEND (1u << 5)
+#define FFO_PAN_COORD   (1u << 7)
+
+/* Correlation reported for a clean frame (status bits 5:0; Contiki takes
+ * it as the LQI). The modem's value is not modelled. */
+#define IEEE_GOOD_CORR  50
+
+static uint32_t ieee_channel_khz(int ch) {
+    return 2405000u + 5000u * (uint32_t)(ch - 11);
+}
+
+static void ieee_fcs(const uint8_t *mpdu, int n, uint8_t out[2]) {
+    uint16_t crc = 0;
+    for (int i = 0; i < n; i++) crc = ieee802154_crc_add_bitrev(crc, mpdu[i]);
+    out[0] = ieee802154_bitrev((uint8_t)(crc >> 8));
+    out[1] = ieee802154_bitrev((uint8_t)crc);
+}
+
+static void ieee_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
+    uint32_t op = s->addr;
+    /* CMD_IEEE_RX.channel @14: 11..26 retunes at start, 0 keeps the
+     * synthesizer where CMD_FS left it. */
+    uint8_t ch = rd8(rfc, op + 14);
+    if (ch >= 11 && ch <= 26) {
+        rfc->freq_khz = ieee_channel_khz(ch);
+        push_channel(rfc);
+    }
+    /* Filter and CCA configuration is latched here; CMD_IEEE_MOD_FILT /
+     * MOD_CCA change the latched copy, as on the CPE. */
+    rfc->ieee.filt_opt    = rd16(rfc, op + 24);
+    rfc->ieee.frame_types = rd8(rfc, op + 26);
+    rfc->ieee.cca_opt     = rd8(rfc, op + 27);
+    rfc->ieee.cca_thr     = (int8_t)rd8(rfc, op + 28);
+    rfc->ieee.ext_addr    = (uint64_t)rd32(rfc, op + 40) | ((uint64_t)rd32(rfc, op + 44) << 32);
+    rfc->ieee.short_addr  = rd16(rfc, op + 48);
+    rfc->ieee.pan_id      = rd16(rfc, op + 50);
+    rfc->rx.active = true;
+    rfc->rx.op = op;
+    rfc->rx.state = RX_HUNT;
+    rfc->rx.shift = 0;
+    uint32_t q = rd32(rfc, op + 16);
+    uint32_t e = q ? rd32(rfc, q) : 0;
+    if (e && rd8(rfc, e + 4) == DE_PENDING) wr8(rfc, e + 4, DE_ACTIVE);
+    uint8_t et = rd8(rfc, op + 55) & 0x0F;
+    if (et == TRIG_ABSTIME || et == 4) {
+        uint32_t t = rd32(rfc, op + 56);
+        int64_t d = (et == 4) ? (int64_t)t * 250
+                              : (int64_t)(int32_t)(t - rat_now(rfc)) * 250;
+        s->phase = 1;
+        op_after(rfc, s, d > 0 ? d : 0);
+    } else {
+        s->phase = 2;
+    }
+    RTRC(rfc, "IEEE RX ch %u, pan 0x%04x short 0x%04x filt 0x%04x", ch,
+         rfc->ieee.pan_id, rfc->ieee.short_addr, rfc->ieee.filt_opt);
+}
+
+static void ieee_emit(cc13x2_rfc_t *rfc, const uint8_t *mpdu, int len) {
+    void *user = rfc->tx_user[rfc->radio_idx];
+    if (!rfc->tx_cb) return;
+    for (int i = 0; i < IEEE802154_PREAMBLE_LEN; i++) rfc->tx_cb(user, 0x00);
+    rfc->tx_cb(user, IEEE802154_SFD);
+    rfc->tx_cb(user, (uint8_t)len);
+    for (int i = 0; i < len; i++) rfc->tx_cb(user, mpdu[i]);
+}
+
+/* CMD_IEEE_TX: txOpt @14 (bIncludePhyHdr [0], bIncludeCrc [1],
+ * payloadLenMsb [7:3]), payloadLen @15, pPayload @16, timeStamp @20. */
+static void ieee_tx_emit(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, int64_t *air_ns) {
+    uint32_t op = s->addr;
+    uint8_t opt = rd8(rfc, op + 14);
+    int plen = rd8(rfc, op + 15) | ((opt >> 3) << 8);
+    uint32_t pp = rd32(rfc, op + 16);
+    uint8_t mpdu[IEEE_MAX_PSDU + 2];
+    int off = (opt & 1u) ? 1 : 0;              /* PHY length supplied by the host */
+    int n = plen - off;
+    if (n < 0) n = 0;
+    if (n > IEEE_MAX_PSDU) n = IEEE_MAX_PSDU;
+    for (int i = 0; i < n; i++) mpdu[i] = rd8(rfc, pp + (uint32_t)(off + i));
+    int len = n;
+    if (!(opt & 2u)) {                          /* the core appends the FCS */
+        if (len > IEEE_MAX_PSDU - 2) len = IEEE_MAX_PSDU - 2;
+        ieee_fcs(mpdu, len, &mpdu[len]);
+        len += 2;
+    }
+    int64_t sfd_end = now_ns(rfc) + (int64_t)(IEEE802154_PREAMBLE_LEN + 1) * IEEE_BYTE_NS;
+    wr32(rfc, op + 20, rat_at(rfc, sfd_end));
+    *air_ns = (int64_t)(IEEE802154_PHY_HEADER_BYTES + len) * IEEE_BYTE_NS;
+    RTRC(rfc, "IEEE TX %d-byte MPDU (FCF 0x%02x%02x seq %u)", len,
+         len > 1 ? mpdu[1] : 0, mpdu[0], len > 2 ? mpdu[2] : 0);
+    ieee_emit(rfc, mpdu, len);
+}
+
+static void ieee_ack_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc13x2_rfc_t *rfc = user;
+    if (!rfc->booted || rfc->prop) return;
+    ieee_emit(rfc, rfc->ieee.ack_frame, 5);
+    rfc->ieee.mute_until_ns = now_ns(rfc) +
+        (int64_t)(IEEE802154_PHY_HEADER_BYTES + 5) * IEEE_BYTE_NS;
+    uint32_t o = rd32(rfc, rfc->rx.op + 20);
+    if (rfc->rx.active && o) wr8(rfc, o, (uint8_t)(rd8(rfc, o) + 1));   /* nTxAck */
+    raise_cpe(rfc, IRQ_TX_ACK);
+    RTRC(rfc, "IEEE auto-ACK seq %u sent", rfc->ieee.ack_frame[2]);
+}
+
+/* Frame filtering (TRM "Receive Operation / Frame Filtering"): frame type
+ * enabled in frameTypes, version <= maxFrameVersion, and a destination
+ * that is this node's PAN (or broadcast) and short/extended address (or
+ * broadcast). Frames without a destination pass only to a PAN coordinator,
+ * and beacons. */
+static bool ieee_accept(cc13x2_rfc_t *rfc, const uint8_t *m, int n) {
+    uint16_t opt = rfc->ieee.filt_opt;
+    if (!(opt & FFO_FILT_EN)) return true;
+    if (n < 3) return false;
+    uint16_t fcf = (uint16_t)(m[0] | (m[1] << 8));
+    int type = fcf & 7, dmode = (fcf >> 10) & 3, ver = (fcf >> 12) & 3;
+    if (!(rfc->ieee.frame_types & (1u << type))) return false;
+    if (ver > ((opt >> 8) & 3)) return false;
+    if (type == 2) return true;                 /* ACKs carry no addresses */
+    int p = 3;
+    if (dmode == 0) return type == 0 || (opt & FFO_PAN_COORD);
+    if (n < p + 2) return false;
+    uint16_t dpan = (uint16_t)(m[p] | (m[p + 1] << 8));
+    p += 2;
+    if (dpan != 0xFFFF && dpan != rfc->ieee.pan_id) return false;
+    if (dmode == 2) {
+        if (n < p + 2) return false;
+        uint16_t d = (uint16_t)(m[p] | (m[p + 1] << 8));
+        return d == 0xFFFF || d == rfc->ieee.short_addr;
+    }
+    if (dmode == 3) {
+        if (n < p + 8) return false;
+        uint64_t d = 0;
+        for (int i = 7; i >= 0; i--) d = (d << 8) | m[p + i];
+        return d == rfc->ieee.ext_addr;
+    }
+    return false;
+}
+
+static bool ieee_unicast(const uint8_t *m, int n) {
+    if (n < 7) return false;
+    uint16_t fcf = (uint16_t)(m[0] | (m[1] << 8));
+    int dmode = (fcf >> 10) & 3;
+    if (dmode == 2) return !(m[5] == 0xFF && m[6] == 0xFF);
+    return dmode == 3;
+}
+
+static void ieee_rx_frame(cc13x2_rfc_t *rfc) {
+    int len = rfc->rx.n;                        /* MPDU incl. FCS */
+    const uint8_t *m = rfc->rx.buf;
+    uint8_t fcs[2];
+    bool crc_ok = len >= 2;
+    if (crc_ok) { ieee_fcs(m, len - 2, fcs); crc_ok = fcs[0] == m[len - 2] && fcs[1] == m[len - 1]; }
+    int n = crc_ok || len >= 2 ? len - 2 : 0;   /* MPDU without FCS */
+    int64_t frame_end = rfc->rx.last_byte_ns + IEEE_BYTE_NS;
+
+    /* CMD_IEEE_RX_ACK waiting: a matching ACK ends it; the frame is still
+     * the background RX's to filter and store. */
+    if (rfc->ieee.ack_listen && crc_ok && n >= 3 && (m[0] & 7) == 2 &&
+        m[2] == rfc->ieee.ack_seq) {
+        cc13x2_rfc_op_t *s = &rfc->fg;
+        rfc->ieee.ack_listen = false;
+        cc13x2_cancel(rfc->soc, &s->ev);
+        bool pend = (m[0] & 0x10) != 0;
+        RTRC(rfc, "IEEE ACK seq %u received%s", m[2], pend ? " (pending)" : "");
+        op_finish(rfc, s, pend ? IEEE_DONE_ACKPEND : IEEE_DONE_ACK, true, true);
+    }
+    if (!rfc->rx.active) return;
+
+    uint32_t op = rfc->rx.op;
+    uint8_t rxc = rd8(rfc, op + 15);
+    uint32_t o = rd32(rfc, op + 20);
+    if (!crc_ok) {
+        rfc->stat_rx_crc_err++;
+        if (o) wr8(rfc, o + 6, (uint8_t)(rd8(rfc, o + 6) + 1));          /* nRxNok */
+        raise_cpe(rfc, IRQ_RX_NOK);
+        if (rxc & IRX_FLUSH_CRC) return;
+    }
+    bool accept = crc_ok && ieee_accept(rfc, m, n);
+    if (crc_ok && !accept) {
+        if (o) wr8(rfc, o + 7, (uint8_t)(rd8(rfc, o + 7) + 1));          /* nRxIgnored */
+        raise_cpe(rfc, IRQ_RX_IGNORED);
+        if (rxc & IRX_FLUSH_IGN) return;
+    }
+
+    /* Auto-ACK an accepted unicast frame that asks for one, aTurnaroundTime
+     * after its end. The pending bit is defaultPend (no source matching). */
+    if (accept && (rfc->ieee.filt_opt & FFO_AUTOACK_EN) && (m[0] & 0x20) &&
+        ((m[0] & 7) == 1 || (m[0] & 7) == 3) && ieee_unicast(m, n)) {
+        uint8_t *a = rfc->ieee.ack_frame;
+        a[0] = 0x02 | ((rfc->ieee.filt_opt & FFO_DEFAULT_PEND) ? 0x10 : 0);
+        a[1] = 0x00;
+        a[2] = m[2];
+        ieee_fcs(a, 3, &a[3]);
+        rfc->ieee.ack_ev.callback = ieee_ack_cb;
+        rfc->ieee.ack_ev.user_data = rfc;
+        cc13x2_schedule_at(rfc->soc, &rfc->ieee.ack_ev, frame_end + IEEE_TURNAROUND_NS);
+    }
+
+    /* Store: [len][PHY hdr][MPDU][FCS][RSSI][corr/CRC status][src idx][timestamp]. */
+    uint32_t q = rd32(rfc, op + 16);
+    uint32_t e = q ? rd32(rfc, q) : 0;
+    uint8_t est = e ? rd8(rfc, e + 4) : 0xFF;
+    int lensz = e ? (rd8(rfc, e + 5) >> 2) & 3 : 0;
+    int cap = e ? rd16(rfc, e + 6) : 0;
+    int total = ((rxc & IRX_INC_PHYHDR) ? 1 : 0) + n + ((rxc & IRX_INC_CRC) ? 2 : 0) +
+                ((rxc & IRX_APP_RSSI) ? 1 : 0) + ((rxc & IRX_APP_CORRCRC) ? 1 : 0) +
+                ((rxc & IRX_APP_SRCIND) ? 1 : 0) + ((rxc & IRX_APP_TS) ? 4 : 0);
+    if (!e || (est != DE_PENDING && est != DE_ACTIVE && est != DE_BUSY) ||
+        lensz + total > cap) {
+        rfc->stat_rx_buf_full++;
+        if (o) wr8(rfc, o + 8, (uint8_t)(rd8(rfc, o + 8) + 1));          /* nRxBufFull */
+        raise_cpe(rfc, IRQ_RX_BUF_FULL);
+        RTRC(rfc, "IEEE RX buffer full (entry 0x%08x status %u)", e, est);
+        return;            /* IEEE RX keeps running; the frame is lost */
+    }
+    /* Timestamp: the end of the SFD + 50 us, the relation Contiki's CC26xx
+     * correction (RAT_TIMESTAMP_OFFSET -50 us, rf/ieee-mode.c) implies for
+     * this RF core. Contiki's CC13xx line adds 800 us instead ("don't know
+     * what exactly is this"); the model does not follow that guess. */
+    int64_t sfd_end = rfc->rx.sync_end_ns;
+    uint32_t ts = rat_at(rfc, sfd_end + 50000);
+    uint32_t d = e + 8;
+    if (lensz == 1) wr8(rfc, d, (uint8_t)total);
+    else if (lensz == 2) wr16(rfc, d, (uint16_t)total);
+    d += (uint32_t)lensz;
+    if (rxc & IRX_INC_PHYHDR) wr8(rfc, d++, (uint8_t)len);
+    for (int i = 0; i < n; i++) wr8(rfc, d++, m[i]);
+    if (rxc & IRX_INC_CRC) { wr8(rfc, d++, m[len - 2]); wr8(rfc, d++, m[len - 1]); }
+    if (rxc & IRX_APP_RSSI) wr8(rfc, d++, (uint8_t)rfc->rx.rssi);
+    if (rxc & IRX_APP_CORRCRC)
+        wr8(rfc, d++, (uint8_t)((crc_ok ? IEEE_GOOD_CORR : 0) | (accept ? 0 : 0x40) |
+                                (crc_ok ? 0 : 0x80)));
+    if (rxc & IRX_APP_SRCIND) wr8(rfc, d++, 0xFF);
+    if (rxc & IRX_APP_TS) { wr32(rfc, d, ts); d += 4; }
+    wr8(rfc, e + 4, DE_FINISHED);
+    uint32_t next = rd32(rfc, e);
+    wr32(rfc, q, next);
+    if (next && rd8(rfc, next + 4) == DE_PENDING) wr8(rfc, next + 4, DE_ACTIVE);
+    if (o && crc_ok) {
+        /* rfc_ieeeRxOutput: nRxBeacon @1, nRxData @2, nRxAck @3, nRxMacCmd @4. */
+        int type = m[0] & 7;
+        if (type <= 3) wr8(rfc, o + 1 + (uint32_t)type, (uint8_t)(rd8(rfc, o + 1 + (uint32_t)type) + 1));
+    }
+    rfc->stat_rx_ok++;
+    raise_cpe(rfc, (crc_ok ? IRQ_RX_OK : IRQ_RX_NOK) | IRQ_RX_ENTRY_DONE);
+    RTRC(rfc, "IEEE RX %d bytes seq %u -> entry 0x%08x%s", n, n > 2 ? m[2] : 0, e,
+         accept ? "" : " (ignored)");
+}
+
+static void ieee_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
+    int64_t t = now_ns(rfc);
+    if (t < rfc->ieee.mute_until_ns) return;    /* own ACK on air */
+    rfc->rx.last_byte_ns = t;
+    switch (rfc->rx.state) {
+    case RX_HUNT:
+        /* Preamble zeros then the SFD. */
+        if (byte == 0x00) {
+            if (rfc->rx.shift < 8) rfc->rx.shift++;
+        } else if (byte == IEEE802154_SFD && rfc->rx.shift >= 2) {
+            rfc->rx.state = RX_LEN;
+            rfc->rx.rssi = rssi;
+            rfc->rx.sync_end_ns = t + IEEE_BYTE_NS;
+            rfc->hwifg |= HWIRQ_MDMSOFT;
+            update_irqs(rfc);
+        } else {
+            rfc->rx.shift = 0;
+        }
+        return;
+    case RX_LEN:
+        rfc->rx.n = byte & 0x7F;
+        rfc->rx.got = 0;
+        if (rfc->rx.n < 2) { rfc->rx.state = RX_HUNT; rfc->rx.shift = 0; return; }
+        rfc->rx.state = RX_PAYLOAD;
+        return;
+    case RX_PAYLOAD:
+        rfc->rx.buf[rfc->rx.got++] = byte;
+        if (rfc->rx.got < rfc->rx.n) return;
+        rfc->rx.state = RX_HUNT;
+        rfc->rx.shift = 0;
+        ieee_rx_frame(rfc);
+        {   /* a graceful CMD_STOP waits for the frame in reception */
+            cc13x2_rfc_op_t *s = &rfc->bg;
+            if (rfc->rx.active && s->stop_req && s->addr == rfc->rx.op)
+                prop_rx_stop(rfc, s, false);
+        }
+        return;
+    default:
+        rfc->rx.state = RX_HUNT;
+        rfc->rx.shift = 0;
+        return;
+    }
+}
+
+/* CMD_IEEE_CCA_REQ: currentRssi @2, maxRssi @3, ccaInfo @4 (ccaState [1:0]
+ * 0 idle / 1 busy / 2 invalid, ccaEnergy [3:2], ccaCorr [5:4], ccaSync [6]).
+ * Energy compares the channel RSSI with the latched ccaRssiThr; correlation
+ * and sync follow a frame being received (no partial-correlation model).
+ * ccaState combines them per ccaOpt: CorrOp [3] = 1 makes correlation count
+ * only together with energy, SyncOp [4] = 0 makes sync busy on its own. */
+static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr) {
+    if (!rfc->rx.active || rfc->prop || rfc->ieee.bg_suspended) {
+        wr8(rfc, addr + 2, 0x80);
+        wr8(rfc, addr + 3, 0x80);
+        wr8(rfc, addr + 4, 0x2 | (0x2 << 2) | (0x2 << 4));
+        return CMDSTA_DONE;
+    }
+    int8_t r = current_rssi(rfc);
+    bool syncing = rfc->rx.state != RX_HUNT;
+    uint8_t opt = rfc->ieee.cca_opt;
+    int energy = (opt & 1u) ? (r > rfc->ieee.cca_thr) : 0;
+    int corr   = (opt & 2u) ? (syncing || r > rfc->ieee.cca_thr) : 0;
+    int sync   = (opt & 4u) ? syncing : 0;
+    bool busy  = ((opt & 8u) ? (energy && corr) : (energy || corr)) || sync;
+    wr8(rfc, addr + 2, (uint8_t)r);
+    wr8(rfc, addr + 3, (uint8_t)r);
+    wr8(rfc, addr + 4, (uint8_t)((busy ? 1 : 0) | (energy << 2) | (corr << 4) | (sync << 6)));
+    return CMDSTA_DONE;
 }
 
 /* ============================================================
@@ -831,12 +1285,35 @@ static uint32_t direct_cmd(cc13x2_rfc_t *rfc, uint32_t cmdr) {
     }
 }
 
+static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr);
+
 static uint32_t immediate_cmd(cc13x2_rfc_t *rfc, uint32_t addr, uint16_t cmd) {
-    (void)addr;
     switch (cmd) {
     case CMD_SET_TX_POWER:
     case CMD_SET_RAT_CMP:
     case CMD_UPDATE_FS:
+        return CMDSTA_DONE;
+    case CMD_IEEE_CCA_REQ:
+        return ieee_cca_req(rfc, addr);
+    case CMD_IEEE_MOD_FILT:
+        /* newFrameFiltOpt @2, newFrameTypes @4: take effect on the running RX. */
+        if (!rfc->rx.active || rfc->prop) return CMDSTA_CONTEXT_ERROR;
+        rfc->ieee.filt_opt = rd16(rfc, addr + 2);
+        rfc->ieee.frame_types = rd8(rfc, addr + 4);
+        return CMDSTA_DONE;
+    case CMD_IEEE_MOD_CCA:
+        if (!rfc->rx.active || rfc->prop) return CMDSTA_CONTEXT_ERROR;
+        rfc->ieee.cca_opt = rd8(rfc, addr + 2);
+        rfc->ieee.cca_thr = (int8_t)rd8(rfc, addr + 3);
+        return CMDSTA_DONE;
+    case CMD_IEEE_STOP_FG:
+    case CMD_IEEE_ABORT_FG:
+        if (rfc->fg.addr) {
+            cc13x2_cancel(rfc->soc, &rfc->fg.ev);
+            op_finish(rfc, &rfc->fg, cmd == CMD_IEEE_ABORT_FG ? IEEE_DONE_ABORT
+                                                               : IEEE_DONE_STOPPED,
+                      false, false);
+        }
         return CMDSTA_DONE;
     default:
         RTRC(rfc, "unknown immediate command 0x%04x", cmd);

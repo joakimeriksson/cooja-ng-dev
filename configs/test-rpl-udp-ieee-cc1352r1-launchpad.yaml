@@ -1,0 +1,25 @@
+# Two CC1352R1 LaunchPads, Contiki-NG rpl-udp over the RF core in IEEE
+# 802.15.4 mode (2.4 GHz): frame filtering, hardware auto-ACK 192 us after
+# the frame, CMD_IEEE_TX -> CMD_IEEE_RX_ACK chaining, CSMA reading the ACK
+# from the RX queue, RPL DAG formation and UDP request/response.
+
+version: 2
+title: "CC1352R1 LaunchPad: RPL-UDP, IEEE mode (2.4 GHz)"
+timeout_ms: 60000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: server, firmware: firmware/cc1352r1-launchpad/udp-server-ieee.cc1352r1-launchpad }
+  - { name: client, firmware: firmware/cc1352r1-launchpad/udp-client-ieee.cc1352r1-launchpad }
+
+nodes:
+  - { type: server, id: 1, x: 0.0, y: 0.0 }
+  - { type: client, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  description: >
+    The client joins the server's DAG and three UDP round trips complete.
+  steps:
+    - { wait: "Received response 'hello 0'", node: 2 }
+    - { wait: "Received response", node: 2, count: 3 }

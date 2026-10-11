@@ -325,6 +325,15 @@ jobs:
       - name: Determinism guard (CC1352R1 RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh test configs/test-rpl-udp-cc1352r1-launchpad.yaml
 
+      - name: CC1352R1 LaunchPad nullnet + RPL-UDP, RF core IEEE mode (2.4 GHz)
+        # CMD_IEEE_RX/TX/RX_ACK, frame filtering, hardware auto-ACK, CCA_REQ.
+        run: |
+          ./build/test_runner test configs/test-nullnet-ieee-cc1352r1-launchpad.yaml
+          ./build/test_runner test configs/test-rpl-udp-ieee-cc1352r1-launchpad.yaml
+
+      - name: CC1352R1 (IEEE mode) on one DAG with Sky, CC2538 and nRF52840 (90 s sim)
+        run: ./build/test_runner test configs/test-mixed-platform-cc1352r1.yaml
+
       - name: Determinism guard (sky RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 20000
 

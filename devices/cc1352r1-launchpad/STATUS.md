@@ -2,11 +2,13 @@
 
 > For the device contract see [`SPEC.md`](SPEC.md).
 
-## Current state — prop mode through L6; IEEE mode next
+## Current state — both radio modes through L6
 
-Contiki-NG runs on the emulated CC1352R1 with its stock radio stack: the
-sub-GHz proprietary mode Contiki uses by default on this board (802.15.4g,
-50 kbps 2-GFSK, 868.325 MHz).
+Contiki-NG runs on the emulated CC1352R1 with its stock radio stack in both
+modes: the sub-GHz proprietary mode Contiki uses by default on this board
+(802.15.4g, 50 kbps 2-GFSK, 868.325 MHz) and IEEE 802.15.4 at 2.4 GHz
+(`RF_CONF_MODE=RF_MODE_2_4_GHZ`), where it interoperates with the other
+2.4 GHz boards.
 
 | Level | Evidence |
 |-------|----------|
@@ -15,8 +17,11 @@ sub-GHz proprietary mode Contiki uses by default on this board (802.15.4g,
 | L2 console | banner on UART0 at the programmed baud rate |
 | L3 LEDs | `leds-nullradio` sequence on DIO6/DIO7 (`CSIM_GPIO_TRACE=1`) |
 | L4 Contiki timers | `configs/test-boot-cc1352r1-launchpad.yaml` |
-| L5 radio | `configs/test-nullnet-cc1352r1-launchpad.yaml` — both nodes hear every broadcast |
-| L6 full stack | `configs/test-rpl-udp-cc1352r1-launchpad.yaml` — RPL DAG + UDP round trips, ~790x real time |
+| L5 radio, prop | `configs/test-nullnet-cc1352r1-launchpad.yaml` |
+| L6 full stack, prop | `configs/test-rpl-udp-cc1352r1-launchpad.yaml` — ~790x real time |
+| L5 radio, IEEE | `configs/test-nullnet-ieee-cc1352r1-launchpad.yaml` |
+| L6 full stack, IEEE | `configs/test-rpl-udp-ieee-cc1352r1-launchpad.yaml` — ~900x real time |
+| Interop, IEEE | `configs/test-mixed-platform-cc1352r1.yaml` — joins a Sky-rooted DAG with a CC2538 and an nRF52840 |
 
 How the radio is modelled: `src/arm/cc13x2_rfc.c` is a command-level model
 of the RF core (the CPE Cortex-M0 and its modem behind the doorbell), not an
@@ -33,15 +38,21 @@ Pieces the radio needed beyond the RF core: the PRCM oscillator interrupt
 (TI's Power driver commits the XOSC_HF switch from INT_OSC_COMB), and the AUX
 TDC that the same driver calibrates the RC oscillators with.
 
-## Plan
+IEEE mode details worth knowing: on CC13xx parts Contiki tunes CMD_FS from
+the sub-GHz table (868.325 MHz) and the radio reaches 2480 MHz only because
+CMD_IEEE_RX's channel field retunes it, as on silicon. CMD_IEEE_RX_ACK
+watches the background RX for its ACK and that RX also stores the ACK —
+Contiki's CSMA (no CSMA_USE_RADIO_ACK) reads it from the queue; only
+CMD_IEEE_TX suspends the background RX.
 
-1. **RF core, IEEE mode (2.4 GHz).** CMD_RADIO_SETUP, CMD_IEEE_RX/TX/RX_ACK,
-   frame filtering, auto-ACK, CCA_REQ, MOD_FILT — interoperating with Sky,
-   CC2538 and nRF nodes on one DAG. On this chip Contiki's IEEE mode tunes
-   CMD_FS from the sub-GHz table and retunes through CMD_IEEE_RX.channel
-   unless the 2450 band is configured.
+## Next
+
+1. **Hardware comparison** (below): FCFG1 dump, RTC compare lag, RF core
+   latencies, boot log timing.
 2. **Sub-GHz capture.** pcap and the packet analyzer decode 2.4 GHz frames
    only (CC1200 frames are not captured either).
+3. **TSCH.** Prop-mode TSCH (`cc13xx-50kbps-tsch`) and IEEE-mode TSCH use
+   RAT timestamps and poll MDMSOFT; the timestamp positions are inferred.
 
 ## Hardware checks (LaunchPad available)
 
@@ -69,7 +80,12 @@ openocd 0.12 talks to the on-board XDS110):
   what Contiki's prop-mode arithmetic assumes. CRCs are computed and
   checked, the on-air bit order of the CRC is not modelled.
 - RSSI is the medium's per-frame value; CMD_GET_RSSI reports -110 dBm on an
-  idle channel and -60 dBm while a neighbour transmits.
+  idle channel and -60 dBm while a neighbour transmits. IEEE CCA_REQ derives
+  energy/correlation/sync from that and from a frame in reception; the
+  correlation value reported per frame is a constant 50.
+- IEEE timestamps sit at the end of the SFD + 50 µs (the relation Contiki's
+  CC26xx correction implies); Contiki's own +800 µs CC13xx correction is
+  left as it is. No source-address matching (autoPend) and no slotted ACKs.
 - The watchdog interrupt is always the maskable IRQ (CTL.INTTYPE's NMI
   routing is not modelled); it does not pause in standby.
 - SSI, GPT, uDMA, TRNG, crypto and the AUX ADC are plain register stores; the

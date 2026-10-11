@@ -84,6 +84,25 @@ typedef struct cc13x2_rfc {
         int64_t  last_byte_ns;
     } rx;
 
+    /* IEEE mode: the receiver configuration latched when CMD_IEEE_RX
+     * starts (and changed by CMD_IEEE_MOD_FILT / MOD_CCA), the foreground
+     * operation suspending it, and the auto-ACK transmitter. */
+    struct {
+        uint16_t    filt_opt;          /* frameFiltOpt */
+        uint8_t     frame_types;
+        uint8_t     cca_opt;
+        int8_t      cca_thr;
+        uint64_t    ext_addr;
+        uint16_t    short_addr;
+        uint16_t    pan_id;
+        bool        bg_suspended;      /* a foreground op owns the radio */
+        bool        ack_listen;        /* CMD_IEEE_RX_ACK waiting for its ACK */
+        uint8_t     ack_seq;
+        uint8_t     ack_frame[5];      /* auto-ACK MPDU being sent */
+        cpu_event_t ack_ev;
+        int64_t     mute_until_ns;     /* own ACK on air: deaf until then */
+    } ieee;
+
     /* Host side: the medium. */
     cc13x2_rfc_tx_fn   tx_cb;
     void              *tx_user[2];       /* per medium slot */

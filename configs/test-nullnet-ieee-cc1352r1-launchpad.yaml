@@ -1,0 +1,28 @@
+# Two CC1352R1 LaunchPads, Contiki-NG nullnet-broadcast over the RF core in
+# IEEE 802.15.4 mode (2.4 GHz, channel 26), firmware built with
+# RF_CONF_MODE=RF_MODE_2_4_GHZ.
+
+version: 2
+title: "CC1352R1 LaunchPad: nullnet broadcast, IEEE mode (2.4 GHz)"
+timeout_ms: 30000
+seed: 42                # same seed => byte-identical run
+startup_delay_ms: 1000  # boards never boot in lockstep
+
+mote_types:
+  - { name: nullnet, firmware: firmware/cc1352r1-launchpad/nullnet-broadcast-ieee.cc1352r1-launchpad }
+
+nodes:
+  - { type: nullnet, id: 1, x: 0.0, y: 0.0 }
+  - { type: nullnet, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  description: >
+    CMD_RADIO_SETUP and CMD_FS (Contiki tunes the sub-GHz table on CC13xx
+    parts), then CMD_IEEE_RX retuning to 2480 MHz from its channel field,
+    CMD_IEEE_TX on air as 802.15.4 with the FCS, and the RX data entries in
+    the IEEE layout Contiki parses.
+  steps:
+    - { wait: "Received 0 from 0012.4b00.0001.0001", node: 2 }
+    - { wait: "Received 0 from 0012.4b00.0002.0002", node: 1 }
+    - { wait: "Received 2 from 0012.4b00.0001.0001", node: 2 }
+    - { wait: "Received 2 from 0012.4b00.0002.0002", node: 1 }
