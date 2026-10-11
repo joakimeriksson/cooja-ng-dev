@@ -178,6 +178,13 @@ static void track_byte_802154g(radio_medium_t *rm, int sender, int sender_radio,
     switch (ft->state) {
     case FRAME_IDLE:
     case FRAME_PREAMBLE:
+        /* The first byte after a frame starts the next one's preamble: clear
+         * frame_id so the preamble and sync word are filtered against the
+         * sender's LIVE channel, not the previous frame's snapshot — the fix
+         * track_byte_802154() already carries. A hopping sub-GHz sender (TSCH)
+         * otherwise had every byte up to the sync match dropped at a receiver
+         * on the new channel, so the receiver could never match the sync. */
+        if (ft->state == FRAME_IDLE) ft->frame_id = 0;
         /* Slide the byte into the sync-word match register. */
         ft->sync_match = (ft->sync_match << 8) | byte;
         if (ft->sync_match == SUBGHZ_SYNC_WORD ||
