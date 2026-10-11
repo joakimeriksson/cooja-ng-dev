@@ -302,6 +302,17 @@ jobs:
         # MAC round-trip that needs the MAC/MII dummy read byte.
         run: ./build/test_runner test configs/test-enc28j60-nrf54l15-dk.json
 
+      - name: CC1352R1 LaunchPad boot, null radio (25 s sim)
+        # TI CC13x2 SoC: reset handler and SetupTrimDevice() through the
+        # stand-in ROM (driverlib behind the ROM API tables), TI's Power,
+        # PIN and UART drivers, Contiki's clock on the AON RTC. Also the
+        # regression for the bit-band word-address fix: the RTC and channel
+        # enables are bit-band writes.
+        run: ./build/test_runner test configs/test-boot-cc1352r1-launchpad.yaml
+
+      - name: Determinism guard (CC1352R1 boot run twice → byte-identical)
+        run: tools/check-determinism.sh test configs/test-boot-cc1352r1-launchpad.yaml
+
       - name: Determinism guard (sky RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 20000
 
