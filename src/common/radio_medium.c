@@ -180,7 +180,9 @@ static void track_byte_802154g(radio_medium_t *rm, int sender, int sender_radio,
     case FRAME_PREAMBLE:
         /* Slide the byte into the sync-word match register. */
         ft->sync_match = (ft->sync_match << 8) | byte;
-        if (ft->sync_match == SUBGHZ_SYNC_WORD) {
+        if (ft->sync_match == SUBGHZ_SYNC_WORD ||
+            (ft->sync_match & RADIO_FRAME_TI_PROP_SYNC_MASK) ==
+                RADIO_FRAME_TI_PROP_SYNC_WORD) {
             ft->state = FRAME_PHR_LO;
             start_new_frame(rm, sender, sender_radio, ft);
         } else {

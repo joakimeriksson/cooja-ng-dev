@@ -62,6 +62,10 @@ typedef struct {
     int payload_count;     /* bytes received after length byte */
     bool subghz;           /* true once sync word matched (sub-GHz frame) */
     int subghz_phr_len;    /* CC1200 PHR width: 1 or 2 bytes */
+    bool ti_prop;          /* TI prop-mode layout (RADIO_FRAME_TI_PROP_SYNC_WORD):
+                            * 2-byte PHR counting the CRC, no bytes after */
+    int pre_bytes;         /* bytes fed since the frame armed, up to its sync */
+    int sync_bytes;        /* ti_prop: preamble + sync bytes before the PHR */
     int64_t first_byte_ns; /* sim time of first preamble byte */
     /* Frame-level sender only: the time this frame went on the air, when
      * that is not the kernel's `now`.  A peer emulator lags the kernel and
