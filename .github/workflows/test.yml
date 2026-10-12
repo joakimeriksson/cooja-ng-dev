@@ -339,8 +339,10 @@ jobs:
       - name: CC1352R1 LaunchPad RIOT hello-world (5 s sim)
         # RIOT idles in WFI with nothing scheduled once main returns; the ARM
         # core used to spin there forever, so this guards with a wall timeout.
+        # perl's alarm, not timeout(1): macOS runners have no coreutils, and
+        # --wall-timeout is only checked between slices, not inside one.
         run: |
-          timeout 60 ./build/test_runner mixed-multinode \
+          perl -e 'alarm 60; exec @ARGV' ./build/test_runner mixed-multinode \
             firmware/cc1352r1-launchpad/riot-hello-world.cc1352r1-launchpad -t 5000 > out.txt 2>&1
           grep -q 'This board features a(n) cc26x2_cc13x2 CPU' out.txt
           grep -q 'Simulated time:   5000 ms' out.txt
