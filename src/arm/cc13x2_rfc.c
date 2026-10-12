@@ -81,6 +81,7 @@
 #define CMD_PROP_RADIO_DIV_SETUP 0x3807
 #define CMD_IEEE_RX             0x2801
 #define CMD_IEEE_TX             0x2C01
+#define CMD_IEEE_CSMA           0x2C02
 #define CMD_IEEE_RX_ACK         0x2C03
 #define CMD_IEEE_MOD_CCA        0x2001
 #define CMD_IEEE_MOD_FILT       0x2002
@@ -107,6 +108,7 @@
 #define PROP_ERROR_NO_SETUP     0x3803
 #define PROP_ERROR_NO_FS        0x3804
 #define IEEE_DONE_OK            0x2400
+#define IEEE_DONE_BUSY          0x2401
 #define IEEE_DONE_STOPPED       0x2402
 #define IEEE_DONE_ACK           0x2403
 #define IEEE_DONE_ACKPEND       0x2404
@@ -142,6 +144,7 @@
 #define DE_ACTIVE    1
 #define DE_BUSY      2
 #define DE_FINISHED  3
+#define DE_TYPE_PTR  2             /* rfc_dataEntryPointer_t: pData @8 */
 
 /* Latencies.  The TRM gives no per-command execution times; these are of
  * the order the RF driver itself budgets (it clamps the measured power-up
@@ -280,6 +283,13 @@ static void set_status(cc13x2_rfc_t *rfc, uint32_t op, uint16_t st) {
     wr16(rfc, op + OP_STATUS, st);
 }
 
+/* Where an RX entry's data goes: inline at @8 for a general entry
+ * (Contiki), at the buffer pData @8 points to for a pointer entry
+ * (Zephyr's CC13xx drivers); `length` is the room either way. */
+static uint32_t entry_data(cc13x2_rfc_t *rfc, uint32_t e) {
+    return ((rd8(rfc, e + 5) & 3u) == DE_TYPE_PTR) ? rd32(rfc, e + 8) : e + 8;
+}
+
 /* An operation finished with `status`; `result` is the TRUE/FALSE its
  * definition gives (DONE_OK-class = TRUE). Raise the done flags and follow
  * pNextOp per the condition rule (rf_common_cmd.h condition). */
@@ -398,6 +408,7 @@ static void prop_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s);
 static void prop_rx_stop(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, bool abort);
 static void ieee_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi);
 static int8_t current_rssi(cc13x2_rfc_t *rfc);
+static int ieee_cca_state(cc13x2_rfc_t *rfc, int8_t *rssi, uint8_t *info);
 static void ieee_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s);
 static void ieee_tx_emit(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, int64_t *air_ns);
 
@@ -592,6 +603,68 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
         rfc->rx.shift = 0;
         op_finish(rfc, s, IEEE_DONE_OK, true, true);
         return;
+
+    case CMD_IEEE_CSMA:
+        /* Unslotted CSMA-CA (rf_ieee_cmd.h rfc_CMD_IEEE_CSMA_t):
+         * randomState @14, macMaxBE @16, macMaxCSMABackoffs @17,
+         * csmaConfig @18, NB @19, BE @20, lastRssi @22, lastTimeStamp @24.
+         * Back off random(2^BE) unit periods of 20 symbols, then assess the
+         * channel for 8 symbols with the background RX's CCA settings.
+         * Idle ends IEEE_DONE_OK (TRUE: the chained CMD_IEEE_TX runs);
+         * busy raises NB and BE and backs off again, until NB exceeds
+         * macMaxCSMABackoffs: IEEE_DONE_BUSY (FALSE). Zephyr's CC13xx
+         * driver sends every frame this way. Slotted mode is not modelled. */
+        if (!rfc->setup_done || rfc->prop) {
+            op_finish(rfc, s, IEEE_ERROR_NO_SETUP, false, false);
+            return;
+        }
+        if (s->phase == 0 || s->phase == 3) {
+            uint8_t be = rd8(rfc, op + 20);
+            uint16_t lfsr = rd16(rfc, op + 14);
+            if (lfsr == 0) {
+                if (!rfc->ieee.csma_lfsr)
+                    rfc->ieee.csma_lfsr = (uint16_t)(0xACE1u ^ (uint16_t)(rfc->node_id * 0x9E37u));
+                lfsr = rfc->ieee.csma_lfsr;
+            }
+            uint32_t backoffs = 0, range = (be >= 16) ? 0xFFFFu : ((1u << be) - 1u);
+            for (int i = 0; i < 16; i++)           /* x^16+x^14+x^13+x^11+1 */
+                lfsr = (uint16_t)((lfsr >> 1) ^ ((lfsr & 1u) ? 0xB400u : 0u));
+            if (!lfsr) lfsr = 0xACE1u;
+            backoffs = range ? (uint32_t)lfsr % (range + 1u) : 0;
+            if (rd16(rfc, op + 14)) wr16(rfc, op + 14, lfsr);
+            else rfc->ieee.csma_lfsr = lfsr;
+            s->phase = 1;
+            op_after(rfc, s, (int64_t)backoffs * 20 * 16000);
+            return;
+        }
+        if (s->phase == 1) {                      /* backoff over: CCA window */
+            s->phase = 2;
+            op_after(rfc, s, 8 * 16000);
+            return;
+        }
+        {
+            int8_t r;
+            uint8_t info;
+            int st = ieee_cca_state(rfc, &r, &info);
+            wr8(rfc, op + 22, (uint8_t)r);
+            wr32(rfc, op + 24, rat_now(rfc));
+            if (st == 0) {
+                op_finish(rfc, s, IEEE_DONE_OK, true, true);
+                return;
+            }
+            uint8_t nb = (uint8_t)(rd8(rfc, op + 19) + 1);
+            uint8_t be = rd8(rfc, op + 20), max_be = rd8(rfc, op + 16);
+            if (be < max_be) be++;
+            wr8(rfc, op + 19, nb);
+            wr8(rfc, op + 20, be);
+            if (nb > rd8(rfc, op + 17)) {
+                op_finish(rfc, s, IEEE_DONE_BUSY, false, true);
+                return;
+            }
+            s->phase = 3;
+            op_run(rfc, s);
+            return;
+        }
 
     case CMD_IEEE_RX_ACK:
         if (s->phase == 0) {
@@ -805,7 +878,7 @@ static void prop_rx_deliver(cc13x2_rfc_t *rfc) {
         op_finish(rfc, s, PROP_ERROR_RXBUF, false, false);
         return;
     }
-    uint32_t d = e + 8;
+    uint32_t d = entry_data(rfc, e);
     if (lensz == 1) wr8(rfc, d, (uint8_t)total);
     else if (lensz == 2) wr16(rfc, d, (uint16_t)total);
     d += (uint32_t)lensz;
@@ -1196,7 +1269,7 @@ static void ieee_rx_frame(cc13x2_rfc_t *rfc) {
      * what exactly is this"); the model does not follow that guess. */
     int64_t sfd_end = rfc->rx.sync_end_ns;
     uint32_t ts = rat_at(rfc, sfd_end + 50000);
-    uint32_t d = e + 8;
+    uint32_t d = entry_data(rfc, e);
     if (lensz == 1) wr8(rfc, d, (uint8_t)total);
     else if (lensz == 2) wr16(rfc, d, (uint16_t)total);
     d += (uint32_t)lensz;
@@ -1274,12 +1347,13 @@ static void ieee_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
  * and sync follow a frame being received (no partial-correlation model).
  * ccaState combines them per ccaOpt: CorrOp [3] = 1 makes correlation count
  * only together with energy, SyncOp [4] = 0 makes sync busy on its own. */
-static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr) {
+/* The receiver's CCA verdict per its latched ccaOpt: 0 idle, 1 busy,
+ * 2 invalid (no IEEE RX listening). *info gets ccaInfo's sub-fields. */
+static int ieee_cca_state(cc13x2_rfc_t *rfc, int8_t *rssi, uint8_t *info) {
     if (!rfc->rx.active || rfc->prop || rfc->ieee.bg_suspended) {
-        wr8(rfc, addr + 2, 0x80);
-        wr8(rfc, addr + 3, 0x80);
-        wr8(rfc, addr + 4, 0x2 | (0x2 << 2) | (0x2 << 4));
-        return CMDSTA_DONE;
+        *rssi = (int8_t)0x80;
+        *info = 0x2 | (0x2 << 2) | (0x2 << 4);
+        return 2;
     }
     int8_t r = current_rssi(rfc);
     bool syncing = rfc->rx.state != RX_HUNT;
@@ -1288,9 +1362,18 @@ static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr) {
     int corr   = (opt & 2u) ? (syncing || r > rfc->ieee.cca_thr) : 0;
     int sync   = (opt & 4u) ? syncing : 0;
     bool busy  = ((opt & 8u) ? (energy && corr) : (energy || corr)) || sync;
+    *rssi = r;
+    *info = (uint8_t)((busy ? 1 : 0) | (energy << 2) | (corr << 4) | (sync << 6));
+    return busy ? 1 : 0;
+}
+
+static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr) {
+    int8_t r;
+    uint8_t info;
+    ieee_cca_state(rfc, &r, &info);
     wr8(rfc, addr + 2, (uint8_t)r);
     wr8(rfc, addr + 3, (uint8_t)r);
-    wr8(rfc, addr + 4, (uint8_t)((busy ? 1 : 0) | (energy << 2) | (corr << 4) | (sync << 6)));
+    wr8(rfc, addr + 4, info);
     return CMDSTA_DONE;
 }
 

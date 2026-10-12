@@ -102,6 +102,7 @@ typedef struct cc13x2_rfc {
         uint8_t     ack_frame[5];      /* auto-ACK MPDU being sent */
         cpu_event_t ack_ev;
         int64_t     mute_until_ns;     /* own ACK on air: deaf until then */
+        uint16_t    csma_lfsr;         /* CMD_IEEE_CSMA randomState 0: own stream */
     } ieee;
 
     /* Host side: the medium. */
