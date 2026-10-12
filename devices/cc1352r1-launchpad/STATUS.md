@@ -59,6 +59,21 @@ errors are ±8-12 rtimer ticks (~±150 µs), inside the guard time but larger
 than exact oscillators explain — the inferred RF core latencies and RTC
 lag are the suspects.
 
+## Other operating systems
+
+Stock Zephyr (v4.2, `cc1352r1_launchxl`) and RIOT (`cc1352-launchpad`)
+images run unmodified:
+
+- Zephyr `hello_world`; `synchronization` (kernel timer on the AON RTC: a
+  605.16 ms print period in csim, 605.01 ms on the LaunchPad over 30 s);
+  `echo_server`/`echo_client` with `overlay-802154.conf`, UDP round trips
+  over 2.4 GHz 802.15.4 (CI). Zephyr needed the TRNG, CMD_IEEE_CSMA (its
+  driver sends every frame through the RF core's CSMA-CA) and pointer data
+  entries (RX buffers outside the entry).
+- RIOT `hello-world` (CI). RIOT's timers use the GPTs, which are a plain
+  register store here, so ztimer-based RIOT applications do not run yet;
+  RIOT has no CC13x2 radio driver.
+
 ## Hardware comparison
 
 Checked against a LaunchPad on 2026-10-12 —
@@ -105,5 +120,9 @@ helper are in `tools/cc13x2-hwcheck/`.
   routing is not modelled). It pauses while the PERIPH domain is off, which
   is how SysCtrlStandby() differs from SysCtrlIdle(). A watchdog reset is
   reported on stderr (`[cc13x2] watchdog reset at ...`).
-- SSI, GPT, uDMA, TRNG, crypto and the AUX ADC are plain register stores; the
+- SSI, GPT, uDMA, crypto and the AUX ADC are plain register stores; the
   AUX TDC measures exact oscillators, so the RC calibration trims nothing.
+- The TRNG delivers a deterministic per-node stream (seeded from the IEEE
+  address), one 64-bit number per 1 ms (the FRO sampling time is not
+  modelled).
+- CMD_IEEE_CSMA is unslotted CSMA-CA only.

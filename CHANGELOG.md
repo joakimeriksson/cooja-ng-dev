@@ -7,6 +7,25 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+- **TI CC1352R1 LaunchPad** (`cc1352r1-launchpad`): the CC13x2 SoC on a
+  stand-in ROM built from driverlib, and a command-level RF core model in
+  both radio modes — sub-GHz proprietary (Contiki's default) and 2.4 GHz
+  IEEE 802.15.4, which joins a mixed Sky/CC2538/nRF52840 DAG. Contiki-NG
+  nullnet, RPL-UDP and TSCH, stock Zephyr samples (802.15.4 echo) and RIOT
+  hello-world run. Checked against a LaunchPad: factory configuration, the
+  AON RTC compare behaviour and RF status words match silicon
+  (`devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`).
+
+### Fixed
+- **ARM: a core sleeping in WFI with no event queued spun forever.** It now
+  sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
+  which idles with none.
+- **Bit-band alias word address** was `byte * 4` for non-zero offsets.
+- **802.15.4g frame tracker** kept the previous frame's channel across a new
+  preamble, so a hopping sub-GHz sender's frames were filtered on the wrong
+  channel.
+
 ## [0.3.0] — 2026-10-11
 
 Cooja-NG becomes something you can drive, embed and watch: a command shell

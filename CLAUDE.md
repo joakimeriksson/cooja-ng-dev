@@ -235,6 +235,9 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 ./build/test_runner test configs/test-rpl-udp-ieee-cc1352r1-launchpad.yaml # IEEE, L6
 ./build/test_runner test configs/test-mixed-platform-cc1352r1.yaml         # 4 architectures, one DAG
 tools/cc13x2-rom/build-rom.sh     # regenerate src/arm/cc13x2_rom_image.c from the SDK's driverlib
+# Zephyr (stock samples, cc1352r1_launchxl) and RIOT (cc1352-launchpad) run too:
+./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40000
+./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/riot-hello-world.cc1352r1-launchpad -t 5000
 # Hardware comparison: one check image runs in csim and on a LaunchPad (RTC
 # compare lag, RF status words, radio call timings, measured on the chip).
 # flash.py programs through the XDS110 (catch.tcl halts even a sleeping image)

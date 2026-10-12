@@ -325,6 +325,26 @@ jobs:
       - name: Determinism guard (CC1352R1 RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh test configs/test-rpl-udp-cc1352r1-launchpad.yaml
 
+      - name: CC1352R1 LaunchPad Zephyr 802.15.4 echo (stock echo_server/client, 40 s sim)
+        # Zephyr's CC13xx driver: the TRNG (entropy at boot), CMD_IEEE_CSMA
+        # (every send) and pointer RX entries.  Counts the server's replies;
+        # csim's [PKT] lines can split one, hence the low threshold.
+        run: |
+          ./build/test_runner mixed-multinode \
+            firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad \
+            firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40000 > out.txt 2>&1
+          n=$(grep -c 'Received and replied' out.txt || true)
+          echo "echo replies: $n"; [ "$n" -ge 5 ]
+
+      - name: CC1352R1 LaunchPad RIOT hello-world (5 s sim)
+        # RIOT idles in WFI with nothing scheduled once main returns; the ARM
+        # core used to spin there forever, so this guards with a wall timeout.
+        run: |
+          timeout 60 ./build/test_runner mixed-multinode \
+            firmware/cc1352r1-launchpad/riot-hello-world.cc1352r1-launchpad -t 5000 > out.txt 2>&1
+          grep -q 'This board features a(n) cc26x2_cc13x2 CPU' out.txt
+          grep -q 'Simulated time:   5000 ms' out.txt
+
       - name: CC1352R1 LaunchPad nullnet + RPL-UDP, RF core IEEE mode (2.4 GHz)
         # CMD_IEEE_RX/TX/RX_ACK, frame filtering, hardware auto-ACK, CCA_REQ.
         run: |

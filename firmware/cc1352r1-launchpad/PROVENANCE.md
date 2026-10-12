@@ -129,3 +129,25 @@
 - **Toolchain**: host
 - **Built**: 2026-10-12 by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --local --contiki-dir <contiki-ng> --target simplelink --board launchpad/cc1352r1 --example tools/cc13x2-hwcheck --output firmware/cc1352r1-launchpad/hwcheck-ieee.cc1352r1-launchpad --make-args "CONTIKI=<contiki-ng> DEFINES=RF_CONF_MODE=RF_MODE_2_4_GHZ"`
+
+## zephyr-echo-server.cc1352r1-launchpad / zephyr-echo-client.cc1352r1-launchpad
+
+- **Source**: Zephyr (`zephyrproject/zephyr`) `v4.2.0-5538-g55473922756`
+- **Source path**: `samples/net/sockets/echo_server` and `.../echo_client`
+- **BOARD**: `cc1352r1_launchxl`
+- **Config**: STOCK — only the sample's own `overlay-802154.conf` (selects
+  Zephyr's CC13xx/CC26xx 2.4 GHz IEEE 802.15.4 driver); no other changes.
+- **Toolchain**: gnuarmemb (Arm GNU Toolchain 15.2.rel1)
+- **Built**: 2026-10-12 by Joakim Eriksson; stripped with `--strip-debug`.
+- **Build command**:
+  `west build -b cc1352r1_launchxl samples/net/sockets/echo_{server,client} -- -DEXTRA_CONF_FILE=overlay-802154.conf`
+
+## riot-hello-world.cc1352r1-launchpad
+
+- **Source**: RIOT `1496277518c140665c23243041cd2d64a251d67f`
+- **Source path**: `examples/basic/hello-world`
+- **BOARD**: `cc1352-launchpad`
+- **Config**: STOCK
+- **Toolchain**: Arm GNU Toolchain 15.2.rel1
+- **Built**: 2026-10-12 by Joakim Eriksson; stripped with `--strip-debug`.
+- **Build command**: `make -C examples/basic/hello-world BOARD=cc1352-launchpad`
