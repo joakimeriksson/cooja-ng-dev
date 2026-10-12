@@ -58,14 +58,14 @@ static void renode_hook_set_power(void *user, int indicator) {
 }
 
 /* Carrier sense, from the medium's own view of this node's position and
- * channel.  The runner's CCA is generic despite its name -- it walks the
- * TX-range neighbour list and reads the bus's per-sender medium-busy
- * deadline, with a cross-band check. */
+ * channel.  The runner's CCA is generic -- it walks the TX-range neighbour
+ * list and reads the bus's per-sender medium-busy deadline, with a
+ * cross-band check. */
 static bool renode_hook_channel_busy(void *user) {
     mixed_node_t *node = (mixed_node_t *)user;
-    if (!node->env->cc1200_channel_busy)
+    if (!node->env->channel_busy)
         return false;
-    return node->env->cc1200_channel_busy(node);
+    return node->env->channel_busy(node);
 }
 
 /* Console bytes from Renode into a csim node.  Returns what the node took,

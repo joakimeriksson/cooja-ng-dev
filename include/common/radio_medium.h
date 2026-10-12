@@ -140,6 +140,7 @@ typedef struct {
     int byte_count;     /* bytes received in current frame */
     uint32_t frame_id;  /* unique ID for current frame */
     int phr_hi;         /* 802.15.4g: top 3 bits of 11-bit length */
+    int tail;           /* 802.15.4g: bytes on air after `length` (CC1200: CRC) */
     radio_frame_profile_t profile;  /* updated when set_channel changes band */
     /* Sender's channel at the moment this frame started, snapshotted at
      * SFD detection. The per-byte channel filter compares the receiver's

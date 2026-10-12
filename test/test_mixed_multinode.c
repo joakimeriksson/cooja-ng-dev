@@ -798,7 +798,7 @@ static void mixed_rfcore_channel_callback(void *user_data, int channel) {
  * decoder.  Without this, CCA always saw a clear channel and senders
  * blasted on top of each other — root cause of L6 RPL non-convergence.
  */
-static bool mixed_cc1200_channel_busy(void *user_data) {
+static bool mixed_channel_busy(void *user_data) {
     mixed_node_t *node = (mixed_node_t *)user_data;
     int idx = (int)(node - nodes);
     int my_ch = radio_medium.nodes[idx].channel;
@@ -1431,7 +1431,7 @@ static const sim_mote_env_t mixed_mote_env = {
     .radio_set_power       = mixed_host_radio_set_power,
     .rfcore_state_change   = mixed_rf_state_handler,
     .rfcore_channel_change = mixed_rfcore_channel_callback,
-    .cc1200_channel_busy   = mixed_cc1200_channel_busy,
+    .channel_busy          = mixed_channel_busy,
     .rf_tx_byte            = mixed_rf_tx_handler,
     .rf_frame              = mixed_rf_frame_handler,
     .native_yield          = native_yield_callback,

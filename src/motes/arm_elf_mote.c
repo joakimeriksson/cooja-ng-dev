@@ -99,7 +99,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
             cc1200_set_rf_listener(&cc_soc->cc1200, env->chip_tx_byte,
                                     &node->rf_ctx[1]);
             cc1200_set_channel_busy_query(&cc_soc->cc1200,
-                                           env->cc1200_channel_busy, node);
+                                           env->channel_busy, node);
         }
 
         /* Seed RFRND and sleep timer uniquely per node. */
@@ -217,7 +217,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
         cc13x2_rfc_set_tx_listener(&cc13_soc->rfc, env->chip_tx_byte,
                                    &node->rf_ctx[1], &node->rf_ctx[0]);
         cc13x2_rfc_set_channel_busy_query(&cc13_soc->rfc,
-                                          env->cc1200_channel_busy, node);
+                                          env->channel_busy, node);
         cc13_soc->rfc.node_id = node_id;
         if (*env->verbose)
             printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",

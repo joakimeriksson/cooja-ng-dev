@@ -86,7 +86,15 @@ typedef struct {
  * full-rate sub-GHz traffic, comfortably more than the firmware's
  * worst-case process latency. */
 #define EMU_RX_QUEUE_SIZE 64
-#define EMU_RX_FRAME_MAX  160  /* preamble(4)+SFD(1)+len(1)+payload(≤127)+CRC(2) */
+#define EMU_RX_FRAME_MAX  256  /* the longest frame the bus carries, with its header:
+                                 * sub-GHz preamble(4)+sync(4)+PHR(2)+≤200; the
+                                 * sender-side capture is 256 too */
+/* Longest sub-GHz PHR length the frame assembler accepts, for CC1200 and TI
+ * prop frames alike. 802.15.4g allows 2047; the bus's per-frame buffers do
+ * not, and neither do the chip models (the CC13x2 RF core takes 256), so a
+ * longer frame is not a frame here. Also how the CC1200's 1-byte vs 2-byte
+ * PHR is told apart (sim_radio_bus.c, TX_ASM_SUBGHZ_PHR). */
+#define RADIO_BUS_SUBGHZ_MAX_LEN 200
 
 typedef struct {
     uint8_t data[EMU_RX_FRAME_MAX];

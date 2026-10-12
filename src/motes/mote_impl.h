@@ -149,8 +149,9 @@ struct sim_mote_env {
     void (*rfcore_state_change)(void *node, int old_state, int new_state);
     void (*rfcore_channel_change)(void *node, int channel);
 
-    /* CC1200 CCA query (user_data = node). */
-    bool (*cc1200_channel_busy)(void *node);
+    /* Carrier sense for radios that ask the bus rather than decode it
+     * (CC1200, the CC13x2 RF core, the Renode device; user_data = node). */
+    bool (*channel_busy)(void *node);
 
     /* Native-mote RF paths (user_data = node).  rf_tx_byte assumes
      * radio slot 0; native_yield is cross-node ACK-turnaround policy

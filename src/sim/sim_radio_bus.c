@@ -15,7 +15,11 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
  *   2.4 GHz: preamble(4) 0x00 + SFD 0x7A + length at data[5]; receiving
  *     chip pushes (length + 1) bytes into its RXFIFO.
  *   sub-GHz: preamble(4) 0x55 + sync(4) + PHR at data[8]; receiving
- *     chip pushes (PHR + payload + 2 status) = (length + 3) bytes. */
+ *     chip pushes (PHR + payload + 2 status) = (length + 3) bytes.
+ * -1: no length to read (not a frame the assembler recognised). Room for
+ * it is never lacking, so it is handed to the chip, whose own sync search
+ * ignores it, rather than parked at the head of a queue it can never
+ * leave. */
 int frame_fifo_bytes(const uint8_t *data, int len, bool subghz) {
     if (subghz && len >= 8 &&
         !(data[4] == 0x6E && data[5] == 0x4E && data[6] == 0x90 && data[7] == 0x4E)) {
@@ -24,14 +28,14 @@ int frame_fifo_bytes(const uint8_t *data, int len, bool subghz) {
         for (int b = 0; b + 4 < len; b++)
             if (data[b] == 0x55 && data[b + 1] == 0x90 && data[b + 2] == 0x4E)
                 return (((int)data[b + 3] & 0x07) << 8 | data[b + 4]) + 2;
-        return 9999;
+        return -1;
     }
     if (subghz) {
         /* Need preamble(4) + sync(4) + PHR(1) at minimum to read length. */
-        if (len < 9) return 9999;
+        if (len < 9) return -1;
         return (int)data[8] + 3;
     }
-    if (len < 6) return 9999;
+    if (len < 6) return -1;
     return (int)data[5] + 1;
 }
 
@@ -122,7 +126,7 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
         if (a->phr_lo < 0) {
             /* First PHR byte. */
             uint8_t len = byte;
-            if (len >= 3 && len <= 200) {
+            if (len >= 3 && len <= RADIO_BUS_SUBGHZ_MAX_LEN) {
                 a->expected_len = len;
                 a->subghz_phr_len = 1;
                 a->state = TX_ASM_PAYLOAD;
@@ -135,7 +139,7 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
         } else {
             /* PHRB byte: low 8 bits */
             a->expected_len = (a->phr_lo << 8) | byte;
-            if (a->expected_len < 3 || a->expected_len > 200) {
+            if (a->expected_len < 3 || a->expected_len > RADIO_BUS_SUBGHZ_MAX_LEN) {
                 asm_back_to_preamble(a);
                 a->subghz = false;
                 a->ti_prop = false;

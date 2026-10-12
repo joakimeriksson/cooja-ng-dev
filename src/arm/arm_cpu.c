@@ -981,8 +981,10 @@ int arm_io_lookup_check(arm_cpu_t *cpu, uint32_t addr) {
 void arm_register_io(arm_cpu_t *cpu, uint32_t base, uint32_t size,
                      arm_io_read_fn read, arm_io_write_fn write, void *data) {
     if (cpu->num_io_regions >= ARM_MAX_IO_REGIONS) {
-        fprintf(stderr, "ARM: too many IO regions\n");
-        return;
+        /* A dropped window reads as unmapped and fails far from here. */
+        fprintf(stderr, "ARM: too many IO regions (ARM_MAX_IO_REGIONS %d)\n",
+                ARM_MAX_IO_REGIONS);
+        abort();
     }
     arm_io_region_t *r = &cpu->io_regions[cpu->num_io_regions++];
     r->base = base;
@@ -2010,7 +2012,11 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
             /* Nothing queued at all (RIOT's hello-world idles in WFI once
              * main returns, with no timer armed): sleep to the slice horizon
              * like an event beyond it.  Breaking without advancing left
-             * arm_step_until re-entering at the same cycle forever. */
+             * arm_step_until re-entering at the same cycle forever.  Not
+             * folded into the branch above: that one sets cycles to the
+             * horizon even when the core already ran past it (winding the
+             * clock back), and the simulation depends on that exactly; this
+             * one never moves backwards, nor to an INT64_MAX horizon. */
             if (cpu->cycle_limit != INT64_MAX && cpu->cycle_limit > cpu->cycles) {
                 cpu->lpm_ns += arm_cycles_to_ns(cpu->cycle_limit - cpu->cycles,
                                                 cpu->cpu_freq_hz);

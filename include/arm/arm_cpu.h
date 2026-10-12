@@ -66,7 +66,7 @@
 #define ARM_SYSTEM_BASE   0xE0000000
 
 /* --- IO region dispatch --- */
-#define ARM_MAX_IO_REGIONS 64
+#define ARM_MAX_IO_REGIONS 96     /* CC13x2: 62 (its windows + nonbuf aliases + core) */
 
 typedef int  (*arm_io_read_fn)(void *user_data, uint32_t addr);
 typedef void (*arm_io_write_fn)(void *user_data, uint32_t addr, uint32_t value);
@@ -82,7 +82,7 @@ typedef struct {
 /* One hash slot of the page-indexed IO lookup.  n == 0 marks an empty slot
  * (the whole table is memset to zero on rebuild), so a page whose peripheral
  * really registered with n entries always has n >= 1. */
-#define ARM_IO_PAGE_SLOTS 128   /* power of two, > 2x the pages any SoC maps */
+#define ARM_IO_PAGE_SLOTS 256   /* power of two, > 2x the pages any SoC maps (CC13x2: 79) */
 #define ARM_IO_PAGE_CHAIN 4
 typedef struct {
     uint32_t page;                       /* addr >> 12 */
