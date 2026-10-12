@@ -16,6 +16,8 @@ modes: the sub-GHz proprietary mode Contiki uses by default on this board
 | L1 reset → `main()` | ~15 000 cycles, through `SetupTrimDevice()` in the stand-in ROM |
 | L2 console | banner on UART0 at the programmed baud rate |
 | L3 LEDs | `leds-nullradio` sequence on DIO6/DIO7 (`CSIM_GPIO_TRACE=1`) |
+| L3 buttons | `configs/test-button-cc1352r1-launchpad.yaml` + `test/scripts/button-cc1352r1-launchpad.cnsh` — button-hal press/periodic/release on BTN-1 and BTN-2 (IOC pull-up, edge detect, AON GPIO edge interrupt) |
+| L3 console input | `configs/test-shell-cc1352r1-launchpad.yaml` — the Contiki shell takes a line longer than the 32-byte RX FIFO (input paced at the baud rate) |
 | L4 Contiki timers | `configs/test-boot-cc1352r1-launchpad.yaml` |
 | L5 radio, prop | `configs/test-nullnet-cc1352r1-launchpad.yaml` |
 | L6 full stack, prop | `configs/test-rpl-udp-cc1352r1-launchpad.yaml` — ~790x real time |
@@ -61,7 +63,8 @@ lag are the suspects.
 
 ## Other operating systems
 
-Stock Zephyr (v4.2, `cc1352r1_launchxl`) and RIOT (`cc1352-launchpad`)
+Stock Zephyr (main after v4.2.0, `v4.2.0-5538-g55473922756`;
+`cc1352r1_launchxl`) and RIOT (`cc1352-launchpad`)
 images run unmodified:
 
 - Zephyr `hello_world`; `synchronization` (kernel timer on the AON RTC: a
@@ -126,3 +129,14 @@ helper are in `tools/cc13x2-hwcheck/`.
   address), one 64-bit number per 1 ms (the FRO sampling time is not
   modelled).
 - CMD_IEEE_CSMA is unslotted CSMA-CA only.
+
+## Tracing
+
+All to stderr, read once per run:
+
+| Variable | Logs |
+|---|---|
+| `CC13X2_TRACE=1` | accesses to windows modelled only as a register store, with the PC (`=2`: every modelled window too) |
+| `CC13X2_RFC_TRACE=1` | every RF core command, status word and frame (`=2`: every RX byte too) |
+| `CC13X2_RTC_TRACE=1` | AON RTC compare writes, arming decisions and channel events |
+| `CSIM_GPIO_TRACE=1` | timestamped GPIO DOUT changes |

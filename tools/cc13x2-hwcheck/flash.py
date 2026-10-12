@@ -9,16 +9,18 @@ and prints every UART line for SECONDS with the host time since the reset.
 The host times carry USB-serial latency (tens of ms, lines arrive in
 bursts); hwcheck takes its timings on the chip for that reason.
 
-PORT defaults to the first /dev/cu.usbmodem*1 (the XDS110's application
-UART is its lower-numbered interface).  Needs openocd 0.12 and pyserial.
+PORT defaults to the XDS110's application UART: of the two serial ports
+the probe (USB 0451:bef3) presents, the lower-numbered one
+(/dev/cu.usbmodem...1 on macOS, /dev/ttyACM0 on Linux).  Needs openocd 0.12
+and pyserial.
 """
-import glob
 import os
 import subprocess
 import sys
 import time
 
 import serial
+from serial.tools import list_ports
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BOARD = ['openocd', '-f', 'board/ti_cc13x2_launchpad.cfg']
@@ -37,13 +39,19 @@ def flash(elf):
     sys.exit('flash failed:\n' + out[-2000:])
 
 
+def xds110_uart():
+    ports = sorted(p.device for p in list_ports.comports()
+                   if p.vid == 0x0451 and p.pid == 0xBEF3)
+    return ports[:1]
+
+
 def main():
     args = sys.argv[1:]
     if len(args) < 2:
         sys.exit(__doc__)
     elf = None if args[0] == '--no-flash' else os.path.abspath(args[0])
     secs = float(args[1])
-    ports = [args[2]] if len(args) > 2 else sorted(glob.glob('/dev/cu.usbmodem*1'))
+    ports = [args[2]] if len(args) > 2 else xds110_uart()
     if not ports:
         sys.exit('no XDS110 UART found')
     if elf:

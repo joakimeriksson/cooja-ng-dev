@@ -1,8 +1,9 @@
 /*
  * CC13x2 hardware check: measurements that compare the csim model with a
  * LaunchPad, taken on the chip so that USB-serial latency does not enter.
- * The same image runs on the board and in csim; tools/cc13x2-hwcheck/
- * compare.py lines the two outputs up.
+ * The same image runs on the board (tools/cc13x2-hwcheck/flash.py logs
+ * its UART) and in csim; devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md
+ * puts the two outputs side by side.
  *
  *  rtc-lag   When the AON RTC channel 2 event flag becomes visible relative
  *            to the compare value.  Channel 2 is free under Contiki (TI's

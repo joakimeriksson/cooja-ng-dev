@@ -82,7 +82,8 @@ The CC13x2 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
   unless `ICEPICK_DEVICE_ID`/`USER_ID` decode to a CC13x2 PG2.0+;
   `Power_init()` spins unless `TFW_FT % 10000 > 682`; the PIN driver sizes
   its pin range from `IOCONF.GPIO_CNT` (28 here). csim maps FCFG1 as dumped
-  from a LaunchPad (`hardware/fcfg1.bin`), with the per-node MAC words
+  from a LaunchPad (`fcfg1_launchpad[]` in `src/arm/cc13x2_soc.c`), with
+  that chip's MAC and die-ID words blanked and per-node MAC words
   overlaid.
 - **CCFG overrides the IEEE address** when any byte of `CCFG:IEEE_MAC_0/1`
   is not `0xFF`; otherwise Contiki takes FCFG1 `MAC_15_4_0/1`, which csim

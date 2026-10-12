@@ -347,6 +347,15 @@ jobs:
           grep -q 'This board features a(n) cc26x2_cc13x2 CPU' out.txt
           grep -q 'Simulated time:   5000 ms' out.txt
 
+      - name: CC1352R1 LaunchPad console input and buttons
+        # UART0 RX paced at the baud rate (a shell line longer than the
+        # 32-byte FIFO), and BTN-1/BTN-2 through the IOC pull-up, edge
+        # detect and the AON GPIO edge interrupt (Contiki's button-hal).
+        run: |
+          ./build/test_runner test configs/test-shell-cc1352r1-launchpad.yaml
+          ./build/test_runner test configs/test-button-cc1352r1-launchpad.yaml \
+            --script test/scripts/button-cc1352r1-launchpad.cnsh
+
       - name: CC1352R1 LaunchPad nullnet + RPL-UDP, RF core IEEE mode (2.4 GHz)
         # CMD_IEEE_RX/TX/RX_ACK, frame filtering, hardware auto-ACK, CCA_REQ.
         run: |

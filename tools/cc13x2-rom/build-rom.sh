@@ -60,7 +60,10 @@ $OBJCOPY -O binary "$TMP/rom.elf" "$TMP/rom.bin"
 [ -n "${ROM_ELF:-}" ] && cp "$TMP/rom.elf" "$ROM_ELF"
 
 SDK_VER="$(git -C "$SDK" describe --always --dirty 2>/dev/null || echo unknown)"
-python3 - "$TMP/rom.bin" "$OUT" "$SDK_VER" <<'EOF'
+# -Os output differs between gcc releases: the SDK revision alone does not
+# make the image reproducible, so the header records the compiler too.
+CC_VER="$($CC --version | head -1)"
+python3 - "$TMP/rom.bin" "$OUT" "$SDK_VER" "$CC_VER" <<'EOF'
 import sys
 data = open(sys.argv[1], "rb").read()
 with open(sys.argv[2], "w") as f:
@@ -69,7 +72,11 @@ with open(sys.argv[2], "w") as f:
             " * csim's CC13x2/CC26x2 stand-in ROM, mapped at 0x10000000: driverlib\n"
             " * (BSD-3-Clause, Texas Instruments) from the SimpleLink core SDK,\n"
             " * coresdk_cc13xx_cc26xx %s, behind the ROM API tables rom.h calls.\n"
-            " */\n" % sys.argv[3])
+            " * Compiled by %s.\n"
+            " *\n"
+            " * This array is driverlib in binary form: its licence notice and\n"
+            " * disclaimer are in tools/cc13x2-rom/LICENSE-TI-driverlib.\n"
+            " */\n" % (sys.argv[3], sys.argv[4]))
     f.write("#include <stddef.h>\n#include <stdint.h>\n\n")
     f.write("const size_t cc13x2_rom_image_size = %d;\n" % len(data))
     f.write("const uint8_t cc13x2_rom_image[%d] = {\n" % len(data))

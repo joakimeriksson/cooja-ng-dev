@@ -70,6 +70,7 @@
 #define CMD_START_RAT           0x0405
 #define CMD_PING                0x0406
 #define CMD_BUS_REQUEST         0x040E
+#define CMD_RF_CLK_CTL          0x0607  /* the RF driver's RF_CMD0: clock control */
 #define CMD_SET_RAT_CMP         0x000A
 #define CMD_SET_TX_POWER        0x0010
 #define CMD_UPDATE_FS           0x0011
@@ -91,6 +92,7 @@
 
 /* Status words */
 #define ST_IDLE                 0x0000
+#define ST_PENDING              0x0001
 #define ST_ACTIVE               0x0002
 #define ST_DONE_OK              0x0400
 #define ST_DONE_STOPPED         0x0404
@@ -129,6 +131,7 @@
 #define TRIG_NOW      0
 #define TRIG_NEVER    1
 #define TRIG_ABSTIME  2
+#define TRIG_REL_START 4
 #define TRIG_PAST_BM  0x80
 
 #define COND_ALWAYS        0
@@ -196,8 +199,7 @@ static void wr32(cc13x2_rfc_t *r, uint32_t a, uint32_t v) {
 /* CC13X2_RFC_TRACE=1: commands, status, frames; =2 adds every RX byte. */
 static int trace_level(void) {
     static int t = -1;
-    if (t < 0) { const char *e = getenv("CC13X2_RFC_TRACE"); t = e ? atoi(e) : 0; }
-    return t;
+    return cc13x2_env_level(&t, "CC13X2_RFC_TRACE");
 }
 static int trace_on(void) { return trace_level() > 0; }
 #define RTRC(rfc, ...) do { if (trace_on()) { \
@@ -278,6 +280,12 @@ static cc13x2_rfc_op_t *slot_for(cc13x2_rfc_t *rfc, uint16_t cmd) {
 
 static void op_start(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint32_t addr);
 static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s);
+static void chain_ev_cb(void *user, cpu_event_t *ev);
+
+/* Synchronous pNextOp chaining nests this deep before the next operation
+ * is deferred (op_finish). Contiki and Zephyr chains are 2-3 long. */
+#define CHAIN_SYNC_MAX  16
+#define CHAIN_DEFER_NS  1000
 
 static void set_status(cc13x2_rfc_t *rfc, uint32_t op, uint16_t st) {
     wr16(rfc, op + OP_STATUS, st);
@@ -297,6 +305,7 @@ static void op_finish(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint16_t status,
                       bool result, bool chain) {
     uint32_t op = s->addr;
     bool fg = (s == &rfc->fg);
+    cc13x2_cancel(rfc->soc, &s->ev);
     set_status(rfc, op, status);
     RTRC(rfc, "op 0x%08x cmd 0x%04x done status 0x%04x", op, s->cmd, status);
     s->addr = 0;
@@ -329,17 +338,38 @@ static void op_finish(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint16_t status,
     uint32_t done = fg ? IRQ_FG_COMMAND_DONE : IRQ_COMMAND_DONE;
     if (!next) done |= fg ? IRQ_LAST_FG_COMMAND_DONE : IRQ_LAST_COMMAND_DONE;
     if (fg) rfc->ieee.ack_listen = false;
-    if (fg && !next) {
-        /* The foreground chain is over: a background RX resumes. */
+    if (fg && !next && rfc->ieee.bg_suspended) {
+        /* A transmit chain is over: the background RX resumes, hunting.
+         * (A chain that never took the radio, e.g. RX_ACK, leaves a frame
+         * the background RX is receiving alone.) */
         rfc->ieee.bg_suspended = false;
         rfc->rx.state = RX_HUNT;
         rfc->rx.shift = 0;
     }
     raise_cpe(rfc, done);
-    if (next) {
-        uint16_t ncmd = rd16(rfc, next);
-        op_start(rfc, slot_for(rfc, ncmd), next);
+    if (!next) return;
+    if (rfc->chain_depth >= CHAIN_SYNC_MAX) {
+        /* Operations that finish at once (NOP, FS_OFF ...) chain by
+         * recursion here; a chain that loops back on itself would never
+         * unwind. The radio CPU takes time per command, so the next one
+         * starts a microsecond later and the recursion starts over. */
+        rfc->chain_next = next;
+        rfc->chain_ev.callback = chain_ev_cb;
+        rfc->chain_ev.user_data = rfc;
+        cc13x2_schedule_at(rfc->soc, &rfc->chain_ev, now_ns(rfc) + CHAIN_DEFER_NS);
+        return;
     }
+    rfc->chain_depth++;
+    op_start(rfc, slot_for(rfc, rd16(rfc, next)), next);
+    rfc->chain_depth--;
+}
+
+static void chain_ev_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc13x2_rfc_t *rfc = user;
+    uint32_t next = rfc->chain_next;
+    rfc->chain_next = 0;
+    if (next) op_start(rfc, slot_for(rfc, rd16(rfc, next)), next);
 }
 
 static void op_ev_cb(void *user, cpu_event_t *ev) {
@@ -368,11 +398,6 @@ static void op_start(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint32_t addr) {
     s->phase = 0;
     s->stop_req = false;
     rfc->stat_cmds++;
-    /* Transmitting takes the radio from a background RX until the frame
-     * is out. CMD_IEEE_RX_ACK does not: it watches the background RX's
-     * frames for its ACK (which that RX also stores — Contiki's CSMA,
-     * without CSMA_USE_RADIO_ACK, reads the ACK from the RX queue). */
-    if (s->cmd == CMD_IEEE_TX) rfc->ieee.bg_suspended = true;
     uint8_t trig = rd8(rfc, addr + OP_TRIGGER);
     int ttype = trig & 0x0F;
     RTRC(rfc, "op 0x%08x cmd 0x%04x start trig %d", addr, s->cmd, ttype);
@@ -380,7 +405,7 @@ static void op_start(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint32_t addr) {
         uint32_t when = rd32(rfc, addr + OP_STARTTIME);
         int32_t d = (int32_t)(when - rat_now(rfc));
         if (d > 0) {
-            set_status(rfc, addr, 0x0001);              /* PENDING */
+            set_status(rfc, addr, ST_PENDING);
             s->phase = -1;                              /* waiting to start */
             op_after(rfc, s, (int64_t)d * 250);         /* 4 MHz RAT ticks */
             return;
@@ -390,7 +415,7 @@ static void op_start(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, uint32_t addr) {
             return;
         }
     } else if (ttype == TRIG_NEVER) {
-        set_status(rfc, addr, 0x0001);
+        set_status(rfc, addr, ST_PENDING);
         s->phase = -2;                                  /* never starts by itself */
         return;
     } else if (ttype != TRIG_NOW) {
@@ -580,10 +605,16 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
         if (s->phase == 0) {
             if (!rfc->synth_ok) {
                 /* Measured: ends at once, before any turnaround. */
-                rfc->ieee.bg_suspended = false;
                 op_finish(rfc, s, IEEE_ERROR_NO_FS, false, false);
                 return;
             }
+            /* Transmitting takes the radio from a background RX from the
+             * moment the operation is ACTIVE until the frame is out.
+             * CMD_IEEE_RX_ACK does not: it watches the background RX's
+             * frames for its ACK (which that RX also stores — Contiki's
+             * CSMA, without CSMA_USE_RADIO_ACK, reads the ACK from the
+             * RX queue). */
+            rfc->ieee.bg_suspended = true;
             /* RX -> TX turnaround before the first preamble symbol. */
             s->phase = 1;
             op_after(rfc, s, IEEE_TURNAROUND_NS);
@@ -743,7 +774,7 @@ static void prop_tx_emit(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s, int64_t *air_ns)
     *air_ns = (int64_t)total * SUBGHZ_BYTE_NS;
     RTRC(rfc, "prop TX %d payload bytes (crc %d), %d on air", n, crc_len, total);
 
-    void *user = rfc->tx_user[1];
+    void *user = rfc->tx_user[rfc->radio_idx];
     if (!rfc->tx_cb) return;
     /* Preamble (preamMode 0: 0101..., i.e. 0x55 MSB first), sync word MSB
      * first, the header as a little-endian word sent MSB first (so the PHR
@@ -789,9 +820,9 @@ static void prop_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
     /* endTrigger: TRIG_NEVER runs until CMD_STOP/ABORT; a relative or
      * absolute end time ends the operation then. */
     uint8_t et = rd8(rfc, op + 31) & 0x0F;
-    if (et == TRIG_ABSTIME || et == 4 /* TRIG_REL_START */) {
+    if (et == TRIG_ABSTIME || et == TRIG_REL_START) {
         uint32_t t = rd32(rfc, op + 32);
-        int64_t d = (et == 4) ? (int64_t)t * 250
+        int64_t d = (et == TRIG_REL_START) ? (int64_t)t * 250
                               : (int64_t)(int32_t)(t - rat_now(rfc)) * 250;
         s->phase = 1;
         op_after(rfc, s, d > 0 ? d : 0);
@@ -952,7 +983,7 @@ static void prop_rx_byte(cc13x2_rfc_t *rfc, uint8_t byte, int8_t rssi) {
         rfc->rx.hdr = (uint16_t)((rfc->rx.hdr << 8) | byte);   /* MSB first */
         if (++rfc->rx.hdr_count < hdr_bytes) return;
         int len_pos = (hconf >> 6) & 0x1F, len_bits = (hconf >> 11) & 0x1F;
-        int len = (rfc->rx.hdr >> len_pos) & ((1 << len_bits) - 1);
+        int len = (int)((rfc->rx.hdr >> len_pos) & ((1u << len_bits) - 1u));
         int8_t len_off = (int8_t)rd8(rfc, op + 30);
         int n = len + len_off;
         uint8_t pkt_conf = rd8(rfc, op + 14);
@@ -1090,9 +1121,9 @@ static void ieee_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
     uint32_t e = q ? rd32(rfc, q) : 0;
     if (e && rd8(rfc, e + 4) == DE_PENDING) wr8(rfc, e + 4, DE_ACTIVE);
     uint8_t et = rd8(rfc, op + 55) & 0x0F;
-    if (et == TRIG_ABSTIME || et == 4) {
+    if (et == TRIG_ABSTIME || et == TRIG_REL_START) {
         uint32_t t = rd32(rfc, op + 56);
-        int64_t d = (et == 4) ? (int64_t)t * 250
+        int64_t d = (et == TRIG_REL_START) ? (int64_t)t * 250
                               : (int64_t)(int32_t)(t - rat_now(rfc)) * 250;
         s->phase = 1;
         op_after(rfc, s, d > 0 ? d : 0);
@@ -1200,7 +1231,7 @@ static void ieee_rx_frame(cc13x2_rfc_t *rfc) {
     uint8_t fcs[2];
     bool crc_ok = len >= 2;
     if (crc_ok) { ieee_fcs(m, len - 2, fcs); crc_ok = fcs[0] == m[len - 2] && fcs[1] == m[len - 1]; }
-    int n = crc_ok || len >= 2 ? len - 2 : 0;   /* MPDU without FCS */
+    int n = len >= 2 ? len - 2 : 0;             /* MPDU without FCS */
     int64_t frame_end = rfc->rx.last_byte_ns + IEEE_BYTE_NS;
 
     /* CMD_IEEE_RX_ACK waiting: a matching ACK ends it; the frame is still
@@ -1392,7 +1423,7 @@ static uint32_t direct_cmd(cc13x2_rfc_t *rfc, uint32_t cmdr) {
     switch (id) {
     case CMD_BUS_REQUEST:
     case CMD_PING:
-    case 0x0607:                      /* CMD0: patch/clock control (RF driver) */
+    case CMD_RF_CLK_CTL:
         return CMDSTA_DONE;
     case CMD_START_RAT:
         rfc->rat_running = true;
@@ -1426,8 +1457,6 @@ static uint32_t direct_cmd(cc13x2_rfc_t *rfc, uint32_t cmdr) {
         return CMDSTA_UNKNOWN_DIR_CMD;
     }
 }
-
-static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr);
 
 static uint32_t immediate_cmd(cc13x2_rfc_t *rfc, uint32_t addr, uint16_t cmd) {
     switch (cmd) {
@@ -1583,12 +1612,17 @@ static void rfc_clear(cc13x2_rfc_t *rfc) {
     void *bu = rfc->busy_user;
     struct cc13x2_soc *soc = rfc->soc;
     int ch = rfc->channel, idx = rfc->radio_idx, nid = rfc->node_id;
+    uint16_t lfsr = rfc->ieee.csma_lfsr;
     uint64_t st[5] = { rfc->stat_tx, rfc->stat_rx_ok, rfc->stat_rx_crc_err,
                        rfc->stat_rx_buf_full, rfc->stat_cmds };
     if (soc) {
+        /* Every queued event: the queue is intrusive, so zeroing a queued
+         * node below would cut the queue. */
         cc13x2_cancel(soc, &rfc->boot_ev);
         cc13x2_cancel(soc, &rfc->bg.ev);
         cc13x2_cancel(soc, &rfc->fg.ev);
+        cc13x2_cancel(soc, &rfc->ieee.ack_ev);
+        cc13x2_cancel(soc, &rfc->chain_ev);
     }
     memset(rfc, 0, sizeof(*rfc));
     rfc->soc = soc;
@@ -1597,6 +1631,9 @@ static void rfc_clear(cc13x2_rfc_t *rfc) {
     rfc->channel = ch; rfc->radio_idx = idx; rfc->node_id = nid;
     rfc->stat_tx = st[0]; rfc->stat_rx_ok = st[1]; rfc->stat_rx_crc_err = st[2];
     rfc->stat_rx_buf_full = st[3]; rfc->stat_cmds = st[4];
+    /* The backoff stream runs on across power cycles, as the TRNG's does
+     * (cc13x2_soc.c): each power-up does not replay the same backoffs. */
+    rfc->ieee.csma_lfsr = lfsr;
 }
 
 void cc13x2_rfc_init(cc13x2_rfc_t *rfc, struct cc13x2_soc *soc) {

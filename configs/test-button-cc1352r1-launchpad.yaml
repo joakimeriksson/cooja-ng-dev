@@ -1,0 +1,13 @@
+# TI CC1352R1 LaunchPad buttons: Contiki-NG's button-hal example with the
+# null radio. Driven from test/scripts/button-cc1352r1-launchpad.cnsh.
+
+version: 2
+title: "CC1352R1 LaunchPad buttons (button-hal, null radio)"
+timeout_ms: 10000
+seed: 42
+
+mote_types:
+  - { name: buttons, firmware: firmware/cc1352r1-launchpad/button-hal-nullradio.cc1352r1-launchpad }
+
+nodes:
+  - { type: buttons, id: 1, x: 0.0, y: 0.0 }

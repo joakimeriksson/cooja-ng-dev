@@ -89,6 +89,7 @@ Optional dependencies: **GNU Lightning** (MSP430 JIT, silent fallback if missing
 | `.nrf52840-dongle` | ARM Cortex-M4F — Nordic PCA10059 USB Dongle |
 | `.nrf52840-dk` | ARM Cortex-M4F — Nordic PCA10056 DK |
 | `.nrf54l15-dk` | ARM Cortex-M33 — Nordic PCA10156 DK |
+| `.cc1352r1-launchpad` | ARM Cortex-M4F — TI LAUNCHXL-CC1352R1 (CC13x2 + RF core: sub-GHz prop and 2.4 GHz IEEE) |
 | `.cooja` | Native Cooja shared library |
 
 Per-board details live in [`devices/`](devices/) and the SoC source files under `src/{msp430,arm}/`.

@@ -14,9 +14,10 @@ reads those macros and writes a C file with
   - the module tables and ROM_API_TABLE itself, placed by the linker script
     at the address rom.h gives.
 
-A slot rom.h does not name points at rom_unimplemented(), which traps, so a
-firmware call into a ROM function this file does not supply stops at the
-call instead of running into whatever happens to be there.
+A slot rom.h does not name points at rom_unimplemented(), so a firmware
+call into a ROM function this file does not supply is reported on stderr
+with its call site and the CPU parks in a bkpt loop there, instead of
+running into whatever happens to be at the slot.
 
 Usage: gen-rom-tables.py <driverlib/rom.h> <out.c>
 """

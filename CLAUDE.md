@@ -228,12 +228,16 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 # then both radio modes: sub-GHz proprietary (Contiki's default on this board)
 # and 2.4 GHz IEEE, which joins a mixed Sky/CC2538/nRF52840 DAG.
 # CC13X2_TRACE=1 (2 = every window) logs register accesses; CC13X2_RFC_TRACE=1
-# logs every RF core command, status and frame.
+# logs every RF core command, status and frame; CC13X2_RTC_TRACE=1 logs AON
+# RTC compare writes, arming decisions and channel events.
 ./build/test_runner test configs/test-boot-cc1352r1-launchpad.yaml         # ~25s sim
 ./build/test_runner test configs/test-nullnet-cc1352r1-launchpad.yaml      # prop, L5
 ./build/test_runner test configs/test-rpl-udp-cc1352r1-launchpad.yaml      # prop, L6
 ./build/test_runner test configs/test-rpl-udp-ieee-cc1352r1-launchpad.yaml # IEEE, L6
 ./build/test_runner test configs/test-mixed-platform-cc1352r1.yaml         # 4 architectures, one DAG
+./build/test_runner test configs/test-shell-cc1352r1-launchpad.yaml        # UART0 RX: a line > the 32-byte FIFO
+./build/test_runner test configs/test-button-cc1352r1-launchpad.yaml --script test/scripts/button-cc1352r1-launchpad.cnsh
+                                  # BTN-1/BTN-2: IOC pull-up, edge detect, AON GPIO edge IRQ
 tools/cc13x2-rom/build-rom.sh     # regenerate src/arm/cc13x2_rom_image.c from the SDK's driverlib
 # Zephyr (stock samples, cc1352r1_launchxl) and RIOT (cc1352-launchpad) run too:
 ./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40000

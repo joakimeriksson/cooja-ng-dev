@@ -13,9 +13,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   both radio modes — sub-GHz proprietary (Contiki's default) and 2.4 GHz
   IEEE 802.15.4, which joins a mixed Sky/CC2538/nRF52840 DAG. Contiki-NG
   nullnet, RPL-UDP and TSCH, stock Zephyr samples (802.15.4 echo) and RIOT
-  hello-world run. Checked against a LaunchPad: factory configuration, the
-  AON RTC compare behaviour and RF status words match silicon
-  (`devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`).
+  hello-world run, and so do the board's buttons (Contiki's button-hal) and
+  console input (the Contiki shell). Checked against a LaunchPad: factory
+  configuration, the AON RTC compare behaviour and RF status words match
+  silicon (`devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`).
 
 ### Fixed
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now

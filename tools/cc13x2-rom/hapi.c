@@ -5,7 +5,7 @@
  * through it; the functions themselves are not part of driverlib, so they
  * are written here from their documented contracts (rom.h, the CC13x2
  * TRM's ROM chapter).  Entries rom.h marks reserved, and the analog-mux
- * selectors no csim firmware uses, trap.
+ * selectors no csim firmware uses, trap (rom_unimplemented).
  *
  * HFSourceSafeSwitch is the one entry that cannot be written as plain
  * register accesses: on silicon it is the ROM's job to commit a pending
@@ -23,8 +23,15 @@
 
 #define CSIM_HAPI_PORT            0x10040000u
 #define CSIM_HAPI_HF_SAFE_SWITCH  1u
+#define CSIM_HAPI_UNIMPLEMENTED   4u      /* port offset: write the caller */
 
+/* Every ROM slot rom.h does not name lands here.  The emulator reports the
+ * call site (LR) on stderr, then the CPU stays in this loop: a debugger
+ * stops on the bkpt, and without one the node stays parked here. */
 void rom_unimplemented(void) {
+    uint32_t lr;
+    __asm volatile ("mov %0, lr" : "=r" (lr));
+    HWREG(CSIM_HAPI_PORT + CSIM_HAPI_UNIMPLEMENTED) = lr;
     for (;;)
         __asm volatile ("bkpt #0xc5");
 }

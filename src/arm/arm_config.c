@@ -85,9 +85,11 @@ const arm_config_t nrf54l15_config = {
  *   - 38 external interrupts (inc/hw_ints.h NUM_INTERRUPTS = 54).
  *
  * The 256 KB ROM sits at 0x10000000, not at 0, so `rom_size` stays 0: the
- * SoC maps its stand-in ROM as an IO window (cc13x2_soc.c). ROM routines
- * are cold paths (power and clock setup), so they do not need the core's
- * direct-mapped fetch.
+ * SoC maps its stand-in ROM as an IO window (cc13x2_soc.c), so every
+ * halfword fetched from it goes through the IO lookup and the page's read
+ * handler. ROM routines are cold paths (power and clock setup), so they do
+ * not need the core's direct-mapped fetch; a firmware that idled in a ROM
+ * routine would.
  */
 const arm_config_t cc13x2_config = {
     .name             = "CC13x2",

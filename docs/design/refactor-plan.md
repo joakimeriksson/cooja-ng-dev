@@ -3277,7 +3277,10 @@ the same patch.
   power/clock paths.  `HFSourceSafeSwitch` is the one entry that cannot be
   plain register accesses; it pokes a csim-only port (`0x10040000`) that the
   emulated DDI0 OSC block commits the HF clock switch from.  A ROM slot
-  `rom.h` does not name traps (`bkpt 0xc5`) rather than running into zeros.
+  `rom.h` does not name traps rather than running into zeros: the stub
+  writes its caller to the same port (csim reports the call site on
+  stderr) and parks in a `bkpt 0xc5` loop.  The core executes `BKPT` as a
+  no-op without a debugger, so the node stays parked there, not stopped.
 
 ## Doc Status
 

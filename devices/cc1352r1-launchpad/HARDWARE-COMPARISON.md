@@ -12,9 +12,11 @@ down, so plain `init; halt` reads an all-zero scan chain; the script's
 
 ## Factory configuration
 
-FCFG1 read from the board (`dump_image fcfg1.bin 0x50001000 0x430`, kept in
-[`hardware/fcfg1.bin`](hardware/fcfg1.bin)) replaces csim's synthesized
-table; the per-node MAC words are still overlaid. The fields the boot path
+FCFG1 read from the board (`dump_image fcfg1.bin 0x50001000 0x430`)
+replaces csim's synthesized table (`fcfg1_launchpad[]` in
+`src/arm/cc13x2_soc.c`). The words that identify the one chip — its BLE and
+IEEE addresses and its die ID — are blanked there, and the per-node MAC
+words are overlaid as before. The fields the boot path
 depends on, against what csim synthesized before:
 
 | Field | Board | csim before |
@@ -29,8 +31,7 @@ depends on, against what csim synthesized before:
 ## Boot
 
 `hello-world-nullradio` prints the same banner on both, and on the board the
-chip's own factory address (`0012.4b00.1ca1.9758`), so the FCFG1 read path
-is the same. Host timestamps resolve tens of ms only (USB bursts):
+chip's own factory address, so the FCFG1 read path is the same. Host timestamps resolve tens of ms only (USB bursts):
 
 | | Board | csim |
 |---|---|---|

@@ -66,6 +66,9 @@ typedef struct cc13x2_rfc {
 
     /* Operation slots: background (prop, IEEE RX) and foreground (IEEE). */
     cc13x2_rfc_op_t bg, fg;
+    cpu_event_t     chain_ev;      /* deferred pNextOp start (op_finish) */
+    uint32_t        chain_next;
+    int             chain_depth;   /* synchronous chaining in progress */
 
     /* Receiver (prop RX_ADV). */
     struct {

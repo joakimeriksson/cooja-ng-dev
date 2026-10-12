@@ -22,13 +22,17 @@ extern const uint8_t cc13x2_rom_image[];
  * register store, with the PC — the first thing to read when firmware
  * stalls on a status bit this file does not yet produce.  CC13X2_TRACE=2
  * logs the modelled windows too (not the memories). */
+int cc13x2_env_level(int *cache, const char *name) {
+    if (__builtin_expect(*cache < 0, 0)) {
+        const char *e = getenv(name);
+        *cache = e ? (*e ? atoi(e) : 1) : 0;
+    }
+    return *cache;
+}
+
 static int cc13x2_trace = -1;
 static bool trace_on(void) {
-    if (cc13x2_trace < 0) {
-        const char *e = getenv("CC13X2_TRACE");
-        cc13x2_trace = e ? atoi(e) : 0;
-    }
-    return cc13x2_trace != 0;
+    return cc13x2_env_level(&cc13x2_trace, "CC13X2_TRACE") != 0;
 }
 
 static inline int64_t live_ns(cc13x2_soc_t *soc) {
@@ -187,8 +191,10 @@ static cc13x2_page_t *find_page(cc13x2_soc_t *soc, const char *name) {
 #define FCFG1_MAC_15_4_1         0x2F4
 
 /* FCFG1 as read from a LAUNCHXL-CC1352R1 (rev E, CC1352R PG2.1) with the
- * XDS110 and openocd (devices/cc1352r1-launchpad/hardware/fcfg1.bin):
+ * XDS110 and openocd:
  *   dump_image fcfg1.bin 0x50001000 0x430
+ * with the words that identify that one chip — MAC_BLE_0/1, MAC_15_4_0/1
+ * and SHDW_DIE_ID_0..3 — set to the erased value.
  * What the boot path depends on, as driverlib's chipinfo.c and TI's
  * prebuilt drivers decode it:
  *   ICEPICK_DEVICE_ID 0x3BB4102F: PG_REV 3 ("PG2.1 or later"), WAFER_ID
@@ -200,7 +206,7 @@ static cc13x2_page_t *find_page(cc13x2_soc_t *soc, const char *name) {
  *   IOCONF.GPIO_CNT = 28: the PIN driver sizes its pin range from it.
  * The trim words are this one chip's; SetupTrimDevice() copies them into
  * analog registers that csim stores and does not interpret.  The address
- * words (MAC_15_4, MAC_BLE) are replaced per node. */
+ * words (MAC_15_4, MAC_BLE) are filled in per node (fcfg1_init). */
 static const uint32_t fcfg1_launchpad[268] = {
     /* 0x000 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
     /* 0x018 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -233,7 +239,7 @@ static const uint32_t fcfg1_launchpad[268] = {
     /* 0x2a0 */ 0xfff2c500, 0xffffffff, 0x0003e703, 0x2f2f2ff3, 0x00112c03, 0xca57f87f,
     /* 0x2b8 */ 0xfaf8e0fb, 0xf4f2f0fc, 0xe8fff9f8, 0x9651a6df, 0xffffff2f, 0xffffffff,
     /* 0x2d0 */ 0xffffffff, 0xffffffff, 0xfffffffd, 0xffffffff, 0xffffffff, 0xffffffff,
-    /* 0x2e8 */ 0xb01edc58, 0xffff806f, 0x1ca19758, 0x00124b00, 0x000017bc, 0x000017ff,
+    /* 0x2e8 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x000017bc, 0x000017ff,
     /* 0x300 */ 0xffffffff, 0xff27fe07, 0x98989f9f, 0xffff393b, 0x00000003, 0x00010001,
     /* 0x318 */ 0x3bb4102f, 0x00000028, 0x0000cfff, 0x8f90917f, 0x8b8c8d8e, 0x8788898a,
     /* 0x330 */ 0x83848586, 0x9e7f7f7f, 0x9a9b9c9d, 0x96979899, 0x92939495, 0xffffff1c,
@@ -242,8 +248,8 @@ static const uint32_t fcfg1_launchpad[268] = {
     /* 0x378 */ 0xff483f47, 0xffffc3ff, 0xffffffff, 0xff1e551e, 0xf5eee5fd, 0xf00ffffe,
     /* 0x390 */ 0xffffffff, 0xffffffff, 0xe08403f8, 0xffffffff, 0xffffffff, 0xffffffff,
     /* 0x3a8 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x00000000,
-    /* 0x3c0 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xa0001d12, 0x00000000,
-    /* 0x3d8 */ 0x8a9f0010, 0xe80d40a8, 0x00000001, 0x00000000, 0x00000000, 0x77000000,
+    /* 0x3c0 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xffffffff, 0xffffffff,
+    /* 0x3d8 */ 0xffffffff, 0xffffffff, 0x00000001, 0x00000000, 0x00000000, 0x77000000,
     /* 0x3f0 */ 0xc0800001, 0x2af108aa, 0x00000ee5, 0x0a036b82, 0x92c5df93, 0x6a544fb3,
     /* 0x408 */ 0xffffc420, 0xfffe70ff, 0xffffffff, 0xffffffff, 0x30efa141, 0x30f5bbc4,
     /* 0x420 */ 0x04c10011, 0x09ac04ff, 0x05980012, 0x0b260017,
@@ -371,6 +377,13 @@ static void hapi_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
     if (off == 0 && val == 1) {
         if (osc_switch_pending(soc))
             soc->osc.hf_src = (soc->ddi0[DDI0_CTL0 / 4] & CTL0_SCLK_HF_SRC_SEL) ? 1 : 0;
+        return;
+    }
+    if (off == 4) {
+        /* tools/cc13x2-rom/hapi.c rom_unimplemented: val is its caller. */
+        fprintf(stderr, "[cc13x2] node %d: call into a ROM slot the stand-in ROM does "
+                "not implement, from 0x%08x; the CPU is parked in a bkpt loop\n",
+                soc->rfc.node_id, val & ~1u);
         return;
     }
     fprintf(stderr, "[cc13x2] HAPI port: unknown request 0x%x at +0x%x\n", val, off);
@@ -504,13 +517,13 @@ static bool rfc_powered(cc13x2_soc_t *soc) {
 #define PRCM_OSCICR  0x298
 
 static void osc_irq_update(cc13x2_soc_t *soc) {
-    cc13x2_page_t *p = find_page(soc, "PRCM");
+    cc13x2_page_t *p = soc->pg_prcm;
     if (p && (REG(p, PRCM_OSCRIS) & REG(p, PRCM_OSCIMSC)))
         irq_raise(soc, CC13X2_IRQ_OSC_COMB);
 }
 
 static void osc_irq_latch(cc13x2_soc_t *soc, uint32_t bits) {
-    cc13x2_page_t *p = find_page(soc, "PRCM");
+    cc13x2_page_t *p = soc->pg_prcm;
     if (!p) return;
     REG(p, PRCM_OSCRIS) |= bits;
     osc_irq_update(soc);
@@ -695,8 +708,7 @@ static void rtc_arm_channel(cc13x2_soc_t *soc, int ch, bool armed_now);
 /* CC13X2_RTC_TRACE=1: compare writes, arming decisions and channel events. */
 static bool rtc_trace(void) {
     static int t = -1;
-    if (t < 0) t = getenv("CC13X2_RTC_TRACE") ? 1 : 0;
-    return t != 0;
+    return cc13x2_env_level(&t, "CC13X2_RTC_TRACE") != 0;
 }
 
 static void rtc_ch_cb(void *user, cpu_event_t *ev) {
@@ -787,7 +799,7 @@ static uint32_t aon_rtc_read(cc13x2_soc_t *soc, uint32_t off) {
         v = (uint32_t)(t >> 15);
         break;
     case RTC_SUBSEC:   v = soc->rtc.subsec_latch; break;
-    case RTC_SUBSECINC: v = 0x8000u; break;     /* 2^38 / 32768 >> 6 alignment */
+    case RTC_SUBSECINC: v = 0x800000u; break;   /* 2^38 / 32768: exactly 32768 Hz */
     case RTC_CHCTL:    v = soc->rtc.chctl; break;
     case RTC_CH0CMP:   v = soc->rtc.cmp[0]; break;
     case RTC_CH1CMP:   v = soc->rtc.cmp[1]; break;
@@ -870,11 +882,63 @@ static void aon_rtc_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
 #define GPIO_EVFLAGS     0xE0
 #define GPIO_PIN_MASK    0x7FFFFFFFu
 
-static uint32_t gpio_din(cc13x2_soc_t *soc) {
+/* IOC:IOCFGn, one word per DIO at 4 x n (inc/hw_ioc.h). */
+#define IOCFG_PULL_CTL_M   0x00006000u
+#define IOCFG_PULL_UP      0x00004000u
+#define IOCFG_EDGE_DET_NEG 0x00010000u
+#define IOCFG_EDGE_DET_POS 0x00020000u
+#define IOCFG_EDGE_IRQ_EN  0x00040000u
+#define IOCFG_IE           0x20000000u
+#define IRQ_AON_GPIO_EDGE  0           /* INT_AON_GPIO_EDGE (16) - 16 */
+
+static uint32_t iocfg(cc13x2_soc_t *soc, int dio) {
+    return soc->pg_ioc ? REG(soc->pg_ioc, (uint32_t)dio * 4u) : 0;
+}
+
+/* The level on each pad: driven from outside (a button), else by the
+ * output driver, else by the IOCFG pull (an unpulled input reads 0). */
+static uint32_t gpio_levels(cc13x2_soc_t *soc) {
     cc13x2_gpio_t *g = &soc->gpio;
-    uint32_t v = g->dout & g->doe;
+    uint32_t v = g->dout & g->doe, pulled = 0;
+    for (int dio = 0; dio < CC13X2_NUM_DIO; dio++)
+        if ((iocfg(soc, dio) & IOCFG_PULL_CTL_M) == IOCFG_PULL_UP) pulled |= 1u << dio;
+    v |= pulled & ~g->doe;
     v = (v & ~g->din_forced) | (g->din_ext & g->din_forced);
     return v & GPIO_PIN_MASK;
+}
+
+/* DIN: the pad level of input-enabled DIOs; an output reads back its own
+ * level (driverlib's GPIO_readDio on an output pin). */
+static uint32_t gpio_din(cc13x2_soc_t *soc) {
+    uint32_t ie = soc->gpio.doe;
+    for (int dio = 0; dio < CC13X2_NUM_DIO; dio++)
+        if (iocfg(soc, dio) & IOCFG_IE) ie |= 1u << dio;
+    return gpio_levels(soc) & ie;
+}
+
+/* An outside level on a DIO (button, `gpio` in the shell); level < 0 lets
+ * the pad follow its driver or pull again.  An edge the IOCFG selects sets
+ * EVFLAGS and, with EDGE_IRQ_EN, the AON GPIO edge interrupt. */
+int cc13x2_soc_set_input_pin(cc13x2_soc_t *soc, int dio, int level) {
+    if (dio < 0 || dio >= CC13X2_NUM_DIO) return -1;
+    cc13x2_gpio_t *g = &soc->gpio;
+    uint32_t bit = 1u << dio;
+    uint32_t before = gpio_levels(soc);
+    if (level < 0) {
+        g->din_forced &= ~bit;
+    } else {
+        g->din_forced |= bit;
+        g->din_ext = level ? (g->din_ext | bit) : (g->din_ext & ~bit);
+    }
+    uint32_t after = gpio_levels(soc);
+    if (!((before ^ after) & bit)) return 0;
+    uint32_t cfg = iocfg(soc, dio);
+    uint32_t det = (after & bit) ? IOCFG_EDGE_DET_POS : IOCFG_EDGE_DET_NEG;
+    if (cfg & det) {
+        g->evflags |= bit;
+        if (cfg & IOCFG_EDGE_IRQ_EN) irq_raise(soc, IRQ_AON_GPIO_EDGE);
+    }
+    return 0;
 }
 
 static uint32_t gpio_read(cc13x2_soc_t *soc, uint32_t off) {
@@ -897,8 +961,7 @@ static uint32_t gpio_read(cc13x2_soc_t *soc, uint32_t off) {
 /* CSIM_GPIO_TRACE=1: timestamped DOUT changes (same format as nRF54L15). */
 static void gpio_trace(cc13x2_soc_t *soc, uint32_t before) {
     static int on = -1;
-    if (on < 0) on = getenv("CSIM_GPIO_TRACE") ? 1 : 0;
-    if (!on || before == soc->gpio.dout) return;
+    if (!cc13x2_env_level(&on, "CSIM_GPIO_TRACE") || before == soc->gpio.dout) return;
     fprintf(stderr, "[GPIO] %9.3f DOUT 0x%08x -> 0x%08x (changed 0x%08x)\n",
             (double)live_ns(soc) / 1e9, before, soc->gpio.dout,
             before ^ soc->gpio.dout);
@@ -1057,6 +1120,7 @@ static void trng_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32
 #define UART_DMACTL 0x48
 
 #define UART_INT_EOT  0x800u
+#define UART_INT_OE   0x400u
 #define UART_INT_RT   0x040u
 #define UART_INT_TX   0x020u
 #define UART_INT_RX   0x010u
@@ -1077,12 +1141,13 @@ static void uart_update_irq(cc13x2_soc_t *soc) {
  * peripheral clock) / (16 * (IBRD + FBRD/64)) baud, 10 bits per frame
  * for 8N1 (LCRH: WLEN [6:5], PEN, STP2 add bits). */
 static int64_t uart_char_ns(cc13x2_uart_t *u) {
-    double div = (double)u->ibrd + (double)u->fbrd / 64.0;
-    if (div < 1.0) div = 26.0 + 3.0 / 64.0;          /* 115200 at 48 MHz */
-    double baud = 48000000.0 / (16.0 * div);
+    /* The divisor in 1/64ths: IBRD.FBRD, 115200 at 48 MHz until it is set. */
+    uint64_t div64 = (uint64_t)u->ibrd * 64u + u->fbrd;
+    if (div64 < 64u) div64 = 26u * 64u + 3u;
     int bits = 1 + 5 + (int)((u->lcrh >> 5) & 3u) + ((u->lcrh & 2u) ? 1 : 0) +
                ((u->lcrh & 8u) ? 2 : 1);
-    return (int64_t)((double)bits * 1e9 / baud);
+    /* bits / baud = bits * 16 * (div64 / 64) / 48 MHz = bits * div64 / 192 MHz */
+    return (int64_t)((uint64_t)bits * div64 * 125u / 24u);
 }
 
 static void uart_start_next(cc13x2_soc_t *soc);
@@ -1173,15 +1238,45 @@ static void uart_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
     uart_update_irq(soc);
 }
 
-void cc13x2_uart_feed_rx(cc13x2_soc_t *soc, const uint8_t *buf, int len) {
+/* Console input arrives on the wire at the programmed baud rate, one
+ * character time apart, so a line longer than the 32-byte RX FIFO reaches
+ * firmware that keeps reading it.  A character that finds the FIFO full is
+ * lost and sets the overrun flag, as on silicon. */
+static void uart_rx_pace_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc13x2_soc_t *soc = user;
     cc13x2_uart_t *u = &soc->uart0;
-    for (int i = 0; i < len && u->rx_count < UART_FIFO; i++) {
-        u->rx_fifo[(u->rx_head + u->rx_count) % UART_FIFO] = buf[i];
+    if (u->wire_count == 0) return;
+    uint8_t b = u->wire[u->wire_head];
+    u->wire_head = (u->wire_head + 1) % CC13X2_UART_WIRE;
+    u->wire_count--;
+    if (u->rx_count < UART_FIFO) {
+        u->rx_fifo[(u->rx_head + u->rx_count) % UART_FIFO] = b;
         u->rx_count++;
+        if (u->rx_count >= uart_level((u->ifls >> 3) & 7u)) u->ris |= UART_INT_RX;
+        u->ris |= UART_INT_RT;
+    } else {
+        u->ris |= UART_INT_OE;
     }
-    if (u->rx_count >= uart_level((u->ifls >> 3) & 7u)) u->ris |= UART_INT_RX;
-    if (u->rx_count > 0) u->ris |= UART_INT_RT;
     uart_update_irq(soc);
+    if (u->wire_count > 0)
+        schedule_at(soc, &u->rx_event, live_ns(soc) + uart_char_ns(u));
+}
+
+int cc13x2_uart_feed_rx(cc13x2_soc_t *soc, const uint8_t *buf, int len) {
+    cc13x2_uart_t *u = &soc->uart0;
+    bool idle = u->wire_count == 0;
+    int n = 0;
+    for (; n < len && u->wire_count < CC13X2_UART_WIRE; n++) {
+        u->wire[(u->wire_head + u->wire_count) % CC13X2_UART_WIRE] = buf[n];
+        u->wire_count++;
+    }
+    if (idle && u->wire_count > 0) {
+        u->rx_event.callback = uart_rx_pace_cb;
+        u->rx_event.user_data = soc;
+        schedule_at(soc, &u->rx_event, live_ns(soc) + uart_char_ns(u));
+    }
+    return n;
 }
 
 /* ============================================================
@@ -1222,7 +1317,7 @@ static void wdt_cb(void *user, cpu_event_t *ev) {
         /* A watchdog reset is always worth knowing about in a simulation. */
         fprintf(stderr, "[cc13x2] watchdog reset at %.6f s (pc 0x%08x)\n",
                 (double)live_ns(soc) / 1e9, soc->plat->cpu.reg[ARM_PC]);
-        cc13x2_page_t *p = find_page(soc, "AON_PMCTL");
+        cc13x2_page_t *p = soc->pg_aon_pmctl;
         if (p) REG(p, AON_PMCTL_RESETCTL) = (REG(p, AON_PMCTL_RESETCTL) & ~0xEu) | 0xEu; /* WARMRESET */
         arm_request_reset(&soc->plat->cpu);
         return;
@@ -1346,16 +1441,17 @@ static void tdc_done_cb(void *user, cpu_event_t *ev) {
 
 static void tdc_run(cc13x2_soc_t *soc, bool sync_start) {
     uint32_t ref = (soc->ddi0[DDI0_CTL0 / 4] >> 4) & 7u;
-    double f_ref = (ref == 2 || ref == 3) ? 32768.0 : 31250.0;
-    uint32_t periods = soc->tdc.trigcntload ? soc->tdc.trigcntload : 1u;
-    soc->tdc.result = (uint32_t)((double)periods * 48000000.0 / f_ref + 0.5);
+    uint64_t f_ref = (ref == 2 || ref == 3) ? 32768u : 31250u;      /* Hz */
+    uint64_t periods = soc->tdc.trigcntload ? soc->tdc.trigcntload : 1u;
+    soc->tdc.result = (uint32_t)((periods * 48000000u + f_ref / 2u) / f_ref);
     soc->tdc.done = false;
     soc->tdc.running = true;
     /* A synchronised start waits for the next reference edge first. */
-    double secs = ((double)periods + (sync_start ? 1.0 : 0.0)) / f_ref;
+    uint64_t edges = periods + (sync_start ? 1u : 0u);
     soc->tdc.event.callback = tdc_done_cb;
     soc->tdc.event.user_data = soc;
-    schedule_at(soc, &soc->tdc.event, live_ns(soc) + (int64_t)(secs * 1e9));
+    schedule_at(soc, &soc->tdc.event,
+                live_ns(soc) + (int64_t)(edges * 1000000000u / f_ref));
 }
 
 static uint32_t tdc_read(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off) {
@@ -1617,10 +1713,14 @@ static void page_write(void *user, uint32_t addr, uint32_t val) {
  * ============================================================ */
 
 /* Reset values the boot path depends on. */
-static void soc_reset_state(cc13x2_soc_t *soc) {
+/* power_on: the cold reset at power-up.  Any other reset (watchdog,
+ * SYSRESETREQ) leaves the AON domain alone: the RTC keeps counting and
+ * keeps its compare channels, as on silicon. */
+static void soc_reset_state(cc13x2_soc_t *soc, bool power_on) {
     arm_cpu_t *cpu = &soc->plat->cpu;
     arm_cancel_event(cpu, &soc->osc.xosc_hf_event);
     arm_cancel_event(cpu, &soc->uart0.tx_event);
+    arm_cancel_event(cpu, &soc->uart0.rx_event);
     for (int i = 0; i < 3; i++) arm_cancel_event(cpu, &soc->rtc.ch_event[i]);
     arm_cancel_event(cpu, &soc->wdt.event);
     arm_cancel_event(cpu, &soc->tdc.event);
@@ -1635,14 +1735,16 @@ static void soc_reset_state(cc13x2_soc_t *soc) {
 
     for (int i = 0; i < soc->num_pages; i++) {
         cc13x2_page_t *p = &soc->pages[i];
-        if (p->regs && p->kind != P_AON_PMCTL)
+        if (p->regs && p->kind != P_AON_PMCTL &&
+            (power_on || p->kind != P_AON_RTC))
             memset(p->regs, 0, p->size);
     }
     memset(soc->ddi0, 0, sizeof(soc->ddi0));
     memset(soc->adi2, 0, sizeof(soc->adi2));
     memset(soc->adi3, 0, sizeof(soc->adi3));
     memset(soc->adi4, 0, sizeof(soc->adi4));
-    memset(&soc->rtc, 0, sizeof(soc->rtc));
+    if (power_on) memset(&soc->rtc, 0, sizeof(soc->rtc));
+    else rtc_rearm_all(soc);
     memset(&soc->osc, 0, sizeof(soc->osc));
     memset(&soc->wdt, 0, sizeof(soc->wdt));
     soc->wdt.load = 0xFFFFFFFFu;               /* reset value; locked = false */
@@ -1664,7 +1766,7 @@ static void soc_reset_state(cc13x2_soc_t *soc) {
      * and AON_PMCTL:SLEEPCTL.IO_PAD_SLEEP_DIS are both 1 (driverlib/setup.c). */
     cc13x2_page_t *p;
     if ((p = find_page(soc, "AON_IOC"))) REG(p, 0x0C) = 1u;
-    if ((p = find_page(soc, "AON_PMCTL"))) {
+    if ((p = soc->pg_aon_pmctl)) {
         REG(p, AON_PMCTL_SLEEPCTL) = 1u;
     }
     /* VIMS: cache mode, as the boot ROM leaves it. */
@@ -1673,7 +1775,7 @@ static void soc_reset_state(cc13x2_soc_t *soc) {
      * reads bits [3:1] as the protocol vector: BLE, 15.4, proprietary;
      * RF_open() refuses RF_MODE_AUTO (0) unless bit 0 is set).
      * 0x2F as read from the LaunchPad. */
-    if ((p = find_page(soc, "PRCM"))) REG(p, PRCM_RFCMODEHWOPT) = 0x2Fu;
+    if ((p = soc->pg_prcm)) REG(p, PRCM_RFCMODEHWOPT) = 0x2Fu;
     /* SysTick, NVIC: arm_platform_reset_peripherals. */
 }
 
@@ -1701,6 +1803,9 @@ static void cc13x2_soc_init(arm_platform_t *plat) {
             arm_register_io(cpu, d->base | 0x20000000u, d->size,
                             page_read, page_write, p);
     }
+    soc->pg_prcm = find_page(soc, "PRCM");
+    soc->pg_aon_pmctl = find_page(soc, "AON_PMCTL");
+    soc->pg_ioc = find_page(soc, "IOC");
 
     /* Per-node identity default: a distinct but fixed address until the
      * harness seeds one. */
@@ -1710,13 +1815,13 @@ static void cc13x2_soc_init(arm_platform_t *plat) {
 
     plat->host.cpu = cpu;
     cc13x2_rfc_init(&soc->rfc, soc);
-    soc_reset_state(soc);
+    soc_reset_state(soc, true);
 }
 
 static void cc13x2_soc_reset(arm_platform_t *plat) {
     cc13x2_soc_t *soc = plat->soc;
     if (!soc) return;
-    soc_reset_state(soc);
+    soc_reset_state(soc, false);
 }
 
 static void cc13x2_soc_destroy(arm_platform_t *plat) {

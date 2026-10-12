@@ -715,8 +715,8 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     nrf54l15_soc_t   *nrfl = arm_platform_nrf54l15(plat);
     cc13x2_soc_t     *cc13 = arm_platform_cc13x2(plat);
     if (cc13)
-        cc13x2_uart_feed_rx(cc13, buf, len);
-    else if (cc)
+        return cc13x2_uart_feed_rx(cc13, buf, len);
+    if (cc)
         for (int i = 0; i < len; i++)
             cc2538_uart_receive_byte(&cc->uart0, buf[i]);
     else if (nrf)
@@ -752,6 +752,8 @@ static int arm_mote_set_input_pin(sim_mote_t *m, int port, int pin, int level) {
         return 0;
     }
     if (nrfl) return nrf54l15_soc_set_input_pin(nrfl, port, pin, level);
+    cc13x2_soc_t *c13 = arm_platform_cc13x2(plat);
+    if (c13) return port == 0 ? cc13x2_soc_set_input_pin(c13, pin, level) : -1;
     return -1;
 }
 

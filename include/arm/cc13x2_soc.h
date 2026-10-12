@@ -80,6 +80,8 @@ typedef struct cc13x2_rtc {
     cpu_event_t ch_event[3];   /* per-channel compare crossing */
 } cc13x2_rtc_t;
 
+#define CC13X2_UART_WIRE  1024           /* console input in flight, bytes */
+
 /* UART0: TI's PL011-derived UART with a 32-byte TX FIFO drained at the
  * programmed baud rate, and the CC13x2 end-of-transmission interrupt. */
 typedef struct cc13x2_uart {
@@ -91,6 +93,9 @@ typedef struct cc13x2_uart {
     cpu_event_t tx_event;                  /* shifter done */
     uint8_t     rx_fifo[32];
     int         rx_head, rx_count;
+    uint8_t     wire[CC13X2_UART_WIRE];    /* console input not yet arrived */
+    int         wire_head, wire_count;
+    cpu_event_t rx_event;                  /* next character arrives */
     arm_uart_tx_callback tx_cb;
     void       *tx_user;
 } cc13x2_uart_t;
@@ -159,6 +164,7 @@ typedef struct cc13x2_soc {
     /* Register windows; see the page table in cc13x2_soc.c. */
     cc13x2_page_t  *pages;
     int             num_pages;
+    cc13x2_page_t  *pg_prcm, *pg_aon_pmctl, *pg_ioc;   /* looked up once */
 
     /* Analog register files (DDI0 OSC: 32-bit registers; ADI: 8-bit). */
     uint32_t        ddi0[0x20];
@@ -198,8 +204,16 @@ void    cc13x2_cancel(cc13x2_soc_t *soc, cpu_event_t *ev);
 void    cc13x2_irq(cc13x2_soc_t *soc, int irq);
 bool    cc13x2_rfc_domain_on(cc13x2_soc_t *soc);
 
-/* Console input into UART0's RX FIFO. */
-void cc13x2_uart_feed_rx(cc13x2_soc_t *soc, const uint8_t *buf, int len);
+/* A trace env variable's level, read once into *cache (start it at -1):
+ * unset 0, set but empty 1, else its number. */
+int     cc13x2_env_level(int *cache, const char *name);
+
+/* Drive a DIO from outside (level 0/1), or release it (level < 0). */
+int  cc13x2_soc_set_input_pin(cc13x2_soc_t *soc, int dio, int level);
+
+/* Console input for UART0, delivered at the baud rate; returns the bytes
+ * taken (the rest did not fit in the in-flight buffer). */
+int  cc13x2_uart_feed_rx(cc13x2_soc_t *soc, const uint8_t *buf, int len);
 
 /* Seed the IEEE 802.15.4 address the factory config reports (FCFG1
  * MAC_15_4_0/1). Contiki builds its EUI-64 from it unless CCFG overrides. */
