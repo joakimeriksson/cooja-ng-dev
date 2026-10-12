@@ -2007,6 +2007,15 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                 cpu->cycles = target;
                 continue;
             }
+            /* Nothing queued at all (RIOT's hello-world idles in WFI once
+             * main returns, with no timer armed): sleep to the slice horizon
+             * like an event beyond it.  Breaking without advancing left
+             * arm_step_until re-entering at the same cycle forever. */
+            if (cpu->cycle_limit != INT64_MAX && cpu->cycle_limit > cpu->cycles) {
+                cpu->lpm_ns += arm_cycles_to_ns(cpu->cycle_limit - cpu->cycles,
+                                                cpu->cpu_freq_hz);
+                cpu->cycles = cpu->cycle_limit;
+            }
             break;
         }
 
