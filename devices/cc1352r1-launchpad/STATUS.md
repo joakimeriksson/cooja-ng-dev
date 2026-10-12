@@ -59,28 +59,25 @@ errors are ±8-12 rtimer ticks (~±150 µs), inside the guard time but larger
 than exact oscillators explain — the inferred RF core latencies and RTC
 lag are the suspects.
 
+## Hardware comparison
+
+Checked against a LaunchPad on 2026-10-12 —
+[`HARDWARE-COMPARISON.md`](HARDWARE-COMPARISON.md). FCFG1 and
+RFCMODEHWOPT now come from the board; the AON RTC compare lag and the
+"as soon as possible" rule match silicon exactly; the RF core's synthesizer
+errors (ERROR_SYNTH_PROG, IEEE_ERROR_PAR, IEEE_ERROR_NO_FS) are modelled from
+status words read on the board. The check firmware and the flash/capture
+helper are in `tools/cc13x2-hwcheck/`.
+
 ## Next
 
-1. **Hardware comparison** (below): FCFG1 dump, RTC compare lag, RF core
-   latencies, boot log timing, and TSCH slot timing (`edr`) against a pair
-   of boards.
-2. **Sub-GHz capture.** pcap and the packet analyzer decode 2.4 GHz frames
+1. **Prop TX latency split** (+275 µs on silicon, before or after the frame?)
+   and CCA right after a retune — needs a second board; see the comparison.
+2. **Per-command RF core latencies** — time commands one at a time rather
+   than driver calls.
+3. **TSCH slot timing** (`edr`) against a pair of boards.
+4. **Sub-GHz capture.** pcap and the packet analyzer decode 2.4 GHz frames
    only (CC1200 frames are not captured either).
-
-## Hardware checks (LaunchPad available)
-
-To run when the board is connected (`board/ti_cc13x2_launchpad.cfg` in
-openocd 0.12 talks to the on-board XDS110):
-
-- **FCFG1 dump** — replace the synthesized FCFG1 (identity fields, TFW_FT,
-  IOCONF; the trims are zero today):
-  `openocd -f board/ti_cc13x2_launchpad.cfg -c "init; halt; dump_image fcfg1.bin 0x50001000 0x430; mdw 0x400821d4; exit"`
-  (the last word is PRCM.RFCMODEHWOPT, also guessed).
-- **RTC compare lag** — whether a channel event lands on the matching
-  SCLK_LF edge or the one after (csim models the latter, which TI's TimerP
-  arithmetic requires), and whether enabling a channel with a just-passed
-  compare fires it (csim: yes, like a CHxCMP write).
-- **Boot log timing** — compare hello-world's console against the board.
 
 ## Deliberate approximations
 
@@ -89,7 +86,11 @@ openocd 0.12 talks to the on-board XDS110):
 - Power domains and clock-gate loads switch at once; XOSC_HF takes 300 µs.
   Standby/idle wake-up latency is not modelled.
 - RF core latencies (boot 40 µs, setup 150 µs, FS 140 µs, RAT sync 31 µs,
-  TX ramp 100 µs) are placeholders of the right order, not measurements.
+  TX ramp 100 µs) are placeholders of the right order. Measured end to end
+  on the board, prop TX is 275 µs longer and the driver's off/on/retune
+  76-145 µs longer; IEEE TX matches.
+- RSSI is valid as soon as RX starts (silicon needs some time after a
+  retune, so a CCA straight after one reports busy there).
   The RX timestamp sits 690 µs before the end of the sync word, which is
   what Contiki's prop-mode arithmetic assumes. CRCs are computed and
   checked, the on-air bit order of the CRC is not modelled.

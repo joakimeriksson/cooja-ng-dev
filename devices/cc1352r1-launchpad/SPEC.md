@@ -81,8 +81,9 @@ The CC13x2 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
 - **Factory config (FCFG1) gates the boot.** `SetupTrimDevice()` halts
   unless `ICEPICK_DEVICE_ID`/`USER_ID` decode to a CC13x2 PG2.0+;
   `Power_init()` spins unless `TFW_FT % 10000 > 682`; the PIN driver sizes
-  its pin range from `IOCONF.GPIO_CNT` (28 here). csim synthesizes these;
-  the rest of FCFG1 is zero until a dump from the board replaces it.
+  its pin range from `IOCONF.GPIO_CNT` (28 here). csim maps FCFG1 as dumped
+  from a LaunchPad (`hardware/fcfg1.bin`), with the per-node MAC words
+  overlaid.
 - **CCFG overrides the IEEE address** when any byte of `CCFG:IEEE_MAC_0/1`
   is not `0xFF`; otherwise Contiki takes FCFG1 `MAC_15_4_0/1`, which csim
   seeds per node (`00:12:4b:00:<id>:<id>`).
@@ -91,8 +92,16 @@ The CC13x2 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
   found and fixed csim's bit-band word address (it was `byte * 4`).
 - **AON RTC compare.** TI's TimerP needs the channel event to arrive at
   least one SCLK_LF edge after the counter reaches the compare value; csim
-  registers it on the edge after the match. Inferred from the arithmetic,
-  not stated in the TRM (see STATUS.md, hardware checks).
+  registers it on the edge after the match. Not stated in the TRM;
+  measured on the LaunchPad (HARDWARE-COMPARISON.md).
+- **IEEE mode on CC13xx: Contiki's CMD_FS fails.** It carries the sub-GHz
+  channel-table frequency, and silicon answers ERROR_SYNTH_PROG; the radio
+  is tuned by CMD_IEEE_RX's channel field. The same table lets
+  `RADIO_PARAM_CHANNEL` accept 27..33, which CMD_IEEE_RX rejects
+  (IEEE_ERROR_PAR), after which CMD_IEEE_TX ends IEEE_ERROR_NO_FS and
+  Contiki's `transmit()` still returns RADIO_TX_OK.
+- **Debugging a sleeping image.** Standby powers the JTAG domain down;
+  `tools/cc13x2-hwcheck/catch.tcl` halts the CPU in the boot window.
 - **Watchdog caps idle.** Contiki sleeps at most until the watchdog's
   remaining time (`WDT.VALUE`), so the WDT has to count.
 
@@ -121,4 +130,4 @@ The CC13x2 has one 32-bit GPIO port (DIO0..DIO30), so the port is always 0.
 - [x] IEEE (2.4 GHz) mode: `test-nullnet-ieee-` and `test-rpl-udp-ieee-cc1352r1-launchpad.yaml`,
       and `test-mixed-platform-cc1352r1.yaml` with Sky, CC2538 and nRF52840
 - [x] `.github/workflows/test.yml` runs the boot, nullnet and RPL-UDP tests and two determinism guards
-- [ ] FCFG1 and the RTC compare lag checked against the LaunchPad
+- [x] FCFG1 and the RTC compare lag checked against the LaunchPad (HARDWARE-COMPARISON.md)

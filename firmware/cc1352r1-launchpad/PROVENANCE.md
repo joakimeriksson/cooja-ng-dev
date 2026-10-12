@@ -107,3 +107,25 @@
 - **Built**: 2026-10-11T22:10:56Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target simplelink --board launchpad/cc1352r1 --example examples/6tisch/simple-node --output firmware/cc1352r1-launchpad/tsch-node-ieee.cc1352r1-launchpad --source-file node --make-args "MAKE_MAC=MAKE_MAC_TSCH DEFINES=RF_CONF_MODE=RF_MODE_2_4_GHZ" --local`
 
+
+## hwcheck.cc1352r1-launchpad
+
+- **Source**: contiki-ng commit `735e87c3e5060e9c427b214e55c372967f595c04`
+- **Source path**: `tools/cc13x2-hwcheck` in this repository (file: `hwcheck.c`)
+- **TARGET**: `simplelink`
+- **BOARD**: `launchpad/cc1352r1`
+- **Make args**: `CONTIKI=<contiki-ng checkout>`
+- **Toolchain**: host
+- **Built**: 2026-10-12 by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --local --contiki-dir <contiki-ng> --target simplelink --board launchpad/cc1352r1 --example tools/cc13x2-hwcheck --output firmware/cc1352r1-launchpad/hwcheck.cc1352r1-launchpad --make-args "CONTIKI=<contiki-ng>"`
+
+## hwcheck-ieee.cc1352r1-launchpad
+
+- **Source**: contiki-ng commit `735e87c3e5060e9c427b214e55c372967f595c04`
+- **Source path**: `tools/cc13x2-hwcheck` in this repository (file: `hwcheck.c`)
+- **TARGET**: `simplelink`
+- **BOARD**: `launchpad/cc1352r1`
+- **Make args**: `CONTIKI=<contiki-ng checkout> DEFINES=RF_CONF_MODE=RF_MODE_2_4_GHZ`
+- **Toolchain**: host
+- **Built**: 2026-10-12 by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --local --contiki-dir <contiki-ng> --target simplelink --board launchpad/cc1352r1 --example tools/cc13x2-hwcheck --output firmware/cc1352r1-launchpad/hwcheck-ieee.cc1352r1-launchpad --make-args "CONTIKI=<contiki-ng> DEFINES=RF_CONF_MODE=RF_MODE_2_4_GHZ"`
