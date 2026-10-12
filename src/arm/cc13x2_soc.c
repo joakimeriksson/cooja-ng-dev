@@ -180,46 +180,82 @@ static cc13x2_page_t *find_page(cc13x2_soc_t *soc, const char *name) {
  * ============================================================ */
 
 /* FCFG1 offsets used here (inc/hw_fcfg1.h). */
-#define FCFG1_MISC_CONF_1        0x0A0
-#define FCFG1_USER_ID            0x294
 #define FCFG1_MAC_BLE_0          0x2E8
 #define FCFG1_MAC_BLE_1          0x2EC
 #define FCFG1_MAC_15_4_0         0x2F0
 #define FCFG1_MAC_15_4_1         0x2F4
-#define FCFG1_ICEPICK_DEVICE_ID  0x318
-#define FCFG1_FCFG1_REVISION     0x31C
-#define FCFG1_TFW_FT             0x41C
-#define FCFG1_IOCONF             0x344
 
-/* Identity of a CC1352R (not -P) at silicon revision PG2.1, as driverlib's
- * chipinfo.c decodes it:
- *   ICEPICK_DEVICE_ID: PG_REV[31:28] = 3 ("PG2.1 or later"), WAFER_ID[27:12]
- *     = 0xBB41 (FAMILY_CC13x2_CC26x2), MANUFACTURER_ID[11:0] = 0x02F (TI).
- *   USER_ID: PROTOCOL[15:12] = 0xF, CC13[23] = 1, PA[25] = 0 -> CC1352.
- *     PKG[18:16] = 3 is PACKAGE_7x7 (the LaunchPad's RGZ package).
+/* FCFG1 as read from a LAUNCHXL-CC1352R1 (rev E, CC1352R PG2.1) with the
+ * XDS110 and openocd (devices/cc1352r1-launchpad/hardware/fcfg1.bin):
+ *   dump_image fcfg1.bin 0x50001000 0x430
+ * What the boot path depends on, as driverlib's chipinfo.c and TI's
+ * prebuilt drivers decode it:
+ *   ICEPICK_DEVICE_ID 0x3BB4102F: PG_REV 3 ("PG2.1 or later"), WAFER_ID
+ *     0xBB41 (FAMILY_CC13x2_CC26x2), MANUFACTURER_ID 0x02F (TI) — the JTAG
+ *     IDCODE openocd reports.
+ *   USER_ID 0x3082F000: CC13 = 1 and PA = 0 (CC1352R), PKG 2 (7x7 RGZ).
  *   MISC_CONF_1.DEVICE_MINOR_REV = 0 -> HWREV_2_1.
- *   TFW_FT (factory test firmware revision): TI's prebuilt Power_init()
- *     spins forever unless TFW_FT % 10000 > 682 (rf_multiMode / power
- *     library, SDK 4.10.02); 700 satisfies it.
- *   IOCONF.GPIO_CNT = 28: the CC1352R's 7x7 package brings out DIO3..DIO30
- *     (CC1352R datasheet, "28 GPIOs"); TI's PIN driver sizes its pin range
- *     from this field (PINCC26XX_getPinCount).
- * Everything else — the analog trim words — is zero here; the trim code
- * copies them into analog registers whose content nothing in csim reads.
- * TODO(hardware): replace with an FCFG1 dump from the LaunchPad. */
+ *   TFW_FT % 10000 = 756: Power_init() spins unless it is > 682.
+ *   IOCONF.GPIO_CNT = 28: the PIN driver sizes its pin range from it.
+ * The trim words are this one chip's; SetupTrimDevice() copies them into
+ * analog registers that csim stores and does not interpret.  The address
+ * words (MAC_15_4, MAC_BLE) are replaced per node. */
+static const uint32_t fcfg1_launchpad[268] = {
+    /* 0x000 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    /* 0x018 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    /* 0x030 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    /* 0x048 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    /* 0x060 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    /* 0x078 */ 0x00000000, 0x00000000, 0xec29a8ae, 0x00a2ba8a, 0x0028a800, 0xa2a80000,
+    /* 0x090 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xffffff00, 0xffffffff,
+    /* 0x0a8 */ 0x03040588, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x0c0 */ 0xffffffff, 0x79054f01, 0x77048f01, 0x8bffd54d, 0x2830105f, 0x5ffff07f,
+    /* 0x0d8 */ 0x2ffff07f, 0x5ffff07f, 0x2840405f, 0x584ff05f, 0x582ed05f, 0x2840005f,
+    /* 0x0f0 */ 0x5840005f, 0x5840205f, 0x2850b05f, 0x5850b05f, 0x582f605f, 0x5840605f,
+    /* 0x108 */ 0x67c7cf73, 0xffff29f1, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x120 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x138 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x150 */ 0xffffffff, 0xd1871174, 0xffffffff, 0xffffffff, 0xffffff05, 0x00060ef1,
+    /* 0x168 */ 0x7f3a0015, 0x0017002b, 0x4c644c64, 0x0a0a2000, 0x02c10200, 0x0200f000,
+    /* 0x180 */ 0x00000001, 0x00050014, 0x0fa00010, 0x00000fa0, 0x0a020804, 0x06080701,
+    /* 0x198 */ 0x06080808, 0x31f6061e, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x1b0 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x0014ffff, 0xffff000c,
+    /* 0x1c8 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x1e0 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x1f8 */ 0xffffffff, 0xffffffff, 0x0000ffff, 0xffffffff, 0x09a2ffff, 0xffffffff,
+    /* 0x210 */ 0x0000ffff, 0xffffffff, 0x0962ffff, 0xffffffff, 0x0000ffff, 0xffffffff,
+    /* 0x228 */ 0x09efffff, 0xffffffff, 0x0000ffff, 0xffffffff, 0x0b8bffff, 0xffffffff,
+    /* 0x240 */ 0x0000ffff, 0xffffffff, 0x0b13ffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x258 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x270 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x288 */ 0xffffffff, 0xffffffff, 0xfffffffe, 0x3082f000, 0xffc5c500, 0xff000000,
+    /* 0x2a0 */ 0xfff2c500, 0xffffffff, 0x0003e703, 0x2f2f2ff3, 0x00112c03, 0xca57f87f,
+    /* 0x2b8 */ 0xfaf8e0fb, 0xf4f2f0fc, 0xe8fff9f8, 0x9651a6df, 0xffffff2f, 0xffffffff,
+    /* 0x2d0 */ 0xffffffff, 0xffffffff, 0xfffffffd, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x2e8 */ 0xb01edc58, 0xffff806f, 0x1ca19758, 0x00124b00, 0x000017bc, 0x000017ff,
+    /* 0x300 */ 0xffffffff, 0xff27fe07, 0x98989f9f, 0xffff393b, 0x00000003, 0x00010001,
+    /* 0x318 */ 0x3bb4102f, 0x00000028, 0x0000cfff, 0x8f90917f, 0x8b8c8d8e, 0x8788898a,
+    /* 0x330 */ 0x83848586, 0x9e7f7f7f, 0x9a9b9c9d, 0x96979899, 0x92939495, 0xffffff1c,
+    /* 0x348 */ 0xd0952dac, 0x3460f483, 0xdc07ff58, 0xffffffff, 0xffffffff, 0x0000815b,
+    /* 0x360 */ 0x0000842a, 0x00000000, 0x00fc00fd, 0x0000c08c, 0xff7b828e, 0x6b8b0303,
+    /* 0x378 */ 0xff483f47, 0xffffc3ff, 0xffffffff, 0xff1e551e, 0xf5eee5fd, 0xf00ffffe,
+    /* 0x390 */ 0xffffffff, 0xffffffff, 0xe08403f8, 0xffffffff, 0xffffffff, 0xffffffff,
+    /* 0x3a8 */ 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x00000000,
+    /* 0x3c0 */ 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xa0001d12, 0x00000000,
+    /* 0x3d8 */ 0x8a9f0010, 0xe80d40a8, 0x00000001, 0x00000000, 0x00000000, 0x77000000,
+    /* 0x3f0 */ 0xc0800001, 0x2af108aa, 0x00000ee5, 0x0a036b82, 0x92c5df93, 0x6a544fb3,
+    /* 0x408 */ 0xffffc420, 0xfffe70ff, 0xffffffff, 0xffffffff, 0x30efa141, 0x30f5bbc4,
+    /* 0x420 */ 0x04c10011, 0x09ac04ff, 0x05980012, 0x0b260017,
+};
+
 static void fcfg1_init(cc13x2_soc_t *soc) {
     memset(soc->fcfg1, 0, sizeof(soc->fcfg1));
+    memcpy(soc->fcfg1, fcfg1_launchpad, sizeof(fcfg1_launchpad));
     uint32_t *f = soc->fcfg1;
-    f[FCFG1_ICEPICK_DEVICE_ID / 4] = (3u << 28) | (0xBB41u << 12) | 0x02Fu;
-    f[FCFG1_USER_ID / 4]           = (1u << 23) | (3u << 16) | (0xFu << 12);
-    f[FCFG1_MISC_CONF_1 / 4]       = 0xFFFFFF00u;   /* minor rev 0 */
-    f[FCFG1_FCFG1_REVISION / 4]    = 0x00000028u;
-    f[FCFG1_TFW_FT / 4]            = 700u;
-    f[FCFG1_IOCONF / 4]            = 28u;
     f[FCFG1_MAC_15_4_0 / 4]        = soc->mac_15_4[0];
     f[FCFG1_MAC_15_4_1 / 4]        = soc->mac_15_4[1];
     f[FCFG1_MAC_BLE_0 / 4]         = soc->mac_15_4[0];
-    f[FCFG1_MAC_BLE_1 / 4]         = soc->mac_15_4[1] & 0xFFFFu;
+    f[FCFG1_MAC_BLE_1 / 4]         = 0xFFFF0000u | (soc->mac_15_4[1] & 0xFFFFu);
 }
 
 void cc13x2_soc_set_ieee_addr(cc13x2_soc_t *soc, const uint8_t addr[8]) {
@@ -692,13 +728,17 @@ static void rtc_ch_cb(void *user, cpu_event_t *ev) {
  * rtimer path writes the compare and then enables the channel
  * (rtimer-arch.c), and TI's TimerP race — a higher-priority ISR running
  * between its read of the counter and its compare write — lands compares in
- * the past exactly this way. That the enable counts too is inferred.
+ * the past exactly this way.
  *
  * Every event is registered one SCLK_LF edge after the match. Not stated in
  * the TRM; it is what TimerP's arithmetic needs (compare = threshold >> 16,
  * and its ISR treats a wakeup as spurious unless RTC64 / period64 has reached
  * the service tick, which an event on the matching edge fails).
- * TODO(hardware): confirm the lag on the LaunchPad. */
+ *
+ * All of this is measured on a LaunchPad (tools/cc13x2-hwcheck, devices/
+ * cc1352r1-launchpad/HARDWARE-COMPARISON.md): the flag appears at cmp+2
+ * (even compare) or cmp+3 (odd), and a compare written or enabled from 2
+ * units to 0.875 s in the past fires on the next edge, 1.5 s does not. */
 static void rtc_arm_channel(cc13x2_soc_t *soc, int ch, bool armed_now) {
     arm_cpu_t *cpu = &soc->plat->cpu;
     cpu_event_t *ev = &soc->rtc.ch_event[ch];
@@ -1524,8 +1564,8 @@ static void soc_reset_state(cc13x2_soc_t *soc) {
     /* PRCM.RFCMODEHWOPT: the RF modes this part may select (chipinfo.c
      * reads bits [3:1] as the protocol vector: BLE, 15.4, proprietary;
      * RF_open() refuses RF_MODE_AUTO (0) unless bit 0 is set).
-     * TODO(hardware): read the LaunchPad's value. */
-    if ((p = find_page(soc, "PRCM"))) REG(p, PRCM_RFCMODEHWOPT) = 0xFFu;
+     * 0x2F as read from the LaunchPad. */
+    if ((p = find_page(soc, "PRCM"))) REG(p, PRCM_RFCMODEHWOPT) = 0x2Fu;
     /* SysTick, NVIC: arm_platform_reset_peripherals. */
 }
 
