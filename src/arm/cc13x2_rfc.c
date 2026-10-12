@@ -98,19 +98,23 @@
 #define ST_ERROR_PAR            0x0803
 #define ST_ERROR_CMDID          0x0805
 #define ST_ERROR_NO_SETUP       0x0807
+#define ST_ERROR_SYNTH_PROG     0x0809
 #define PROP_DONE_OK            0x3400
 #define PROP_DONE_STOPPED       0x3404
 #define PROP_DONE_ABORT         0x3405
 #define PROP_ERROR_PAR          0x3800
 #define PROP_ERROR_RXBUF        0x3801
 #define PROP_ERROR_NO_SETUP     0x3803
+#define PROP_ERROR_NO_FS        0x3804
 #define IEEE_DONE_OK            0x2400
 #define IEEE_DONE_STOPPED       0x2402
 #define IEEE_DONE_ACK           0x2403
 #define IEEE_DONE_ACKPEND       0x2404
 #define IEEE_DONE_TIMEOUT       0x2405
 #define IEEE_DONE_ABORT         0x2407
+#define IEEE_ERROR_PAR          0x2800
 #define IEEE_ERROR_NO_SETUP     0x2801
+#define IEEE_ERROR_NO_FS        0x2802
 
 /* Radio-operation header: commandNo @0, status @2, pNextOp @4,
  * startTime @8, startTrigger @12, condition @13. */
@@ -142,8 +146,11 @@
 /* Latencies.  The TRM gives no per-command execution times; these are of
  * the order the RF driver itself budgets (it clamps the measured power-up
  * time to 300..2500 us, RFCC26X2_multiMode.c) and keep power-up through an
- * active RX well inside the ~1 ms Contiki's get_rssi() waits. Measured
- * values from the LaunchPad would replace them. TODO(hardware). */
+ * active RX well inside the ~1 ms Contiki's get_rssi() waits.  A LaunchPad
+ * measures prop CMD_PROP_TX 275 us longer in total (the per-byte time is
+ * exact) and the driver's off/on/retune calls 76-145 us longer; how that
+ * splits over these constants is not known yet (devices/cc1352r1-launchpad/
+ * HARDWARE-COMPARISON.md).  IEEE CMD_IEEE_TX matches within one RTC tick. */
 #define BOOT_NS          40000    /* PWMCLKEN.CPE -> BOOT_DONE */
 #define SETUP_NS        150000    /* CMD_(PROP_)RADIO(_DIV)_SETUP */
 #define FS_NS           140000    /* CMD_FS: synthesizer calibrate + lock */
@@ -431,19 +438,37 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
 
     case CMD_FS:
         if (s->phase == 0) {
-            uint16_t f = rd16(rfc, op + 14), frac = rd16(rfc, op + 16);
-            rfc->freq_khz = (uint32_t)f * 1000u + (uint32_t)(((uint32_t)frac * 1000u) >> 16);
             s->phase = 1;
             op_after(rfc, s, FS_NS);
             return;
         }
+        {
+            uint16_t f = rd16(rfc, op + 14), frac = rd16(rfc, op + 16);
+            uint32_t khz = (uint32_t)f * 1000u + (uint32_t)(((uint32_t)frac * 1000u) >> 16);
+            /* The synthesizer locks only in the band the last setup command
+             * configured.  Measured on a LaunchPad: in IEEE mode Contiki's
+             * CMD_FS carries the sub-GHz channel-table frequency (868.325 MHz)
+             * and ends ERROR_SYNTH_PROG; CMD_IEEE_RX's channel field is what
+             * tunes the radio. */
+            if (rfc->setup_done && rfc->prop == (khz >= 2000000u)) {
+                rfc->synth_ok = false;
+                op_finish(rfc, s, ST_ERROR_SYNTH_PROG, false, true);
+                return;
+            }
+            rfc->freq_khz = khz;
+        }
+        rfc->synth_ok = true;
         push_channel(rfc);
         op_finish(rfc, s, ST_DONE_OK, true, true);
         return;
 
     case CMD_FS_OFF:
-    case CMD_FS_POWERUP:
     case CMD_FS_POWERDOWN:
+        rfc->synth_ok = false;
+        op_finish(rfc, s, ST_DONE_OK, true, true);
+        return;
+
+    case CMD_FS_POWERUP:
         op_finish(rfc, s, ST_DONE_OK, true, true);
         return;
 
@@ -472,6 +497,10 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
             return;
         }
         if (s->phase == 0) {
+            if (!rfc->synth_ok) {
+                op_finish(rfc, s, PROP_ERROR_NO_FS, false, false);
+                return;
+            }
             s->phase = 1;
             op_after(rfc, s, TX_START_NS);
             return;
@@ -495,6 +524,10 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
             return;
         }
         if (s->phase == 0) {
+            if (!rfc->synth_ok) {
+                op_finish(rfc, s, PROP_ERROR_NO_FS, false, false);
+                return;
+            }
             prop_rx_begin(rfc, s);
             return;
         }
@@ -508,6 +541,20 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
             return;
         }
         if (s->phase == 0) {
+            /* channel @14: 11..26 tunes the synthesizer, 0 uses the one
+             * CMD_FS programmed.  Anything else ends IEEE_ERROR_PAR and
+             * leaves the synthesizer unprogrammed (measured: the next
+             * CMD_IEEE_TX ends IEEE_ERROR_NO_FS). */
+            uint8_t ch = rd8(rfc, op + 14);
+            if (ch != 0 && (ch < 11 || ch > 26)) {
+                rfc->synth_ok = false;
+                op_finish(rfc, s, IEEE_ERROR_PAR, false, false);
+                return;
+            }
+            if (ch == 0 && !rfc->synth_ok) {
+                op_finish(rfc, s, IEEE_ERROR_NO_FS, false, false);
+                return;
+            }
             ieee_rx_begin(rfc, s);
             return;
         }
@@ -520,6 +567,12 @@ static void op_run(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
             return;
         }
         if (s->phase == 0) {
+            if (!rfc->synth_ok) {
+                /* Measured: ends at once, before any turnaround. */
+                rfc->ieee.bg_suspended = false;
+                op_finish(rfc, s, IEEE_ERROR_NO_FS, false, false);
+                return;
+            }
             /* RX -> TX turnaround before the first preamble symbol. */
             s->phase = 1;
             op_after(rfc, s, IEEE_TURNAROUND_NS);
@@ -944,6 +997,7 @@ static void ieee_rx_begin(cc13x2_rfc_t *rfc, cc13x2_rfc_op_t *s) {
     uint8_t ch = rd8(rfc, op + 14);
     if (ch >= 11 && ch <= 26) {
         rfc->freq_khz = ieee_channel_khz(ch);
+        rfc->synth_ok = true;
         push_channel(rfc);
     }
     /* Filter and CCA configuration is latched here; CMD_IEEE_MOD_FILT /

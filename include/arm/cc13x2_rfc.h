@@ -12,9 +12,9 @@
  * LAST_COMMAND_DONE flags, keeps the radio timer (RAT, 4 MHz) locked to
  * the AON RTC, and moves frames between RX/TX buffers and the medium.
  *
- * Proprietary mode (sub-GHz 802.15.4g, CMD_PROP_*) is implemented; IEEE
- * mode is the next stage.  On air a frame is the byte stream the medium
- * framers parse: preamble, sync word, PHR, payload, CRC.
+ * Proprietary mode (sub-GHz 802.15.4g, CMD_PROP_*) and IEEE mode
+ * (CMD_IEEE_*) are implemented.  On air a frame is the byte stream the
+ * medium framers parse: preamble, sync word, PHR, payload, CRC.
  */
 #ifndef CC13X2_RFC_H
 #define CC13X2_RFC_H
@@ -60,6 +60,7 @@ typedef struct cc13x2_rfc {
     int         sw_bits;           /* formatConf.nSwBits */
     int         whiten_mode;       /* formatConf.whitenMode */
     uint32_t    freq_khz;          /* CMD_FS */
+    bool        synth_ok;          /* synthesizer programmed (FS / IEEE RX channel) */
     int         channel;           /* medium channel last pushed, -1 none */
     int         radio_idx;         /* medium slot: 1 sub-GHz, 0 2.4 GHz */
 
