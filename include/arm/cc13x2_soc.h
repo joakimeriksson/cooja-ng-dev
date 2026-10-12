@@ -127,6 +127,18 @@ typedef struct cc13x2_tdc {
     cpu_event_t event;
 } cc13x2_tdc_t;
 
+/* TRNG (inc/hw_trng.h): one 64-bit number at a time from a per-node
+ * deterministic stream, IRQFLAGSTAT.RDY when it is ready. */
+typedef struct cc13x2_trng {
+    bool        enabled;       /* CTL.TRNG_EN */
+    uint32_t    flags;         /* IRQFLAGSTAT */
+    uint32_t    mask;          /* IRQFLAGMASK */
+    uint32_t    out[2];        /* OUT0, OUT1 */
+    uint64_t    state;         /* xorshift64; 0 = not seeded yet */
+    bool        generating;
+    cpu_event_t event;         /* next number ready */
+} cc13x2_trng_t;
+
 /* Oscillator state behind DDI0 OSC: which source drives SCLK_HF / LF. */
 typedef struct cc13x2_osc {
     int         hf_src;        /* 0 = RCOSC_HF, 1 = XOSC_HF */
@@ -154,6 +166,7 @@ typedef struct cc13x2_soc {
 
     cc13x2_rtc_t    rtc;
     cc13x2_uart_t   uart0;
+    cc13x2_trng_t   trng;
     cc13x2_gpio_t   gpio;
     cc13x2_osc_t    osc;
     cc13x2_wdt_t    wdt;

@@ -98,6 +98,7 @@ enum {
     P_WDT,
     P_RFC_PWR,
     P_RFC_DBELL,
+    P_TRNG,
     P_RFC_RAT,
     P_AUX_TDC,
     P_AUX_EVCTL,
@@ -130,7 +131,7 @@ static const page_desc_t page_descs[] = {
     { 0x40020000, 0x1000, "UDMA0",      P_STORE,     false },
     { 0x40022000, 0x1000, "GPIO",       P_GPIO,      true  },
     { 0x40024000, 0x1000, "CRYPTO",     P_STORE,     false },
-    { 0x40028000, 0x1000, "TRNG",       P_STORE,     false },
+    { 0x40028000, 0x2000, "TRNG",       P_TRNG,      false },
     { 0x40030000, 0x4000, "FLASH",      P_FLASH,     false },
     { 0x40034000, 0x1000, "VIMS",       P_VIMS,      false },
     { 0x40035000, 0x1000, "SRAM_MMR",   P_STORE,     false },
@@ -937,6 +938,107 @@ static void gpio_write_impl(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
 }
 
 /* ============================================================
+ * TRNG — inc/hw_trng.h
+ *
+ * Zephyr's entropy driver (and TI's TRNG driver) enable the generator and
+ * take each 64-bit number from OUT0/OUT1 when IRQFLAGSTAT.RDY raises the
+ * TRNG interrupt; clearing RDY starts the next one.  The numbers come from
+ * a xorshift64 stream seeded from the node's IEEE address, so a run is
+ * reproducible and nodes differ.  TRNG_GEN_NS is a placeholder for the
+ * FRO sampling time (set by CFG0/CTL.STARTUP_CYCLES on silicon).
+ * ============================================================ */
+
+#define TRNG_OUT0         0x000
+#define TRNG_OUT1         0x004
+#define TRNG_IRQFLAGSTAT  0x008
+#define TRNG_IRQFLAGMASK  0x00C
+#define TRNG_IRQFLAGCLR   0x010
+#define TRNG_CTL          0x014
+#define TRNG_IRQSTATMASK  0x1FD8
+#define TRNG_IRQSET       0x1FEC
+#define TRNG_SWRESET      0x1FF0
+#define TRNG_IRQSTAT      0x1FF8
+#define TRNG_RDY          0x1u
+#define TRNG_CTL_EN       0x400u
+#define TRNG_GEN_NS       1000000
+
+static void trng_update_irq(cc13x2_soc_t *soc) {
+    if (soc->trng.flags & soc->trng.mask) irq_raise(soc, CC13X2_IRQ_TRNG);
+}
+
+static void trng_ready_cb(void *user, cpu_event_t *ev) {
+    (void)ev;
+    cc13x2_soc_t *soc = user;
+    cc13x2_trng_t *t = &soc->trng;
+    t->generating = false;
+    if (!t->enabled) return;
+    if (!t->state)
+        t->state = (((uint64_t)soc->mac_15_4[1] << 32) | soc->mac_15_4[0]) ^
+                   0x9E3779B97F4A7C15ull;
+    uint64_t x = t->state;
+    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+    t->state = x;
+    t->out[0] = (uint32_t)x;
+    t->out[1] = (uint32_t)(x >> 32);
+    t->flags |= TRNG_RDY;
+    trng_update_irq(soc);
+}
+
+static void trng_kick(cc13x2_soc_t *soc) {
+    cc13x2_trng_t *t = &soc->trng;
+    if (!t->enabled || t->generating || (t->flags & TRNG_RDY)) return;
+    t->generating = true;
+    t->event.callback = trng_ready_cb;
+    t->event.user_data = soc;
+    schedule_at(soc, &t->event, live_ns(soc) + TRNG_GEN_NS);
+}
+
+static uint32_t trng_read(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off) {
+    cc13x2_trng_t *t = &soc->trng;
+    switch (off & ~3u) {
+    case TRNG_OUT0:        return t->out[0];
+    case TRNG_OUT1:        return t->out[1];
+    case TRNG_IRQFLAGSTAT: return t->flags;
+    case TRNG_IRQFLAGMASK: return t->mask;
+    case TRNG_IRQSTATMASK:
+    case TRNG_IRQSTAT:     return t->flags & t->mask;
+    case TRNG_SWRESET:     return 0;                   /* reset completes at once */
+    default:               return REG(p, off & ~3u);
+    }
+}
+
+static void trng_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
+    cc13x2_trng_t *t = &soc->trng;
+    switch (off & ~3u) {
+    case TRNG_IRQFLAGMASK: t->mask = val & 3u; break;
+    case TRNG_IRQFLAGCLR:  t->flags &= ~val; break;
+    case TRNG_IRQSET:      t->flags |= val & 3u; break;
+    case TRNG_CTL:
+        REG(p, TRNG_CTL) = val;
+        t->enabled = (val & TRNG_CTL_EN) != 0;
+        if (!t->enabled && t->generating) {
+            arm_cancel_event(&soc->plat->cpu, &t->event);
+            t->generating = false;
+        }
+        break;
+    case TRNG_SWRESET:
+        if (val & 1u) {
+            if (t->generating) arm_cancel_event(&soc->plat->cpu, &t->event);
+            uint64_t st = t->state;
+            memset(t, 0, sizeof(*t));
+            t->state = st;                             /* the stream continues */
+            REG(p, TRNG_CTL) = 0;
+        }
+        break;
+    default:
+        REG(p, off & ~3u) = val;
+        break;
+    }
+    trng_kick(soc);
+    trng_update_irq(soc);
+}
+
+/* ============================================================
  * UART0 — inc/hw_uart.h (TI's PL011-derived UART)
  * ============================================================ */
 
@@ -1415,6 +1517,7 @@ static int page_read_impl(void *user, uint32_t addr) {
     case P_AON_RTC:   return (int)aon_rtc_read(soc, off);
     case P_GPIO:      return (int)gpio_read(soc, off);
     case P_UART0:     return (int)uart_read(soc, off);
+    case P_TRNG:      return (int)(trng_read(soc, p, off) >> ((off & 3u) * 8u));
     case P_DDI0:      return (int)ddi0_read(soc, off);
     case P_ADI2:      return (int)adi_read(soc->adi2, off);
     case P_ADI3:      return (int)adi_read(soc->adi3, off);
@@ -1484,6 +1587,7 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
     case P_GPIO:      gpio_write(soc, off, val); return;
     case P_UART0:     uart_write(soc, off, val); return;
+    case P_TRNG:      trng_write(soc, p, off, val); return;
     case P_DDI0:      ddi0_write(soc, off, val); return;
     case P_ADI2:      adi_write(soc, soc->adi2, off, val); return;
     case P_ADI3:      adi_write(soc, soc->adi3, off, val); return;
@@ -1521,6 +1625,10 @@ static void soc_reset_state(cc13x2_soc_t *soc) {
     arm_cancel_event(cpu, &soc->wdt.event);
     arm_cancel_event(cpu, &soc->tdc.event);
     memset(&soc->tdc, 0, sizeof(soc->tdc));
+    arm_cancel_event(cpu, &soc->trng.event);
+    uint64_t trng_state = soc->trng.state;     /* a reset does not replay it */
+    memset(&soc->trng, 0, sizeof(soc->trng));
+    soc->trng.state = trng_state;
     soc->aux_evflags = 0;
     soc->aux_combmask = 0;
     cc13x2_rfc_reset(&soc->rfc);
