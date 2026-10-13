@@ -497,8 +497,8 @@ static inline int64_t byte_period_ns(bool subghz) {
 }
 
 /* FIFO bytes a receiving chip needs free to accept a buffered on-air
- * frame; sentinel > any FIFO size when the buffer is too short to read
- * the length field (caller queues the frame instead). */
+ * frame; -1 when no length can be read from it (the frame is handed to
+ * the chip, whose sync search ignores it, rather than left queued). */
 int frame_fifo_bytes(const uint8_t *data, int len, bool subghz);
 
 #ifdef __cplusplus

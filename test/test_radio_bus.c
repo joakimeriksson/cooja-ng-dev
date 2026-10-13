@@ -359,14 +359,14 @@ static void test_frame_fifo_bytes(void) {
     uint8_t f24[] = { 0,0,0,0, 0x7A, 20, 0,0,0 };
     ASSERT_EQ(frame_fifo_bytes(f24, (int)sizeof(f24), false), 21,
               "2.4GHz fifo = len+1");
-    ASSERT_EQ(frame_fifo_bytes(f24, 5, false), 9999,
-              "2.4GHz too-short buffer → sentinel");
+    ASSERT_EQ(frame_fifo_bytes(f24, 5, false), -1,
+              "2.4GHz too-short buffer → -1 (unparseable)");
 
     uint8_t fg[] = { 0x55,0x55,0x55,0x55, 0x6E,0x4E,0x90,0x4E, 30, 0,0 };
     ASSERT_EQ(frame_fifo_bytes(fg, (int)sizeof(fg), true), 33,
               "sub-GHz fifo = phr+3");
-    ASSERT_EQ(frame_fifo_bytes(fg, 8, true), 9999,
-              "sub-GHz too-short buffer → sentinel");
+    ASSERT_EQ(frame_fifo_bytes(fg, 8, true), -1,
+              "sub-GHz too-short buffer → -1 (unparseable)");
 }
 
 static void test_byte_period(void) {
