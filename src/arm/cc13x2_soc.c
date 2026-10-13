@@ -1119,6 +1119,9 @@ static void trng_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32
 #define UART_ICR   0x44
 #define UART_DMACTL 0x48
 
+#define UART_CTL_UARTEN 0x001u
+#define UART_CTL_RXE    0x200u
+
 #define UART_INT_EOT  0x800u
 #define UART_INT_OE   0x400u
 #define UART_INT_RT   0x040u
@@ -1241,7 +1244,9 @@ static void uart_write(cc13x2_soc_t *soc, uint32_t off, uint32_t val) {
 /* Console input arrives on the wire at the programmed baud rate, one
  * character time apart, so a line longer than the 32-byte RX FIFO reaches
  * firmware that keeps reading it.  A character that finds the FIFO full is
- * lost and sets the overrun flag, as on silicon. */
+ * lost and sets the overrun flag, as on silicon.  So is one that arrives
+ * while the receiver is off (CTL.UARTEN or CTL.RXE clear): it passes on the
+ * wire unsampled, without touching the FIFO or the flags. */
 static void uart_rx_pace_cb(void *user, cpu_event_t *ev) {
     (void)ev;
     cc13x2_soc_t *soc = user;
@@ -1250,7 +1255,10 @@ static void uart_rx_pace_cb(void *user, cpu_event_t *ev) {
     uint8_t b = u->wire[u->wire_head];
     u->wire_head = (u->wire_head + 1) % CC13X2_UART_WIRE;
     u->wire_count--;
-    if (u->rx_count < UART_FIFO) {
+    if ((u->ctl & (UART_CTL_UARTEN | UART_CTL_RXE)) !=
+        (UART_CTL_UARTEN | UART_CTL_RXE)) {
+        /* Receiver off: the character is lost. */
+    } else if (u->rx_count < UART_FIFO) {
         u->rx_fifo[(u->rx_head + u->rx_count) % UART_FIFO] = b;
         u->rx_count++;
         if (u->rx_count >= uart_level((u->ifls >> 3) & 7u)) u->ris |= UART_INT_RX;

@@ -1995,7 +1995,10 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
                  * parks its compare ~256 s out) would fast-forward straight
                  * past the horizon.  If the event is beyond the slice, idle to
                  * the horizon and END the slice — the runner advances time and
-                 * re-enters; otherwise jump to the event and process it. */
+                 * re-enters; otherwise jump to the event and process it.
+                 * Known quirk (issue #76): if the core already ran past the
+                 * horizon, this winds cycles back to it, and the baseline
+                 * output depends on that exactly. */
                 if (target > cpu->cycle_limit) {
                     if (cpu->cycle_limit > cpu->cycles)
                         cpu->lpm_ns += arm_cycles_to_ns(
@@ -2015,8 +2018,9 @@ static int arm_step_interpreter(arm_cpu_t *cpu, int count) {
              * arm_step_until re-entering at the same cycle forever.  Not
              * folded into the branch above: that one sets cycles to the
              * horizon even when the core already ran past it (winding the
-             * clock back), and the simulation depends on that exactly; this
-             * one never moves backwards, nor to an INT64_MAX horizon. */
+             * clock back, issue #76), and the simulation depends on that
+             * exactly; this one never moves backwards, nor to an INT64_MAX
+             * horizon. */
             if (cpu->cycle_limit != INT64_MAX && cpu->cycle_limit > cpu->cycles) {
                 cpu->lpm_ns += arm_cycles_to_ns(cpu->cycle_limit - cpu->cycles,
                                                 cpu->cpu_freq_hz);
