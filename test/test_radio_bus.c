@@ -292,6 +292,39 @@ static void test_asm_802154g(void) {
     ASSERT(sim_radio_bus_asm_feed(&a, frame[n - 1]), "g: completes on 2nd CRC byte");
 }
 
+static void test_asm_ti_prop(void) {
+    tx_frame_asm_t a;
+    sim_radio_bus_asm_reset(&a);
+    /* TI CC13x2 prop mode (Contiki's prop-settings.c): 3x0x55 preamble +
+     * 24-bit sync 0x55904E + 2-byte PHR (FCS=CRC-32, length 6 = 2 payload
+     * + 4 CRC) + payload + CRC, nothing after the CRC. */
+    uint8_t frame[] = {
+        0x55,0x55,0x55, 0x55,0x90,0x4E, 0x00,0x06,
+        0xA1,0xA2, 0xC1,0xC2,0xC3,0xC4
+    };
+    int n = (int)sizeof(frame);
+    for (int i = 0; i < n - 1; i++)
+        ASSERT(!sim_radio_bus_asm_feed(&a, frame[i]), "ti: no completion before CRC4");
+    ASSERT(sim_radio_bus_asm_feed(&a, frame[n - 1]), "ti: completes on the last CRC byte");
+    ASSERT_EQ(a.subghz, 1, "ti: flagged sub-GHz");
+    ASSERT_EQ(a.ti_prop, 1, "ti: flagged TI prop layout");
+    ASSERT_EQ(a.expected_len, 6, "ti: PHR length counts the CRC");
+    ASSERT_EQ(a.sync_bytes, 6, "ti: 3 preamble + 3 sync bytes before the PHR");
+
+    /* The CC1200 layout on the same assembler afterwards is unaffected. */
+    uint8_t cc[] = {
+        0x55,0x55,0x55,0x55, 0x6E,0x4E,0x90,0x4E, 8,
+        1,2,3,4,5,6,7,8, 0xC1,0xC2
+    };
+    sim_radio_bus_asm_reset(&a);
+    ASSERT_EQ(feed_seq(&a, cc, (int)sizeof(cc)), 1, "ti: CC1200 frame still parses");
+    ASSERT_EQ(a.ti_prop, 0, "ti: CC1200 frame not flagged TI");
+
+    uint8_t fifo[] = { 0x55,0x55,0x55, 0x55,0x90,0x4E, 0x00,0x06, 0xA1,0xA2 };
+    ASSERT_EQ(frame_fifo_bytes(fifo, (int)sizeof(fifo), true), 8,
+              "ti: fifo = PHR length + 2");
+}
+
 static void test_asm_invalid_length_resets(void) {
     tx_frame_asm_t a;
     sim_radio_bus_asm_reset(&a);
@@ -326,14 +359,14 @@ static void test_frame_fifo_bytes(void) {
     uint8_t f24[] = { 0,0,0,0, 0x7A, 20, 0,0,0 };
     ASSERT_EQ(frame_fifo_bytes(f24, (int)sizeof(f24), false), 21,
               "2.4GHz fifo = len+1");
-    ASSERT_EQ(frame_fifo_bytes(f24, 5, false), 9999,
-              "2.4GHz too-short buffer → sentinel");
+    ASSERT_EQ(frame_fifo_bytes(f24, 5, false), -1,
+              "2.4GHz too-short buffer → -1 (unparseable)");
 
     uint8_t fg[] = { 0x55,0x55,0x55,0x55, 0x6E,0x4E,0x90,0x4E, 30, 0,0 };
     ASSERT_EQ(frame_fifo_bytes(fg, (int)sizeof(fg), true), 33,
               "sub-GHz fifo = phr+3");
-    ASSERT_EQ(frame_fifo_bytes(fg, 8, true), 9999,
-              "sub-GHz too-short buffer → sentinel");
+    ASSERT_EQ(frame_fifo_bytes(fg, 8, true), -1,
+              "sub-GHz too-short buffer → -1 (unparseable)");
 }
 
 static void test_byte_period(void) {
@@ -1292,6 +1325,7 @@ int run_radio_bus_tests(int verbose) {
 
     test_asm_802154();
     test_asm_802154g();
+    test_asm_ti_prop();
     test_asm_invalid_length_resets();
     test_asm_reset_clears();
     test_frame_fifo_bytes();

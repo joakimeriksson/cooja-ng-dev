@@ -76,6 +76,34 @@ const arm_config_t nrf54l15_config = {
     .cpuid            = 0x410FD214,   /* Cortex-M33 r0p4 */
 };
 
+/* TI CC13x2 / CC26x2 (CC1352R1 LaunchPad).
+ *
+ * Per the CC13x2/CC26x2 TRM (SWCU185) and driverlib inc/hw_memmap.h:
+ *   - Cortex-M4F @ 48 MHz (SCLK_HF, from the 48 MHz XOSC_HF or RCOSC_HF).
+ *   - 352 KB flash @ 0x00000000 (44 sectors of 8 KB; CCFG in the last one).
+ *   - 80 KB SRAM @ 0x20000000.
+ *   - 38 external interrupts (inc/hw_ints.h NUM_INTERRUPTS = 54).
+ *
+ * The 256 KB ROM sits at 0x10000000, not at 0, so `rom_size` stays 0: the
+ * SoC maps its stand-in ROM as an IO window (cc13x2_soc.c), so every
+ * halfword fetched from it goes through the IO lookup and the page's read
+ * handler. ROM routines are cold paths (power and clock setup), so they do
+ * not need the core's direct-mapped fetch; a firmware that idled in a ROM
+ * routine would.
+ */
+const arm_config_t cc13x2_config = {
+    .name             = "CC13x2",
+    .rom_size         = 0,
+    .flash_size       = 352 * 1024,
+    .flash_base       = 0x00000000,
+    .sram_size        = 80 * 1024,
+    .sram_base        = 0x20000000,
+    .default_cpu_freq = 48000000,
+    .num_irqs         = 38,
+    .vtor_default     = 0,           /* vector table at flash base */
+    .cpuid            = 0x410FC241,  /* Cortex-M4 r0p1 */
+};
+
 const arm_config_t nrf52840_config = {
     .name            = "nRF52840",
     .rom_size        = 0,

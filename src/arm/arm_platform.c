@@ -11,6 +11,7 @@
 #include "cc2538_soc.h"
 #include "nrf52840_soc.h"
 #include "nrf54l15_soc.h"
+#include "cc13x2_soc.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -152,6 +153,25 @@ static const arm_platform_config_t platform_nrf54l15_xiao = {
     .vtor_override = 0,
 };
 
+/* TI CC1352R1 LaunchPad (LAUNCHXL-CC1352R1; TARGET=simplelink
+ * BOARD=launchpad/cc1352r1). Pins from the board file CC1352R1_LAUNCHXL.h:
+ *   Red LED   = DIO6, Green LED = DIO7       active-high
+ *   BTN-1     = DIO15, BTN-2    = DIO14      active-low, pull-up
+ *   Console   = UART0 (RX DIO12, TX DIO13) via the XDS110 backchannel
+ * GPIO is one 32-bit port, so `port` is 0 throughout. */
+static const arm_platform_config_t platform_cc1352r1_launchpad = {
+    .name          = "cc1352r1-launchpad",
+    .soc           = &cc13x2_config,
+    .soc_ops       = &cc13x2_soc_ops,
+    .console_uart  = 0,
+    .leds = {
+        { .port = 0, .pin = 6, .active_low = false },   /* red   DIO6 */
+        { .port = 0, .pin = 7, .active_low = false },   /* green DIO7 */
+    },
+    .button        = { .port = 0, .pin = 15, .active_low = true },  /* BTN-1 DIO15 */
+    .vtor_override = 0,
+};
+
 static const arm_platform_config_t *all_arm_platforms[] = {
     &platform_cc2538dk,
     &platform_openmote,
@@ -160,6 +180,7 @@ static const arm_platform_config_t *all_arm_platforms[] = {
     &platform_nrf52840_dk,
     &platform_nrf54l15_dk,
     &platform_nrf54l15_xiao,
+    &platform_cc1352r1_launchpad,
     NULL
 };
 

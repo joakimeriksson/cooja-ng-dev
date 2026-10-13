@@ -1,0 +1,30 @@
+# TSCH on two CC1352R1 LaunchPads in IEEE 802.15.4 mode (2.4 GHz, built with
+# RF_CONF_MODE=RF_MODE_2_4_GHZ): the radio in poll mode, software ACKs,
+# receiving_packet() from CMD_IEEE_CCA_REQ's sync bit. Contiki-NG
+# examples/6tisch/simple-node; node 1 self-selects coordinator.
+# Association + HELD sync: >= 3 periodic drift reports prove the EB / ACK
+# time-synchronisation loop is alive, not just association (the same checks
+# as configs/test-tsch-nrf52840-dk.json).
+#
+# Association waits for an EB on the channel the joining node scans.
+
+version: 2
+title: "CC1352R1 LaunchPad: TSCH association + held sync, IEEE mode (2.4 GHz)"
+timeout_ms: 200000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: tsch, firmware: firmware/cc1352r1-launchpad/tsch-node-ieee.cc1352r1-launchpad }
+
+nodes:
+  - { type: tsch, id: 1, x: 0.0, y: 0.0 }
+  - { type: tsch, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  steps:
+    - { wait: "starting as coordinator", node: 1 }
+    - { wait: "association done", node: 2 }
+    - { wait: "drift", node: 2, count: 3 }
+  fail_on:
+    - "leaving the network"

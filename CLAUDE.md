@@ -224,6 +224,31 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
 # Two-node UDP echo over 802.15.4/6LoWPAN/IPv6/RPL; server logs "Received and replied", 0 timeouts.
 ./build/test_runner nrf52840-dk-multinode firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk firmware/nrf52840-dk/zephyr-echo-client.nrf52840-dk -t 40000
 
+# TI CC1352R1 LaunchPad (CC13x2 SoC + RF core model). Boot with the null radio,
+# then both radio modes: sub-GHz proprietary (Contiki's default on this board)
+# and 2.4 GHz IEEE, which joins a mixed Sky/CC2538/nRF52840 DAG.
+# CC13X2_TRACE=1 (2 = every window) logs register accesses; CC13X2_RFC_TRACE=1
+# logs every RF core command, status and frame; CC13X2_RTC_TRACE=1 logs AON
+# RTC compare writes, arming decisions and channel events.
+./build/test_runner test configs/test-boot-cc1352r1-launchpad.yaml         # ~25s sim
+./build/test_runner test configs/test-nullnet-cc1352r1-launchpad.yaml      # prop, L5
+./build/test_runner test configs/test-rpl-udp-cc1352r1-launchpad.yaml      # prop, L6
+./build/test_runner test configs/test-rpl-udp-ieee-cc1352r1-launchpad.yaml # IEEE, L6
+./build/test_runner test configs/test-mixed-platform-cc1352r1.yaml         # 4 architectures, one DAG
+./build/test_runner test configs/test-shell-cc1352r1-launchpad.yaml        # UART0 RX: a line > the 32-byte FIFO
+./build/test_runner test configs/test-button-cc1352r1-launchpad.yaml --script test/scripts/button-cc1352r1-launchpad.cnsh
+                                  # BTN-1/BTN-2: IOC pull-up, edge detect, AON GPIO edge IRQ
+tools/cc13x2-rom/build-rom.sh     # regenerate src/arm/cc13x2_rom_image.c from the SDK's driverlib
+# Zephyr (stock samples, cc1352r1_launchxl) and RIOT (cc1352-launchpad) run too:
+./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40000
+./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/riot-hello-world.cc1352r1-launchpad -t 5000
+# Hardware comparison: one check image runs in csim and on a LaunchPad (RTC
+# compare lag, RF status words, radio call timings, measured on the chip).
+# flash.py programs through the XDS110 (catch.tcl halts even a sleeping image)
+# and logs the UART. Results: devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md
+./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/hwcheck.cc1352r1-launchpad -t 3000
+tools/cc13x2-hwcheck/flash.py firmware/cc1352r1-launchpad/hwcheck.cc1352r1-launchpad 10
+
 # nRF54L15 console input: the Contiki-NG shell example on the DK, driven
 # through the UARTE20 EasyDMA receive path (bytes paced at the baud rate).
 ./build/test_runner test configs/test-shell-nrf54l15-dk.yaml   # ~4s sim
@@ -642,6 +667,7 @@ ACLK is fixed at 32,768 Hz (crystal). SMCLK = DCO / divider.
 | **nrf52840-dk** | nRF52840 (ARM Cortex-M4F) | Yes (on-chip 2.4 GHz) | UART0 (legacy window) | Nordic PCA10056 Development Kit, same SoC as Dongle, VTOR=0x0, SEGGER VCP console |
 | **nrf54l15-dk** | nRF54L15 (ARM Cortex-M33, ARMv8-M) | Yes (on-chip 2.4 GHz) | UARTE20 | Nordic nRF54L15-DK, 256 KB RAM, GRTC/DPPI fabric, VTOR=0x0. **The only platform with the ARMv8-M security extension (TrustZone-M) enabled** (`has_trustzone`) — see [`docs/design/trustzone-m-plan.md`](docs/design/trustzone-m-plan.md) |
 | **nrf54l15-xiao** | nRF54L15 (ARM Cortex-M33, ARMv8-M) | Yes (on-chip 2.4 GHz) | UARTE20 | Seeed Studio XIAO nRF54L15. Same SoC as the DK; one user LED on P2.0, user button on P0.0. The board the TrustZone tests and the hardware comparison use |
+| **cc1352r1-launchpad** | CC1352R (ARM Cortex-M4F) | Yes (on-chip RF core: sub-GHz prop + 2.4 GHz IEEE) | UART0 | TI LAUNCHXL-CC1352R1. Runs on a stand-in ROM built from driverlib (`tools/cc13x2-rom/`, Decisions Log). The RF core is a command-level model (`src/arm/cc13x2_rfc.c`): TI does not publish the CPE ROM, so the documented doorbell/command contract is modelled, not the M0. Contiki's default is prop mode; `RF_CONF_MODE=RF_MODE_2_4_GHZ` builds IEEE mode. See [`devices/cc1352r1-launchpad/`](devices/cc1352r1-launchpad/STATUS.md) |
 | **nrf54l15-dk + FLPR** | nRF54L15 **FLPR (RV32EMC, RISC-V)** coprocessor | — (uses the M33's radio) | shared SRAM | **Dual-core / cross-ISA**: the M33 (`flpr-host`) loads the FLPR blob into shared SRAM and releases it via the VPR `CPURUN` register; the RV32EMC core (`hello-vpr`) then runs **unmodified Contiki-NG** alongside the M33. ISA `rv32emc_zicsr_zifencei` (M + C). See [`docs/design/riscv-vpr-plan.md`](docs/design/riscv-vpr-plan.md) |
 
 ## MCU Configurations

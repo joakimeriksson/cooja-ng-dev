@@ -302,6 +302,79 @@ jobs:
         # MAC round-trip that needs the MAC/MII dummy read byte.
         run: ./build/test_runner test configs/test-enc28j60-nrf54l15-dk.json
 
+      - name: CC1352R1 LaunchPad boot, null radio (25 s sim)
+        # TI CC13x2 SoC: reset handler and SetupTrimDevice() through the
+        # stand-in ROM (driverlib behind the ROM API tables), TI's Power,
+        # PIN and UART drivers, Contiki's clock on the AON RTC. Also the
+        # regression for the bit-band word-address fix: the RTC and channel
+        # enables are bit-band writes.
+        run: ./build/test_runner test configs/test-boot-cc1352r1-launchpad.yaml
+
+      - name: Determinism guard (CC1352R1 boot run twice → byte-identical)
+        run: tools/check-determinism.sh test configs/test-boot-cc1352r1-launchpad.yaml
+
+      - name: CC1352R1 LaunchPad nullnet broadcast, RF core prop mode (30 s sim)
+        # The command-level RF core model: power-up/BOOT_DONE, the doorbell,
+        # radio-operation chaining, CMD_PROP_TX_ADV/RX_ADV with TI's RX
+        # data-entry queue, and the TI prop-mode 802.15.4g framing on the bus.
+        run: ./build/test_runner test configs/test-nullnet-cc1352r1-launchpad.yaml
+
+      - name: CC1352R1 LaunchPad RPL-UDP, prop mode (60 s sim)
+        run: ./build/test_runner test configs/test-rpl-udp-cc1352r1-launchpad.yaml
+
+      - name: Determinism guard (CC1352R1 RPL-UDP run twice → byte-identical)
+        run: tools/check-determinism.sh test configs/test-rpl-udp-cc1352r1-launchpad.yaml
+
+      - name: CC1352R1 LaunchPad Zephyr 802.15.4 echo (stock echo_server/client, 40 s sim)
+        # Zephyr's CC13xx driver: the TRNG (entropy at boot), CMD_IEEE_CSMA
+        # (every send) and pointer RX entries.  Counts the server's replies;
+        # csim's [PKT] lines can split one, hence the low threshold.
+        run: |
+          ./build/test_runner mixed-multinode \
+            firmware/cc1352r1-launchpad/zephyr-echo-server.cc1352r1-launchpad \
+            firmware/cc1352r1-launchpad/zephyr-echo-client.cc1352r1-launchpad -t 40000 > out.txt 2>&1
+          n=$(grep -c 'Received and replied' out.txt || true)
+          echo "echo replies: $n"; [ "$n" -ge 5 ]
+
+      - name: CC1352R1 LaunchPad RIOT hello-world (5 s sim)
+        # RIOT idles in WFI with nothing scheduled once main returns; the ARM
+        # core used to spin there forever, so this guards with a wall timeout.
+        # perl's alarm, not timeout(1): macOS runners have no coreutils, and
+        # --wall-timeout is only checked between slices, not inside one.
+        run: |
+          perl -e 'alarm 60; exec @ARGV' ./build/test_runner mixed-multinode \
+            firmware/cc1352r1-launchpad/riot-hello-world.cc1352r1-launchpad -t 5000 > out.txt 2>&1
+          grep -q 'This board features a(n) cc26x2_cc13x2 CPU' out.txt
+          grep -q 'Simulated time:   5000 ms' out.txt
+
+      - name: CC1352R1 LaunchPad console input and buttons
+        # UART0 RX paced at the baud rate (a shell line longer than the
+        # 32-byte FIFO), and BTN-1/BTN-2 through the IOC pull-up, edge
+        # detect and the AON GPIO edge interrupt (Contiki's button-hal).
+        run: |
+          ./build/test_runner test configs/test-shell-cc1352r1-launchpad.yaml
+          ./build/test_runner test configs/test-button-cc1352r1-launchpad.yaml \
+            --script test/scripts/button-cc1352r1-launchpad.cnsh
+
+      - name: CC1352R1 LaunchPad nullnet + RPL-UDP, RF core IEEE mode (2.4 GHz)
+        # CMD_IEEE_RX/TX/RX_ACK, frame filtering, hardware auto-ACK, CCA_REQ.
+        run: |
+          ./build/test_runner test configs/test-nullnet-ieee-cc1352r1-launchpad.yaml
+          ./build/test_runner test configs/test-rpl-udp-ieee-cc1352r1-launchpad.yaml
+
+      - name: CC1352R1 (IEEE mode) on one DAG with Sky, CC2538 and nRF52840 (90 s sim)
+        run: ./build/test_runner test configs/test-mixed-platform-cc1352r1.yaml
+
+      - name: CC1352R1 TSCH association + held sync, prop and IEEE mode
+        # Sub-GHz TSCH (40 ms slots, 4-channel hopping) is also the regression
+        # for the 802.15.4g frame tracker's per-frame channel reset, the AON
+        # RTC's documented as-soon-as-possible compare, and the watchdog
+        # pausing in standby.
+        run: |
+          ./build/test_runner test configs/test-tsch-cc1352r1-launchpad.yaml
+          ./build/test_runner test configs/test-tsch-ieee-cc1352r1-launchpad.yaml
+          tools/check-determinism.sh test configs/test-tsch-ieee-cc1352r1-launchpad.yaml
+
       - name: Determinism guard (sky RPL-UDP run twice → byte-identical)
         run: tools/check-determinism.sh multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 20000
 

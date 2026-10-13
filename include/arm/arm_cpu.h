@@ -66,7 +66,7 @@
 #define ARM_SYSTEM_BASE   0xE0000000
 
 /* --- IO region dispatch --- */
-#define ARM_MAX_IO_REGIONS 64
+#define ARM_MAX_IO_REGIONS 96     /* CC13x2: 62 (its windows + nonbuf aliases + core) */
 
 typedef int  (*arm_io_read_fn)(void *user_data, uint32_t addr);
 typedef void (*arm_io_write_fn)(void *user_data, uint32_t addr, uint32_t value);
@@ -82,7 +82,7 @@ typedef struct {
 /* One hash slot of the page-indexed IO lookup.  n == 0 marks an empty slot
  * (the whole table is memset to zero on rebuild), so a page whose peripheral
  * really registered with n entries always has n >= 1. */
-#define ARM_IO_PAGE_SLOTS 128   /* power of two, > 2x the pages any SoC maps */
+#define ARM_IO_PAGE_SLOTS 256   /* power of two, > 2x the pages any SoC maps (CC13x2: 79) */
 #define ARM_IO_PAGE_CHAIN 4
 typedef struct {
     uint32_t page;                       /* addr >> 12 */
@@ -224,6 +224,12 @@ typedef struct arm_cpu {
     bool      io_ns_alias;           /* config->periph_ns_alias: fold 0x4 onto 0x5 in IO dispatch */
     bool      io_txn_ns;             /* last IO access came through the Non-secure alias */
     bool      io_blocked;            /* last IO lookup was refused by io_access_check */
+    /* Byte width (1/2/4) of the IO access being dispatched, set just before
+     * the region's read/write callback runs. A sub-word store reaches the
+     * callback as (address, narrow value), so without it a byte store and a
+     * word store of the same value to an aligned address look alike; the
+     * CC13x2 ADI's 8-bit registers need to tell them apart. */
+    uint8_t   io_width;
     /* Non-secure fetch cache: [fetch_ok_base, fetch_ok_base + fetch_ok_len)
      * is the window around the last verified PC over which attribution
      * cannot change (its 4 KB page clamped to the SAU region boundaries),

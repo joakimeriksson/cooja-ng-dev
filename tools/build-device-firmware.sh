@@ -118,9 +118,10 @@ fi
 [ -n "$SRC_NAME" ] || { echo "Error: no main/PROCESS in $SRC_DIR/*.c" >&2; exit 1; }
 
 # ---- build ----
-OUTPUT_ABS="$(cd "$(dirname "$OUTPUT")" 2>/dev/null && pwd)/$(basename "$OUTPUT")" || \
-    OUTPUT_ABS="$CSIM_DIR/$OUTPUT"
-mkdir -p "$(dirname "$OUTPUT_ABS")"
+# Create the output directory first: resolving it with cd before it exists
+# fails inside the substitution and left OUTPUT_ABS as "/<name>".
+mkdir -p "$(dirname "$OUTPUT")"
+OUTPUT_ABS="$(cd "$(dirname "$OUTPUT")" && pwd)/$(basename "$OUTPUT")"
 
 BOARD_ARG=""
 [ -n "$BOARD" ] && BOARD_ARG="BOARD=$BOARD"

@@ -1,0 +1,30 @@
+# The CC1352R1 LaunchPad in IEEE mode (2.4 GHz) on one RPL DAG with the
+# other 2.4 GHz boards: a Tmote Sky root (MSP430 + CC2420), a CC2538DK
+# (Cortex-M3 + RF Core) and an nRF52840-DK (Cortex-M4F + RADIO), plus the
+# CC1352R1 (Cortex-M4F + the TI RF core model in IEEE mode). Every client
+# completes UDP round trips through the Sky root, so each radio model's
+# frames, FCS and ACKs are accepted by the others.
+title: "Mixed platforms: Sky + CC2538 + nRF52840 + CC1352R1 (IEEE mode) on one DAG"
+timeout_ms: 90000
+seed: 42
+startup_delay_ms: 1000
+
+radiomedium:
+  type: udgm
+  tx_range: 55.0
+  interference_range: 110.0
+  success_ratio_tx: 1.0
+  success_ratio_rx: 1.0
+
+nodes:
+  - { firmware: firmware/sky/udp-server.sky,                                   id: 1, x:  0.0, y:  0.0 }
+  - { firmware: firmware/cc2538dk/udp-client.cc2538dk,                         id: 2, x: 20.0, y:  0.0 }
+  - { firmware: firmware/nrf52840-dk/udp-client.nrf52840-dk,                   id: 3, x: 40.0, y:  0.0 }
+  - { firmware: firmware/cc1352r1-launchpad/udp-client-ieee.cc1352r1-launchpad, id: 4, x: 20.0, y: 20.0 }
+
+test:
+  validators:
+    - { pattern: "Received request", node: 1, min_count: 3 }
+    - { pattern: "Received response", node: 2, min_count: 1 }
+    - { pattern: "Received response", node: 3, min_count: 1 }
+    - { pattern: "Received response", node: 4, min_count: 1 }

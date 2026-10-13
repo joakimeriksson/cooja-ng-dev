@@ -62,6 +62,10 @@ typedef struct {
     int payload_count;     /* bytes received after length byte */
     bool subghz;           /* true once sync word matched (sub-GHz frame) */
     int subghz_phr_len;    /* CC1200 PHR width: 1 or 2 bytes */
+    bool ti_prop;          /* TI prop-mode layout (RADIO_FRAME_TI_PROP_SYNC_WORD):
+                            * 2-byte PHR counting the CRC, no bytes after */
+    int pre_bytes;         /* bytes fed since the frame armed, up to its sync */
+    int sync_bytes;        /* ti_prop: preamble + sync bytes before the PHR */
     int64_t first_byte_ns; /* sim time of first preamble byte */
     /* Frame-level sender only: the time this frame went on the air, when
      * that is not the kernel's `now`.  A peer emulator lags the kernel and
@@ -82,7 +86,15 @@ typedef struct {
  * full-rate sub-GHz traffic, comfortably more than the firmware's
  * worst-case process latency. */
 #define EMU_RX_QUEUE_SIZE 64
-#define EMU_RX_FRAME_MAX  160  /* preamble(4)+SFD(1)+len(1)+payload(≤127)+CRC(2) */
+#define EMU_RX_FRAME_MAX  256  /* the longest frame the bus carries, with its header:
+                                 * sub-GHz preamble(4)+sync(4)+PHR(2)+≤200; the
+                                 * sender-side capture is 256 too */
+/* Longest sub-GHz PHR length the frame assembler accepts, for CC1200 and TI
+ * prop frames alike. 802.15.4g allows 2047; the bus's per-frame buffers do
+ * not, and neither do the chip models (the CC13x2 RF core takes 256), so a
+ * longer frame is not a frame here. Also how the CC1200's 1-byte vs 2-byte
+ * PHR is told apart (sim_radio_bus.c, TX_ASM_SUBGHZ_PHR). */
+#define RADIO_BUS_SUBGHZ_MAX_LEN 200
 
 typedef struct {
     uint8_t data[EMU_RX_FRAME_MAX];
@@ -485,8 +497,8 @@ static inline int64_t byte_period_ns(bool subghz) {
 }
 
 /* FIFO bytes a receiving chip needs free to accept a buffered on-air
- * frame; sentinel > any FIFO size when the buffer is too short to read
- * the length field (caller queues the frame instead). */
+ * frame; -1 when no length can be read from it (the frame is handed to
+ * the chip, whose sync search ignores it, rather than left queued). */
 int frame_fifo_bytes(const uint8_t *data, int len, bool subghz);
 
 #ifdef __cplusplus

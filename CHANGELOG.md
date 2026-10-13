@@ -7,6 +7,36 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+- **TI CC1352R1 LaunchPad** (`cc1352r1-launchpad`): the CC13x2 SoC on a
+  stand-in ROM built from driverlib, and a command-level RF core model in
+  both radio modes — sub-GHz proprietary (Contiki's default) and 2.4 GHz
+  IEEE 802.15.4, which joins a mixed Sky/CC2538/nRF52840 DAG. Contiki-NG
+  nullnet, RPL-UDP and TSCH, stock Zephyr samples (802.15.4 echo) and RIOT
+  hello-world run, and so do the board's buttons (Contiki's button-hal) and
+  console input (the Contiki shell). Checked against a LaunchPad: factory
+  configuration, the AON RTC compare behaviour and RF status words match
+  silicon (`devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`).
+
+### Fixed
+- **ARM: a core sleeping in WFI with no event queued spun forever.** It now
+  sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
+  which idles with none.
+- **Bit-band alias word address** was `byte * 4` for non-zero offsets.
+- **802.15.4g frame tracker** kept the previous frame's channel across a new
+  preamble, so a hopping sub-GHz sender's frames were filtered on the wrong
+  channel. It now also counts the CC1200's two trailing CRC bytes as part
+  of the frame, so they share its channel snapshot and loss decision.
+- **Radio bus: a queued frame longer than 160 bytes was truncated.** The
+  deferred-RX queue now holds 256-byte frames, the longest the bus carries
+  (sub-GHz PHR lengths up to 200, `RADIO_BUS_SUBGHZ_MAX_LEN`); a CC1200
+  frame over ~150 bytes reached a busy receiver cut short.
+- **Radio bus: a frame whose length could not be read was parked at the
+  head of the receiver's queue for good**, holding back every frame behind
+  it. It is handed to the chip, whose own sync search ignores it.
+- **ARM: an SoC registering more than 64 IO windows lost the extra ones
+  silently.** The limit is 96 and exceeding it stops at init.
+
 ## [0.3.0] — 2026-10-11
 
 Cooja-NG becomes something you can drive, embed and watch: a command shell

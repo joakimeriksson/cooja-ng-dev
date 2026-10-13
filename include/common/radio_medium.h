@@ -75,6 +75,16 @@ typedef enum {
  * (see arch/dev/radio/cc1200/cc1200-802154g-863-870-fsk-50kbps.c). */
 #define RADIO_FRAME_802154G_SYNC_WORD  0x6E4E904Eu
 
+/* TI CC13x2/CC26x2 RF core in proprietary mode, as Contiki-NG configures it
+ * (rf-settings/cc13x2/prop-settings.c): 3 preamble bytes 0x55, a 24-bit sync
+ * word 0x55904E, a 2-byte 802.15.4g PHR whose length counts payload + CRC,
+ * then payload and CRC, nothing after.  The two sync configurations do not
+ * correlate with each other on air, so a CC1200 and a CC13x2 with Contiki's
+ * defaults do not hear each other — the framers recognise both and leave
+ * that to the receivers' own sync matching. */
+#define RADIO_FRAME_TI_PROP_SYNC_WORD  0x0055904Eu
+#define RADIO_FRAME_TI_PROP_SYNC_MASK  0x00FFFFFFu
+
 typedef struct {
     double tx_range;            /* meters, default 50.0 */
     double interference_range;  /* meters, default 100.0 */
@@ -130,6 +140,7 @@ typedef struct {
     int byte_count;     /* bytes received in current frame */
     uint32_t frame_id;  /* unique ID for current frame */
     int phr_hi;         /* 802.15.4g: top 3 bits of 11-bit length */
+    int tail;           /* 802.15.4g: bytes on air after `length` (CC1200: CRC) */
     radio_frame_profile_t profile;  /* updated when set_channel changes band */
     /* Sender's channel at the moment this frame started, snapshotted at
      * SFD detection. The per-byte channel filter compares the receiver's

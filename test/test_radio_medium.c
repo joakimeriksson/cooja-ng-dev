@@ -685,9 +685,36 @@ static void test_frame_tracker_802154g_state_progression(void) {
     ASSERT_EQ(ft->state, FRAME_DATA, "PHR_LO -> FRAME_DATA");
     ASSERT_EQ(ft->length, 5, "length = 5");
 
-    /* 5 payload bytes -> IDLE. */
+    /* The CC1200's PHR counts the payload only; its 2 CRC bytes follow and
+     * belong to the frame (same channel snapshot, same loss decision). */
     for (int i = 0; i < 5; i++) radio_medium_filter_byte(&rm, 0, 1, 0xA0 + i);
-    ASSERT_EQ(ft->state, FRAME_IDLE, "after 5 payload bytes -> IDLE");
+    ASSERT_EQ(ft->state, FRAME_DATA, "after 5 payload bytes -> still DATA (CRC)");
+    radio_medium_filter_byte(&rm, 0, 1, 0x12);
+    radio_medium_filter_byte(&rm, 0, 1, 0x34);
+    ASSERT_EQ(ft->state, FRAME_IDLE, "after the 2 CRC bytes -> IDLE");
+}
+
+/* TI prop mode (CC13x2): 24-bit sync 0x55904E, and the PHR length already
+ * counts the CRC, so the frame ends on its last counted byte. */
+static void test_frame_tracker_802154g_ti_prop_length(void) {
+    radio_medium_t rm;
+    radio_medium_init(&rm, 2);
+    radio_medium_configure_udgm(&rm, 50.0, 100.0, 1.0, 1.0);
+    radio_medium_set_channel(&rm, 0, RADIO_MEDIUM_SUBGHZ_CHANNEL_BASE);
+    radio_medium_set_channel(&rm, 1, RADIO_MEDIUM_SUBGHZ_CHANNEL_BASE);
+    frame_tracker_t *ft = &rm.frame_track[0][0];
+
+    for (int i = 0; i < 4; i++) radio_medium_filter_byte(&rm, 0, 1, 0x55);
+    uint8_t sync[3] = { 0x55, 0x90, 0x4E };
+    for (int i = 0; i < 3; i++) radio_medium_filter_byte(&rm, 0, 1, sync[i]);
+    ASSERT_EQ(ft->state, FRAME_PHR_LO, "TI sync -> FRAME_PHR_LO");
+    radio_medium_filter_byte(&rm, 0, 1, 0x00);
+    radio_medium_filter_byte(&rm, 0, 1, 0x07);
+    ASSERT_EQ(ft->length, 7, "length = 7 (payload 5 + CRC 2)");
+    for (int i = 0; i < 6; i++) radio_medium_filter_byte(&rm, 0, 1, 0xA0 + i);
+    ASSERT_EQ(ft->state, FRAME_DATA, "6 of 7 -> still DATA");
+    radio_medium_filter_byte(&rm, 0, 1, 0xA6);
+    ASSERT_EQ(ft->state, FRAME_IDLE, "7 of 7 -> IDLE, no tail");
 }
 
 /* Per-frame loss caching also applies to sub-GHz frames: with
@@ -1348,6 +1375,7 @@ int run_radio_medium_tests(int verbose) {
 
     /* Frame tracker — IEEE 802.15.4g */
     test_frame_tracker_802154g_state_progression();
+    test_frame_tracker_802154g_ti_prop_length();
     test_frame_tracker_802154g_per_frame_cache();
     test_set_channel_band_change_resets_tracker();
 

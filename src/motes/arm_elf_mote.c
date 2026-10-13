@@ -22,6 +22,7 @@
 #include "cc2538_uart.h"    /* arm_mote_serial_input (M38) */
 #include "nrf52840_soc.h"
 #include "nrf54l15_soc.h"
+#include "cc13x2_soc.h"
 #include "gdb_stub.h"       /* arm_mote_execute cpu->gdb_stub poll (M38) */
 #include "sim_state.h"      /* SIM_RADIO_* for arm_elf_mote_rf_sim_state (M61) */
 
@@ -78,6 +79,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
     cc2538_soc_t   *cc_soc   = arm_platform_cc2538(plat);
     nrf52840_soc_t *nrf_soc  = arm_platform_nrf52840(plat);
     nrf54l15_soc_t *nrfl_soc = arm_platform_nrf54l15(plat);
+    cc13x2_soc_t   *cc13_soc = arm_platform_cc13x2(plat);
 
     if (cc_soc) {
         /* CC2538-class platform (cc2538dk / openmote / zoul-firefly). */
@@ -97,7 +99,7 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
             cc1200_set_rf_listener(&cc_soc->cc1200, env->chip_tx_byte,
                                     &node->rf_ctx[1]);
             cc1200_set_channel_busy_query(&cc_soc->cc1200,
-                                           env->cc1200_channel_busy, node);
+                                           env->channel_busy, node);
         }
 
         /* Seed RFRND and sleep timer uniquely per node. */
@@ -196,6 +198,31 @@ int arm_elf_mote_boot(mixed_node_t *node, int slot,
             printf("  Node %d [nrf54l15]: TX listener installed, "
                    "ficr deviceid=%08x:%08x\n",
                    node_id, nrfl_soc->ficr.deviceid1, nrfl_soc->ficr.deviceid0);
+    } else if (cc13_soc) {
+        /* CC13x2: Contiki's ieee-addr.c takes the EUI-64 from the factory
+         * config (FCFG1 MAC_15_4) unless CCFG overrides it, and
+         * node_id_init() reads the node id from its last two bytes. Same
+         * Cooja-style repeated scheme as the cc2538 boards. */
+        uint8_t eui[8] = { 0x00, 0x12, 0x4B, 0x00,
+                           (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF),
+                           (uint8_t)(node_id >> 8), (uint8_t)(node_id & 0xFF) };
+        cc13x2_soc_set_ieee_addr(cc13_soc, eui);
+        /* One RF core, two medium slots by band: proprietary (sub-GHz)
+         * frames leave on slot 1, IEEE (2.4 GHz) on slot 0 — the
+         * convention sim_radio_bus_push_channel registers spectra by. */
+        node->rf_ctx[0].node_idx  = idx;
+        node->rf_ctx[0].radio_idx = 0;
+        node->rf_ctx[1].node_idx  = idx;
+        node->rf_ctx[1].radio_idx = 1;
+        cc13x2_rfc_set_tx_listener(&cc13_soc->rfc, env->chip_tx_byte,
+                                   &node->rf_ctx[1], &node->rf_ctx[0]);
+        cc13x2_rfc_set_channel_busy_query(&cc13_soc->rfc,
+                                          env->channel_busy, node);
+        cc13_soc->rfc.node_id = node_id;
+        if (*env->verbose)
+            printf("  Node %d [cc13x2]: ieee=%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                   node_id, eui[0], eui[1], eui[2], eui[3], eui[4], eui[5],
+                   eui[6], eui[7]);
     }
 
     arm_cpu_reset(&plat->cpu);
@@ -315,6 +342,11 @@ static int arm_radio_rxfifo_available(void *m) {
          * not in RX state. */
         return 128;
     }
+    if (arm_platform_cc13x2(&node->plat.arm)) {
+        /* The RF core writes frames into RAM data entries; a full queue
+         * is its own RX_BUF_FULL, not bus backpressure. */
+        return 255;
+    }
     return 0;
 }
 static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
@@ -333,6 +365,8 @@ static void arm_radio_receive_byte(void *m, uint8_t byte, int8_t rssi) {
     }
     if (nrf_soc)  nrf_radio_receive_byte(nrf_soc, byte);
     if (nrfl_soc) nrf54l_radio_receive_byte(nrfl_soc, byte);
+    cc13x2_soc_t *cc13 = arm_platform_cc13x2(&node->plat.arm);
+    if (cc13) cc13x2_rfc_receive_byte(&cc13->rfc, byte, rssi);
 }
 static bool arm_radio_rx_busy(void *m) { (void)m; return false; }
 static const mote_radio_ops_t arm_radio_ops = {
@@ -365,6 +399,18 @@ static void armnrf_radio_rx_stall(void *m) {
     nrf52840_soc_t *nrf_soc = arm_platform_nrf52840(&node->plat.arm);
     if (nrf_soc) nrf_radio_rx_stall(nrf_soc);
 }
+/* cc13x2 variant: the RF core abandons a frame whose stream died. */
+static void armcc13_radio_rx_stall(void *m) {
+    mixed_node_t *node = (mixed_node_t *)m;
+    cc13x2_soc_t *soc = arm_platform_cc13x2(&node->plat.arm);
+    if (soc) cc13x2_rfc_rx_stall(&soc->rfc);
+}
+static const mote_radio_ops_t armcc13_radio_ops = {
+    arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
+    armcc13_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
+    NULL /* on_air */, NULL /* receive_byte_at */
+};
+
 static const mote_radio_ops_t armnrf_radio_ops = {
     arm_radio_receive_byte, arm_radio_rxfifo_available, arm_radio_rx_busy,
     armnrf_radio_rx_stall, NULL /* current_channel */, NULL /* mark_collisions */,
@@ -394,8 +440,10 @@ void arm_elf_mote_register_radio(mixed_node_t *node, int slot,
      * cc2538/nrf54l15. */
     sim_radio_delivery_mode_t mode = SIM_RADIO_DELIVERY_PER_BYTE;
     (void)0;
+    bool cc13 = arm_platform_cc13x2(&node->plat.arm) != NULL;
     const mote_radio_ops_t *ops = nrf54l ? &arm54l_radio_ops
                                 : nrf52  ? &armnrf_radio_ops
+                                : cc13   ? &armcc13_radio_ops
                                          : &arm_radio_ops;
     sim_radio_bus_register(bus, slot, ops, node, mode, /*caps=*/0);
 }
@@ -665,6 +713,9 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     cc2538_soc_t     *cc   = arm_platform_cc2538(plat);
     nrf52840_soc_t   *nrf  = arm_platform_nrf52840(plat);
     nrf54l15_soc_t   *nrfl = arm_platform_nrf54l15(plat);
+    cc13x2_soc_t     *cc13 = arm_platform_cc13x2(plat);
+    if (cc13)
+        return cc13x2_uart_feed_rx(cc13, buf, len);
     if (cc)
         for (int i = 0; i < len; i++)
             cc2538_uart_receive_byte(&cc->uart0, buf[i]);
@@ -701,6 +752,8 @@ static int arm_mote_set_input_pin(sim_mote_t *m, int port, int pin, int level) {
         return 0;
     }
     if (nrfl) return nrf54l15_soc_set_input_pin(nrfl, port, pin, level);
+    cc13x2_soc_t *c13 = arm_platform_cc13x2(plat);
+    if (c13) return port == 0 ? cc13x2_soc_set_input_pin(c13, pin, level) : -1;
     return -1;
 }
 
@@ -724,6 +777,16 @@ static void arm_mote_ui_leds(const sim_mote_t *m, uint8_t leds[3]) {
         leds[0] = (pc_data >> 0) & 1;  /* red */
         leds[1] = (pc_data >> 1) & 1;  /* yellow */
         leds[2] = (pc_data >> 2) & 1;  /* green */
+        return;
+    }
+    cc13x2_soc_t *c13 = arm_platform_cc13x2(plat);
+    if (c13) {
+        const arm_platform_config_t *cfg = plat->config;
+        for (int i = 0; i < 3; i++) {
+            const arm_gpio_pin_t *led = &cfg->leds[i];
+            bool present = led->pin || led->active_low;
+            leds[i] = present ? (uint8_t)((c13->gpio.dout >> led->pin) & 1u) : 0;
+        }
         return;
     }
     nrf54l15_soc_t *nl = arm_platform_nrf54l15(plat);

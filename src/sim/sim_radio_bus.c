@@ -15,14 +15,27 @@ static void sim_radio_bus_frame_complete(sim_radio_bus_t *bus,
  *   2.4 GHz: preamble(4) 0x00 + SFD 0x7A + length at data[5]; receiving
  *     chip pushes (length + 1) bytes into its RXFIFO.
  *   sub-GHz: preamble(4) 0x55 + sync(4) + PHR at data[8]; receiving
- *     chip pushes (PHR + payload + 2 status) = (length + 3) bytes. */
+ *     chip pushes (PHR + payload + 2 status) = (length + 3) bytes.
+ * -1: no length to read (not a frame the assembler recognised). Room for
+ * it is never lacking, so it is handed to the chip, whose own sync search
+ * ignores it, rather than parked at the head of a queue it can never
+ * leave. */
 int frame_fifo_bytes(const uint8_t *data, int len, bool subghz) {
+    if (subghz && len >= 8 &&
+        !(data[4] == 0x6E && data[5] == 0x4E && data[6] == 0x90 && data[7] == 0x4E)) {
+        /* TI prop layout: the PHR follows the 24-bit sync 0x55904E, and its
+         * length already counts the CRC (RADIO_FRAME_TI_PROP_SYNC_WORD). */
+        for (int b = 0; b + 4 < len; b++)
+            if (data[b] == 0x55 && data[b + 1] == 0x90 && data[b + 2] == 0x4E)
+                return (((int)data[b + 3] & 0x07) << 8 | data[b + 4]) + 2;
+        return -1;
+    }
     if (subghz) {
         /* Need preamble(4) + sync(4) + PHR(1) at minimum to read length. */
-        if (len < 9) return 9999;
+        if (len < 9) return -1;
         return (int)data[8] + 3;
     }
-    if (len < 6) return 9999;
+    if (len < 6) return -1;
     return (int)data[5] + 1;
 }
 
@@ -47,6 +60,20 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
         /* Look for either preamble pattern. */
         a->pre_run = (byte == 0x00 || byte == 0x55) ? (0x100 | byte) : 0;
         a->sync_match = (a->sync_match << 8) | byte;
+        a->pre_bytes++;
+        if (a->sync_match != RADIO_FRAME_802154G_SYNC_WORD &&
+            (a->sync_match & RADIO_FRAME_TI_PROP_SYNC_MASK) ==
+                RADIO_FRAME_TI_PROP_SYNC_WORD) {
+            /* TI prop-mode sync — a 2-byte PHR follows, no sniffing. */
+            a->state = TX_ASM_SUBGHZ_PHR;
+            a->subghz = true;
+            a->ti_prop = true;
+            a->sync_bytes = a->pre_bytes;
+            a->subghz_phr_len = 2;
+            a->phr_lo = -1;
+            a->payload_count = 0;
+            return false;
+        }
         if (a->sync_match == RADIO_FRAME_802154G_SYNC_WORD) {
             /* CC1200 sync word — next 1 or 2 bytes are the PHR (we
              * disambiguate inside TX_ASM_SUBGHZ_PHR). */
@@ -92,10 +119,14 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
          * for a small 802.15.4g frame still parses correctly via the
          * 1-byte path even though it's 2-byte on the wire. The
          * follow-up PHR-byte path catches the few high-length cases. */
+        if (a->phr_lo < 0 && a->ti_prop) {
+            a->phr_lo = byte & 0x07;            /* PHR: [MS..FCS DW L10:8] */
+            return false;
+        }
         if (a->phr_lo < 0) {
             /* First PHR byte. */
             uint8_t len = byte;
-            if (len >= 3 && len <= 200) {
+            if (len >= 3 && len <= RADIO_BUS_SUBGHZ_MAX_LEN) {
                 a->expected_len = len;
                 a->subghz_phr_len = 1;
                 a->state = TX_ASM_PAYLOAD;
@@ -108,9 +139,10 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
         } else {
             /* PHRB byte: low 8 bits */
             a->expected_len = (a->phr_lo << 8) | byte;
-            if (a->expected_len < 3 || a->expected_len > 200) {
+            if (a->expected_len < 3 || a->expected_len > RADIO_BUS_SUBGHZ_MAX_LEN) {
                 asm_back_to_preamble(a);
                 a->subghz = false;
+                a->ti_prop = false;
                 return false;
             }
             a->state = TX_ASM_PAYLOAD;
@@ -126,7 +158,8 @@ bool sim_radio_bus_asm_feed(tx_frame_asm_t *a, uint8_t byte) {
          * length byte counts payload only and the chip appends 2 extra
          * CRC bytes after the payload — we wait for those too so the
          * receiver-side dispatch's total_air_bytes count includes them. */
-        int payload_target = a->expected_len + (a->subghz ? 2 : 0);
+        int payload_target = a->expected_len +
+                             (a->subghz && !a->ti_prop ? 2 : 0);
         if (a->payload_count >= payload_target) {
             /* Frame complete — reset only the bytes-on-wire tracking
              * (state + sliding sync register + zero counter); leave
@@ -152,6 +185,9 @@ void sim_radio_bus_asm_reset(tx_frame_asm_t *a) {
     a->phr_lo = -1;
     a->subghz = false;
     a->subghz_phr_len = 0;
+    a->ti_prop = false;
+    a->pre_bytes = 0;
+    a->sync_bytes = 0;
     a->first_byte_ns = 0;
 }
 
@@ -255,6 +291,8 @@ static void bus_sync_channel(sim_radio_bus_t *bus, sim_runtime_t *sim,
  * the 2 FCS); 802.15.4g = 4 preamble + 4 sync + PHR(1/2) + payload +
  * 2 auto-CRC. */
 static int frame_air_bytes(const tx_frame_asm_t *a) {
+    if (a->ti_prop)
+        return a->sync_bytes + 2 + a->expected_len;
     return a->subghz
         ? (4 + 4 + a->subghz_phr_len + a->expected_len + 2)
         : (IEEE802154_PHY_HEADER_BYTES + a->expected_len);
@@ -437,6 +475,8 @@ void sim_radio_bus_tx_byte(sim_radio_bus_t *bus, struct sim_runtime *sim,
                                                  : sim_runtime_now_ns(sim);
         a->at_override_ns = 0;
         a->subghz = (byte == 0x55);
+        a->ti_prop = false;
+        a->pre_bytes = 0;
         cap->len = 0;
         bus->on_air_end_ns[sender_idx] = 0;   /* a new frame's window */
     }

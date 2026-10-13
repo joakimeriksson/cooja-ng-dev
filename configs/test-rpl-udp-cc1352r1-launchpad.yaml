@@ -1,0 +1,24 @@
+# Two CC1352R1 LaunchPads, Contiki-NG rpl-udp over the RF core in
+# proprietary mode (sub-GHz): RPL DAG formation, CSMA with software ACKs,
+# UDP request/response — porting ladder L6 (docs/porting-a-device.md).
+
+version: 2
+title: "CC1352R1 LaunchPad: RPL-UDP, prop mode (sub-GHz)"
+timeout_ms: 60000
+seed: 42
+startup_delay_ms: 1000
+
+mote_types:
+  - { name: server, firmware: firmware/cc1352r1-launchpad/udp-server.cc1352r1-launchpad }
+  - { name: client, firmware: firmware/cc1352r1-launchpad/udp-client.cc1352r1-launchpad }
+
+nodes:
+  - { type: server, id: 1, x: 0.0, y: 0.0 }
+  - { type: client, id: 2, x: 5.0, y: 0.0 }
+
+test:
+  description: >
+    The client joins the server's DAG and three UDP round trips complete.
+  steps:
+    - { wait: "Received response 'hello 0'", node: 2 }
+    - { wait: "Received response", node: 2, count: 3 }
