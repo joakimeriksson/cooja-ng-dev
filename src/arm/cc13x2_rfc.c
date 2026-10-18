@@ -167,9 +167,8 @@
 #define IEEE_TURNAROUND_NS 192000 /* aTurnaroundTime: 12 symbols (802.15.4 PHY) */
 #define IEEE_MAX_PSDU      127    /* aMaxPHYPacketSize */
 
-/* RSSI the receiver reports without a frame: an idle channel at the
- * sensitivity floor, and a carrier it can sense but has not synced to. */
-#define RSSI_IDLE_DBM   (-110)
+/* RSSI the receiver reports for a carrier it can sense but has not synced
+ * to.  An idle channel reads the part's idle_rssi_dbm (cc13x2_part_t). */
 #define RSSI_BUSY_DBM   (-60)
 
 enum { RX_HUNT = 0, RX_HDR, RX_PAYLOAD, RX_CRC, RX_LEN };
@@ -1415,7 +1414,7 @@ static uint32_t ieee_cca_req(cc13x2_rfc_t *rfc, uint32_t addr) {
 static int8_t current_rssi(cc13x2_rfc_t *rfc) {
     if (rfc->rx.active && rfc->rx.state != RX_HUNT) return rfc->rx.rssi;
     if (rfc->busy_cb && rfc->busy_cb(rfc->busy_user)) return RSSI_BUSY_DBM;
-    return RSSI_IDLE_DBM;
+    return rfc->soc->part->idle_rssi_dbm;
 }
 
 static uint32_t direct_cmd(cc13x2_rfc_t *rfc, uint32_t cmdr) {

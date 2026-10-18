@@ -259,28 +259,38 @@ static const uint32_t fcfg1_launchpad[268] = {
 
 #define FCFG1_USER_ID            0x294
 #define FCFG1_ICEPICK_DEVICE_ID  0x318
+#define FCFG1_IOCONF             0x344
 
 /* The parts.  The CC1352R is the LaunchPad above, as read.  The CC1312R7
- * takes the same FCFG1 with the two words that say which chip this is
- * replaced, as the CC13x2x7/CC26x2x7 driverlib decodes them (chipinfo.c):
+ * takes the same FCFG1 with the words that say which chip this is
+ * replaced, as read from an LP-CC1312R7 with openocd (FCFG1 and PRCM):
  *   ICEPICK_DEVICE_ID 0x1BB7702F: PG_REV 1 (case 1, "PG1.1 or later"),
  *     WAFER_ID 0xBB77 (FAMILY_CC13x2x7_CC26x2x7; any other wafer ID makes
  *     ThisLibraryIsFor_CC13x2x7_CC26x2x7_HaltIfViolated() spin), TI.
  *   USER_ID 0x10828000: PROTOCOL 0x8 with CC13 = 1 and PA = 0
  *     (CHIP_TYPE_CC1312R7), PKG 2 (7x7 RGZ), PG_REV 1.
- *   RFCMODEHWOPT 0x29: modes 0 (RF_MODE_AUTO), 3 and 5, i.e. the
- *     proprietary protocol bit and no BLE or IEEE 802.15.4 (chipinfo.c
- *     reads bits [3:1]).
- * Not read from silicon: no CC1312R7 has been dumped yet.  The trim words
- * are the CC1352R's; the model does not interpret them. */
+ *   IOCONF 0xFFFFFF1E: GPIO_CNT 30 (the CC1352R has 28; the PIN driver
+ *     sizes its pin range from it).
+ *   RFCMODEHWOPT 0x21: modes 0 (RF_MODE_AUTO) and 5.  Bits [3:1] are 0, so
+ *     ChipInfo_GetSupportedProtocol_BV() returns 0 on silicon too.
+ *   MISC_CONF_1 0xFFFFFF00, as on the CC1352R.
+ * The trim words are still the CC1352R's (91 of the 268 words differ on
+ * the R7, mostly trims, and its FCFG1 goes on past 0x430); the model does
+ * not interpret them. */
 const cc13x2_part_t cc13x2_part_cc1352r = {
     .name = "CC1352R", .flash_size = 352u * 1024u,
-    .icepick_id = 0x3BB4102Fu, .user_id = 0x3082F000u, .rfcmodehwopt = 0x2Fu,
+    .icepick_id = 0x3BB4102Fu, .user_id = 0x3082F000u, .ioconf = 0xFFFFFF1Cu,
+    .rfcmodehwopt = 0x2Fu, .idle_rssi_dbm = -110,
     .rom = cc13x2_rom_image, .rom_size = &cc13x2_rom_image_size,
 };
 const cc13x2_part_t cc13x2_part_cc1312r7 = {
     .name = "CC1312R7", .flash_size = 704u * 1024u,
-    .icepick_id = 0x1BB7702Fu, .user_id = 0x10828000u, .rfcmodehwopt = 0x29u,
+    .icepick_id = 0x1BB7702Fu, .user_id = 0x10828000u, .ioconf = 0xFFFFFF1Eu,
+    /* An LP-CC1312R7 reads -87/-88 dBm on an idle channel, above Contiki's
+     * -90 dBm CCA threshold, so the stock contiki-ng#3285 build never
+     * transmits under CSMA on silicon.  At -88 here, so does the model;
+     * kept at -110 until the port or its tests settle that. */
+    .rfcmodehwopt = 0x21u, .idle_rssi_dbm = -110,
     .rom = cc13x2x7_rom_image, .rom_size = &cc13x2x7_rom_image_size,
 };
 
@@ -289,6 +299,7 @@ static void fcfg1_init(cc13x2_soc_t *soc) {
     memcpy(soc->fcfg1, fcfg1_launchpad, sizeof(fcfg1_launchpad));
     soc->fcfg1[FCFG1_ICEPICK_DEVICE_ID / 4] = soc->part->icepick_id;
     soc->fcfg1[FCFG1_USER_ID / 4]           = soc->part->user_id;
+    soc->fcfg1[FCFG1_IOCONF / 4]            = soc->part->ioconf;
     uint32_t *f = soc->fcfg1;
     f[FCFG1_MAC_15_4_0 / 4]        = soc->mac_15_4[0];
     f[FCFG1_MAC_15_4_1 / 4]        = soc->mac_15_4[1];

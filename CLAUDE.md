@@ -244,8 +244,8 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
                                   # BTN-1/BTN-2: IOC pull-up, edge detect, AON GPIO edge IRQ
 tools/cc13x2-rom/build-rom.sh     # regenerate src/arm/cc13x2_rom_image.c from the SDK's driverlib
 # TI CC1312R7 LaunchPad: the same model with the CC13x2x7 part (704 KB/144 KB,
-# own ROM, sub-GHz only). Contiki-NG support is a local port, branch
-# feature/cc1312r7-launchpad (see firmware/cc1312r7-launchpad/PROVENANCE.md).
+# own ROM, sub-GHz only). Contiki-NG support is contiki-ng/contiki-ng#3285, not
+# merged yet (see firmware/cc1312r7-launchpad/PROVENANCE.md).
 ./build/test_runner test configs/test-rpl-udp-cc1312r7-launchpad.yaml      # prop, L6
 ./build/test_runner test configs/test-mixed-subghz-cc1312r7-cc1352r1.yaml  # R7 clients, R1 root
 tools/cc13x2-rom/build-rom.sh --contiki-dir <port> --device cc13x2x7_cc26x2x7  # cc13x2x7_rom_image.c
@@ -258,6 +258,7 @@ tools/cc13x2-rom/build-rom.sh --contiki-dir <port> --device cc13x2x7_cc26x2x7  #
 # and logs the UART. Results: devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md
 ./build/test_runner mixed-multinode firmware/cc1352r1-launchpad/hwcheck.cc1352r1-launchpad -t 3000
 tools/cc13x2-hwcheck/flash.py firmware/cc1352r1-launchpad/hwcheck.cc1352r1-launchpad 10
+tools/cc13x2-hwcheck/flash.py --x7 --serial <SN> ELF 10   # an x7 part (LP-CC1312R7), one probe of several
 
 # nRF54L15 console input: the Contiki-NG shell example on the DK, driven
 # through the UARTE20 EasyDMA receive path (bytes paced at the baud rate).

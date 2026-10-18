@@ -20,21 +20,27 @@
 
 ## Firmware
 
-Contiki-NG has no CC1312R7 support upstream. The images here come from a
-local port (Contiki-NG branch `feature/cc1312r7-launchpad`): a
+Contiki-NG has no CC1312R7 support upstream yet. The images here come from
+contiki-ng/contiki-ng#3285 (with contiki-ng/coresdk_cc13xx_cc26xx#9): a
 `cc13x2x7-cc26x2x7` CPU subfamily that builds TI's drivers from source
 against the SDK 7.10.01.24 CC13x2x7 driverlib, and a `launchpad/cc1312r7`
-board. Until that is merged, rebuilding needs that branch
-(`--contiki-dir`).
+board. Until it is merged, rebuilding needs that PR's branch,
+`feature/cc1312r7-launchpad` (`--contiki-dir`).
 
 ## Open
 
-- **Silicon identity.** `ICEPICK_DEVICE_ID`, `USER_ID` and `RFCMODEHWOPT`
-  are derived from TI's driverlib, the trims are the CC1352R1's. Dump FCFG1
-  and `RFCMODEHWOPT` from a real LP-CC1312R7 (as `fcfg1.bin` was for the
-  CC1352R1, identifying words blanked) and replace them.
-- **Hardware comparison.** Run `tools/cc13x2-hwcheck` on an LP-CC1312R7
+- **FCFG1 trims.** `ICEPICK_DEVICE_ID`, `USER_ID`, `MISC_CONF_1`, `IOCONF`
+  and `RFCMODEHWOPT` are read from an LP-CC1312R7. The rest of FCFG1 is
+  still the CC1352R1's: 91 of its 268 words differ on the R7, mostly trims,
+  and the R7's FCFG1 goes on past `0x430`. A per-part table from a dump
+  (identifying words blanked, as for the CC1352R1) replaces them.
+- **Idle RSSI.** On an LP-CC1312R7 the idle channel reads −87 to −88 dBm
+  (a CC1352R1 on the same desk: −93 to −103), above Contiki's −90 dBm CCA
+  threshold, so contiki-ng#3285 never transmits under CSMA on silicon. The
+  model reports −110 dBm idle for every part, so these tests cannot show it.
+- **Hardware comparison.** Run `tools/cc13x2-hwcheck` on an LP-CC1312R7 (`flash.py --x7`)
   for the same table as `devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`.
-- **On hardware, the Contiki-NG port itself** is untested: the RF settings
-  (TI's CC1312R7 overrides and PA table) and the TI drivers compiled from
-  source need a real board before the port goes upstream.
+- **On hardware, the Contiki-NG port** boots, receives every frame from
+  CC1352R1 and CC1312R1 peers, and transmits at 13 dBm once the CCA
+  threshold is raised. LEDs, buttons, standby current and the 12/14 dBm PA
+  entries are untested there.

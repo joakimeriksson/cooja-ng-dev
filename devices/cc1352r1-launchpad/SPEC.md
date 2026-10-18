@@ -22,7 +22,8 @@
   RAM 16 KB + 4 KB @ `0x21000000`
 - **Flash**: 360 448 bytes (44 × 8 KB) @ `0x00000000`; CCFG is the last
   sector, also seen at `0x50003000`–`0x50004FFF`
-- **ROM**: 256 KB window @ `0x10000000`. csim maps a stand-in built from
+- **ROM**: 256 KB on the chip @ `0x10000000`. csim maps its first 16 KB
+  (`0x4000`) with a stand-in built from
   driverlib (`tools/cc13x2-rom/`, see the Decisions Log in
   `docs/design/refactor-plan.md`), never TI's image.
 - **Reuses existing emulator?**: CPU and NVIC, yes; every peripheral is new

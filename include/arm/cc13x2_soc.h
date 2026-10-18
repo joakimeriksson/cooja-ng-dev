@@ -44,7 +44,10 @@ typedef struct cc13x2_part {
     uint32_t        flash_size;     /* bytes; CCFG is the last 8 KB sector */
     uint32_t        icepick_id;     /* FCFG1 ICEPICK_DEVICE_ID (chip family) */
     uint32_t        user_id;        /* FCFG1 USER_ID (chip type) */
+    uint32_t        ioconf;         /* FCFG1 IOCONF (GPIO_CNT: the pin range) */
     uint32_t        rfcmodehwopt;   /* PRCM.RFCMODEHWOPT (RF modes) */
+    int8_t          idle_rssi_dbm;  /* RSSI the RF core reports on an idle
+                                       channel (CMD_GET_RSSI, CCA) */
     const uint8_t  *rom;            /* stand-in ROM image, tools/cc13x2-rom */
     const size_t   *rom_size;
 } cc13x2_part_t;

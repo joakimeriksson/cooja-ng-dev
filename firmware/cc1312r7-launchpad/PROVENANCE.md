@@ -1,6 +1,7 @@
-<!-- The Contiki-NG commit below is the CC1312R7 port on branch
-     feature/cc1312r7-launchpad (Core SDK submodule 8162033), not yet merged
-     upstream; rebuild with --contiki-dir pointing at that branch. -->
+<!-- The Contiki-NG commit below is the CC1312R7 port in
+     contiki-ng/contiki-ng#3285, branch feature/cc1312r7-launchpad (Core SDK
+     submodule 8162033, contiki-ng/coresdk_cc13xx_cc26xx#9), not yet merged;
+     rebuild with --contiki-dir pointing at that branch. -->
 
 ## hello-world-nullradio.cc1312r7-launchpad
 
