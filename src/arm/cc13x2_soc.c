@@ -108,6 +108,7 @@ enum {
     P_RFC_RAT,
     P_AUX_TDC,
     P_AUX_EVCTL,
+    P_IOC,
 };
 
 typedef struct {
@@ -146,7 +147,7 @@ static const page_desc_t page_descs[] = {
     { 0x40043000, 0x1000, "RFC_RAT",    P_RFC_RAT,   true  },
     { 0x40044000, 0x1000, "RFC_FSCA",   P_STORE,     false },
     { 0x40080000, 0x1000, "WDT",        P_WDT,       false },
-    { 0x40081000, 0x1000, "IOC",        P_STORE,     false },
+    { 0x40081000, 0x1000, "IOC",        P_IOC,       false },
     { 0x40082000, 0x1000, "PRCM",       P_PRCM,      true  },
     { 0x40083000, 0x1000, "EVENT",      P_STORE,     false },
     { 0x40084000, 0x1000, "SMPH",       P_SMPH,      false },
@@ -280,17 +281,13 @@ static const uint32_t fcfg1_launchpad[268] = {
 const cc13x2_part_t cc13x2_part_cc1352r = {
     .name = "CC1352R", .flash_size = 352u * 1024u,
     .icepick_id = 0x3BB4102Fu, .user_id = 0x3082F000u, .ioconf = 0xFFFFFF1Cu,
-    .rfcmodehwopt = 0x2Fu, .idle_rssi_dbm = -110,
+    .rfcmodehwopt = 0x2Fu,
     .rom = cc13x2_rom_image, .rom_size = &cc13x2_rom_image_size,
 };
 const cc13x2_part_t cc13x2_part_cc1312r7 = {
     .name = "CC1312R7", .flash_size = 704u * 1024u,
     .icepick_id = 0x1BB7702Fu, .user_id = 0x10828000u, .ioconf = 0xFFFFFF1Eu,
-    /* An LP-CC1312R7 reads -87/-88 dBm on an idle channel, above Contiki's
-     * -90 dBm CCA threshold, so the stock contiki-ng#3285 build never
-     * transmits under CSMA on silicon.  At -88 here, so does the model;
-     * kept at -110 until the port or its tests settle that. */
-    .rfcmodehwopt = 0x21u, .idle_rssi_dbm = -110,
+    .rfcmodehwopt = 0x21u,
     .rom = cc13x2x7_rom_image, .rom_size = &cc13x2x7_rom_image_size,
 };
 
@@ -937,14 +934,25 @@ static uint32_t iocfg(cc13x2_soc_t *soc, int dio) {
     return soc->pg_ioc ? REG(soc->pg_ioc, (uint32_t)dio * 4u) : 0;
 }
 
+/* IOCFGn (0x00..0x78, one word per DIO): a plain store, with the pull-up
+ * and input-enable bits mirrored into masks so a DIN read does not walk all
+ * 31 words.  A reset zeroes the store and the masks together. */
+static void ioc_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
+    uint32_t a = off & ~3u;
+    REG(p, a) = merge_write(soc, REG(p, a), off, val);
+    if (a >= (uint32_t)CC13X2_NUM_DIO * 4u) return;
+    uint32_t bit = 1u << (a / 4u), cfg = REG(p, a);
+    cc13x2_gpio_t *g = &soc->gpio;
+    g->pull_up  = ((cfg & IOCFG_PULL_CTL_M) == IOCFG_PULL_UP) ? (g->pull_up | bit)
+                                                              : (g->pull_up & ~bit);
+    g->input_en = (cfg & IOCFG_IE) ? (g->input_en | bit) : (g->input_en & ~bit);
+}
+
 /* The level on each pad: driven from outside (a button), else by the
  * output driver, else by the IOCFG pull (an unpulled input reads 0). */
 static uint32_t gpio_levels(cc13x2_soc_t *soc) {
     cc13x2_gpio_t *g = &soc->gpio;
-    uint32_t v = g->dout & g->doe, pulled = 0;
-    for (int dio = 0; dio < CC13X2_NUM_DIO; dio++)
-        if ((iocfg(soc, dio) & IOCFG_PULL_CTL_M) == IOCFG_PULL_UP) pulled |= 1u << dio;
-    v |= pulled & ~g->doe;
+    uint32_t v = (g->dout & g->doe) | (g->pull_up & ~g->doe);
     v = (v & ~g->din_forced) | (g->din_ext & g->din_forced);
     return v & GPIO_PIN_MASK;
 }
@@ -952,10 +960,7 @@ static uint32_t gpio_levels(cc13x2_soc_t *soc) {
 /* DIN: the pad level of input-enabled DIOs; an output reads back its own
  * level (driverlib's GPIO_readDio on an output pin). */
 static uint32_t gpio_din(cc13x2_soc_t *soc) {
-    uint32_t ie = soc->gpio.doe;
-    for (int dio = 0; dio < CC13X2_NUM_DIO; dio++)
-        if (iocfg(soc, dio) & IOCFG_IE) ie |= 1u << dio;
-    return gpio_levels(soc) & ie;
+    return gpio_levels(soc) & (soc->gpio.doe | soc->gpio.input_en);
 }
 
 /* An outside level on a DIO (button, `gpio` in the shell); level < 0 lets
@@ -1623,7 +1628,7 @@ static uint32_t page_off(cc13x2_page_t *p, uint32_t addr) {
 
 static void trace_access(cc13x2_page_t *p, uint32_t off, bool wr, uint32_t v) {
     if (!trace_on()) return;
-    if (p->kind != P_STORE && cc13x2_trace < 2) return;
+    if (p->kind != P_STORE && p->kind != P_IOC && cc13x2_trace < 2) return;
     if (p->kind == P_ROM || p->kind == P_GPRAM || p->kind == P_RFC_RAM) return;
     arm_cpu_t *cpu = &p->soc->plat->cpu;
     fprintf(stderr, "[cc13x2] %12.6f %c %-10s +0x%03x %s 0x%08x  pc=0x%08x\n",
@@ -1700,6 +1705,7 @@ static int page_read_impl(void *user, uint32_t addr) {
         break;
     case P_AON_IOC:
     case P_HAPI:
+    case P_IOC:
     case P_STORE:
         break;
     }
@@ -1734,6 +1740,7 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_AON_PMCTL: aon_pmctl_write(soc, p, off, val); return;
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
     case P_GPIO:      gpio_write(soc, off, val); return;
+    case P_IOC:       ioc_write(soc, p, off, val); return;
     case P_UART0:     uart_write(soc, off, val); return;
     case P_TRNG:      trng_write(soc, p, off, val); return;
     case P_DDI0:      ddi0_write(soc, off, val); return;

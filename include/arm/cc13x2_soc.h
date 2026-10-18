@@ -46,8 +46,6 @@ typedef struct cc13x2_part {
     uint32_t        user_id;        /* FCFG1 USER_ID (chip type) */
     uint32_t        ioconf;         /* FCFG1 IOCONF (GPIO_CNT: the pin range) */
     uint32_t        rfcmodehwopt;   /* PRCM.RFCMODEHWOPT (RF modes) */
-    int8_t          idle_rssi_dbm;  /* RSSI the RF core reports on an idle
-                                       channel (CMD_GET_RSSI, CCA) */
     const uint8_t  *rom;            /* stand-in ROM image, tools/cc13x2-rom */
     const size_t   *rom_size;
 } cc13x2_part_t;
@@ -128,6 +126,8 @@ typedef struct cc13x2_gpio {
     uint32_t    din_ext;       /* level driven from outside (buttons) */
     uint32_t    din_forced;    /* pins whose level din_ext overrides */
     uint32_t    evflags;
+    uint32_t    pull_up;       /* IOCFG PULL_CTL = up, kept on IOC writes */
+    uint32_t    input_en;      /* IOCFG IE, kept on IOC writes */
 } cc13x2_gpio_t;
 
 /* Watchdog: a down-counter at 1.5 MHz (48 MHz / 32, WATCHDOG_DIV_RATIO in

@@ -34,13 +34,5 @@ board. Until it is merged, rebuilding needs that PR's branch,
   still the CC1352R1's: 91 of its 268 words differ on the R7, mostly trims,
   and the R7's FCFG1 goes on past `0x430`. A per-part table from a dump
   (identifying words blanked, as for the CC1352R1) replaces them.
-- **Idle RSSI.** On an LP-CC1312R7 the idle channel reads −87 to −88 dBm
-  (a CC1352R1 on the same desk: −93 to −103), above Contiki's −90 dBm CCA
-  threshold, so contiki-ng#3285 never transmits under CSMA on silicon. The
-  model reports −110 dBm idle for every part, so these tests cannot show it.
-- **Hardware comparison.** Run `tools/cc13x2-hwcheck` on an LP-CC1312R7 (`flash.py --x7`)
-  for the same table as `devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`.
-- **On hardware, the Contiki-NG port** boots, receives every frame from
-  CC1352R1 and CC1312R1 peers, and transmits at 13 dBm once the CCA
-  threshold is raised. LEDs, buttons, standby current and the 12/14 dBm PA
-  entries are untested there.
+- **Hardware comparison.** Run `tools/cc13x2-hwcheck` on an LP-CC1312R7
+  (`flash.py --x7`) for the same table as `devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`.

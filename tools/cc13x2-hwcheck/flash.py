@@ -22,6 +22,7 @@ and pyserial.
           picks both the probe openocd drives and the UART to log.
 """
 import os
+import re
 import subprocess
 import sys
 import time
@@ -34,24 +35,39 @@ BOARD = ['openocd', '-f', 'board/ti_cc13x2_launchpad.cfg']
 BOARD_X7 = ['openocd', '-f', os.path.join(HERE, 'ti_cc13x2x7_launchpad.cfg')]
 
 
-def flash(elf):
+def catch(elf=None):
+    """Halt the CPU in the boot ROM (catch.tcl), and program ELF if given.
+    --no-flash takes the same path, so the reset that follows starts from a
+    halted CPU as it does after flashing.  With a plain "reset run" against a
+    running or sleeping image, the UART log came back empty about half the
+    time."""
     out = ''
+    cmd = (f'flash write_image erase {elf}; verify_image {elf}; ' if elf else '')
     for _ in range(4):   # the catch is occasionally lost; openocd may assert
         r = subprocess.run(BOARD + ['-f', os.path.join(HERE, 'catch.tcl'), '-c',
-                                    f'flash write_image erase {elf}; verify_image {elf}; '
-                                    'echo FLASH-VERIFIED; exit'],
+                                    cmd + 'echo CAUGHT; exit'],
                            capture_output=True, text=True)
         out = r.stdout + r.stderr
-        if 'FLASH-VERIFIED' in out:
+        if 'CAUGHT' in out:
             return
-    sys.exit('flash failed:\n' + out[-2000:])
+    sys.exit(('flash' if elf else 'catch') + ' failed:\n' + out[-2000:])
 
 
 def xds110_uart(serial_no=None):
-    ports = sorted(p.device for p in list_ports.comports()
-                   if p.vid == 0x0451 and p.pid == 0xBEF3 and
-                   (serial_no is None or p.serial_number == serial_no))
-    return ports[:1]
+    """The probe's application UART: USB interface 0 (location ...:1.0 on
+    Linux).  Where the location carries no interface (macOS), the lower
+    port number, compared as a number: by name, ttyACM10 sorts before
+    ttyACM9."""
+    ports = [p for p in list_ports.comports()
+             if p.vid == 0x0451 and p.pid == 0xBEF3 and
+             (serial_no is None or p.serial_number == serial_no)]
+    app = [p for p in ports if (p.location or '').endswith(':1.0')]
+    if app:
+        ports = app
+    def number_order(p):
+        return [int(t) if t.isdigit() else t
+                for t in re.split(r'(\d+)', p.device)]
+    return [p.device for p in sorted(ports, key=number_order)][:1]
 
 
 def main():
@@ -77,8 +93,7 @@ def main():
     if not ports:
         sys.exit('no XDS110 UART found' +
                  (f' with serial number {serial_no}' if serial_no else ''))
-    if elf:
-        flash(elf)
+    catch(elf)
     s = serial.Serial(ports[0], 115200, timeout=0.05)
     s.reset_input_buffer()
     t0 = time.monotonic()
