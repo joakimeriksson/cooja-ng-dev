@@ -36,12 +36,12 @@
 
 /* What differs between the parts this model covers.  The CC13x2x7/CC26x2x7
  * (CC1312R7, ...) is the CC13x2/CC26x2 core with 704 KB flash, 144 KB SRAM
- * (arm_config_t) and a ROM of its own; the peripherals the model implements
- * are the same.  A platform names its part in `arm_platform_config_t::soc_part`
+ * (both in its arm_config_t, the only place the sizes are written; CCFG is
+ * the last 8 KB sector) and a ROM of its own; the peripherals the model
+ * implements are the same.  A platform names its part in `arm_platform_config_t::soc_part`
  * (NULL = cc13x2_part_cc1352r). */
 typedef struct cc13x2_part {
     const char     *name;
-    uint32_t        flash_size;     /* bytes; CCFG is the last 8 KB sector */
     uint32_t        icepick_id;     /* FCFG1 ICEPICK_DEVICE_ID (chip family) */
     uint32_t        user_id;        /* FCFG1 USER_ID (chip type) */
     uint32_t        ioconf;         /* FCFG1 IOCONF (GPIO_CNT: the pin range) */

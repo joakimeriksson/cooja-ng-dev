@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --contiki-dir) CONTIKI_DIR="$2"; shift 2 ;;
         --device) DEVICE="$2"; shift 2 ;;
-        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) OUT="$1"; shift ;;
     esac
 done

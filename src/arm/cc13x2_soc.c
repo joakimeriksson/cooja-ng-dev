@@ -279,13 +279,13 @@ static const uint32_t fcfg1_launchpad[268] = {
  * the R7, mostly trims, and its FCFG1 goes on past 0x430); the model does
  * not interpret them. */
 const cc13x2_part_t cc13x2_part_cc1352r = {
-    .name = "CC1352R", .flash_size = 352u * 1024u,
+    .name = "CC1352R",
     .icepick_id = 0x3BB4102Fu, .user_id = 0x3082F000u, .ioconf = 0xFFFFFF1Cu,
     .rfcmodehwopt = 0x2Fu,
     .rom = cc13x2_rom_image, .rom_size = &cc13x2_rom_image_size,
 };
 const cc13x2_part_t cc13x2_part_cc1312r7 = {
-    .name = "CC1312R7", .flash_size = 704u * 1024u,
+    .name = "CC1312R7",
     .icepick_id = 0x1BB7702Fu, .user_id = 0x10828000u, .ioconf = 0xFFFFFF1Eu,
     .rfcmodehwopt = 0x21u,
     .rom = cc13x2x7_rom_image, .rom_size = &cc13x2x7_rom_image_size,
@@ -1573,10 +1573,18 @@ static uint32_t vims_read(cc13x2_page_t *p, uint32_t off) {
     return REG(p, a) >> ((off & 3u) * 8u);
 }
 
+/* The flash the SoC config gives the core (arm_config_t::flash_size): the
+ * one place a part's flash size is written down. */
+static uint32_t soc_flash_size(const cc13x2_soc_t *soc) {
+    return soc->plat->cpu.flash_end - soc->plat->cpu.flash_base;
+}
+
 /* FLASH controller: identification and an always-idle state machine.
  * FLASH_SIZE.SECTORS = the part's 8 KB sectors (44 = 352 KB on the CC1352R,
- * 88 = 704 KB on the CC1312R7); FCFG_B0_SSIZE0 = that many sectors of 8 KB
- * (B0_SECT_SIZE in KB). inc/hw_flash.h. */
+ * 88 = 704 KB on the CC1312R7).  FCFG_B0_SSIZE0 does not follow the part:
+ * silicon reads 0x002C0008 on the CC1352R1, the CC1312R1 and the CC1312R7
+ * alike (B0_NUM_SECTORS 44, B0_SECT_SIZE 8 KB), and driverlib reads only the
+ * sector size.  inc/hw_flash.h. */
 #define FLASH_STAT          0x001C
 #define FLASH_FLASH_SIZE    0x002C
 #define FLASH_FSM_STAT      0x2208
@@ -1584,9 +1592,8 @@ static uint32_t vims_read(cc13x2_page_t *p, uint32_t off) {
 static uint32_t flash_read(cc13x2_page_t *p, uint32_t off) {
     uint32_t a = off & ~3u, v;
     switch (a) {
-    case FLASH_FLASH_SIZE:     v = p->soc->part->flash_size / CC13X2_FLASH_SECTOR; break;
-    case FLASH_FCFG_B0_SSIZE0:
-        v = ((p->soc->part->flash_size / CC13X2_FLASH_SECTOR) << 16) | 8u; break;
+    case FLASH_FLASH_SIZE:     v = soc_flash_size(p->soc) / CC13X2_FLASH_SECTOR; break;
+    case FLASH_FCFG_B0_SSIZE0: v = 0x002C0008u; break;
     case FLASH_STAT:           v = 0u; break;       /* not busy */
     case FLASH_FSM_STAT:       v = 0x4u; break;     /* INV_DAT idle */
     default:                   v = REG(p, a); break;
@@ -1662,7 +1669,7 @@ static int page_read_impl(void *user, uint32_t addr) {
          * CCFG_O_* run 0x1FA8..0x1FFF (inc/hw_ccfg.h), the CCFG struct the
          * image links at 0x57FA8 (352 KB) or 0xAFFA8 (704 KB). */
         arm_cpu_t *cpu = &soc->plat->cpu;
-        return (int)(arm_read32(cpu, (soc->part->flash_size - CC13X2_CCFG_SIZE) + (off & ~3u))
+        return (int)(arm_read32(cpu, (soc_flash_size(soc) - CC13X2_CCFG_SIZE) + (off & ~3u))
                      >> ((off & 3u) * 8u));
     }
     case P_PRCM:      return (int)prcm_read(soc, p, off);

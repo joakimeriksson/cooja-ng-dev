@@ -17,6 +17,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   console input (the Contiki shell). Checked against a LaunchPad: factory
   configuration, the AON RTC compare behaviour and RF status words match
   silicon (`devices/cc1352r1-launchpad/HARDWARE-COMPARISON.md`).
+- **TI CC1312R7 LaunchPad** (`cc1312r7-launchpad`): the same model with
+  the CC13x2x7 part — 704 KB flash, 144 KB SRAM and a stand-in ROM of its
+  own (`build-rom.sh --device cc13x2x7_cc26x2x7`), sub-GHz only. Contiki-NG
+  boot, buttons, console input, nullnet, RPL-UDP and TSCH run, and two R7
+  clients join a CC1352R1-rooted DAG; Zephyr hello-world boots. The chip
+  identity words are read from an LP-CC1312R7. Contiki-NG support is
+  contiki-ng/contiki-ng#3285, not merged yet
+  (`firmware/cc1312r7-launchpad/PROVENANCE.md`).
 
 ### Changed
 - **Warnings are errors.** The build is warning-free on gcc 13–15 and
