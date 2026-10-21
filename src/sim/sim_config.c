@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int parse_v1(cJSON *root, sim_normalized_config_t *cfg);
 static int parse_v2(cJSON *root, sim_normalized_config_t *cfg);
@@ -69,6 +70,49 @@ static int parse_node_peripherals(cJSON *node_item, sim_node_config_t *n, int id
 static void parse_medium_object(cJSON *medium, sim_normalized_config_t *cfg);
 static void parse_description(cJSON *root, sim_normalized_config_t *cfg);
 static int  parse_test(cJSON *test, sim_normalized_config_t *cfg);
+
+/* A file a config names is looked up next to the config first: "~/" is the
+ * home directory, and a relative path that exists relative to the config's
+ * directory becomes that joined path.  Otherwise the path is left as
+ * written and opened relative to the current directory, as it always was —
+ * every config in the repo names repo-root paths and is run from there, so
+ * those load exactly as before. */
+static void resolve_one(char *p, size_t sz, const char *dir) {
+    if (!p[0]) return;
+    char buf[1024];
+    if (p[0] == '~' && p[1] == '/') {
+        const char *home = getenv("HOME");
+        if (!home || !*home) return;
+        snprintf(buf, sizeof(buf), "%s%s", home, p + 1);
+        if (strlen(buf) < sz) snprintf(p, sz, "%s", buf);
+        return;
+    }
+    if (p[0] == '/' || !dir[0]) return;
+    snprintf(buf, sizeof(buf), "%s/%s", dir, p);
+    if (access(buf, F_OK) == 0 && strlen(buf) < sz)
+        snprintf(p, sz, "%s", buf);
+}
+
+static void resolve_paths(sim_normalized_config_t *cfg, const char *config_path) {
+    char dir[512] = "";
+    const char *slash = strrchr(config_path, '/');
+    if (slash && (size_t)(slash - config_path) < sizeof(dir))
+        snprintf(dir, sizeof(dir), "%.*s", (int)(slash - config_path), config_path);
+    if (slash == config_path) snprintf(dir, sizeof(dir), "/");
+#define RESOLVE(field) resolve_one((field), sizeof(field), dir)
+    for (int i = 0; i < cfg->node_count; i++) {
+        RESOLVE(cfg->nodes[i].firmware);
+        RESOLVE(cfg->nodes[i].secure_firmware);
+    }
+    for (int t = 0; t < cfg->mote_type_count && t < SIM_MAX_MOTE_TYPES; t++) {
+        RESOLVE(cfg->mote_types[t].firmware);
+        RESOLVE(cfg->mote_types[t].secure_firmware);
+        RESOLVE(cfg->mote_type_firmware[t]);
+        RESOLVE(cfg->mote_type_secure_firmware[t]);
+    }
+    RESOLVE(cfg->js_script_path);
+#undef RESOLVE
+}
 
 int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
     memset(cfg, 0, sizeof(*cfg));
@@ -162,6 +206,7 @@ int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
         if (cfg->nodes[i].id == 0)
             cfg->nodes[i].id = i + 1;
     }
+    resolve_paths(cfg, json_path);
     return 0;
 }
 
@@ -211,7 +256,7 @@ static int parse_v1(cJSON *root, sim_normalized_config_t *cfg) {
     cJSON_ArrayForEach(node_item, nodes) {
         if (count >= MAX_SIM_NODES) {
             fprintf(stderr, "sim_config: too many nodes (max %d)\n", MAX_SIM_NODES);
-            break;
+            return -1;
         }
 
         cJSON *fw = cJSON_GetObjectItemCaseSensitive(node_item, "firmware");
@@ -269,7 +314,11 @@ static int parse_v1(cJSON *root, sim_normalized_config_t *cfg) {
         int ti = 0;
         cJSON *mt_item;
         cJSON_ArrayForEach(mt_item, mt_arr) {
-            if (ti >= 8) break;
+            if (ti >= SIM_MAX_MOTE_TYPES) {
+                fprintf(stderr, "sim_config: too many mote types (max %d)\n",
+                        SIM_MAX_MOTE_TYPES);
+                return -1;
+            }
             cJSON *fw = cJSON_GetObjectItem(mt_item, "firmware");
             if (cJSON_IsString(fw) && fw->valuestring)
                 strncpy(cfg->mote_type_firmware[ti], fw->valuestring, 255);
@@ -561,7 +610,11 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
         int ti = 0;
         cJSON *mt_item;
         cJSON_ArrayForEach(mt_item, mt_arr) {
-            if (ti >= 8) break;
+            if (ti >= SIM_MAX_MOTE_TYPES) {
+                fprintf(stderr, "sim_config: too many mote types (max %d)\n",
+                        SIM_MAX_MOTE_TYPES);
+                return -1;
+            }
             sim_mote_type_t *mt = &cfg->mote_types[ti];
             struct { const char *key; char *dst; size_t sz; } fields[] = {
                 {"name", mt->name, sizeof(mt->name)},
@@ -623,7 +676,7 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
     cJSON_ArrayForEach(node_item, nodes) {
         if (count >= MAX_SIM_NODES) {
             fprintf(stderr, "sim_config: too many nodes (max %d)\n", MAX_SIM_NODES);
-            break;
+            return -1;
         }
         sim_node_config_t *n = &cfg->nodes[count];
 

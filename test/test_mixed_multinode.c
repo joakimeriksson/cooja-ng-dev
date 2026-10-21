@@ -1428,8 +1428,33 @@ static const sim_mote_env_t mixed_mote_env = {
  * run (reboots and timed "add" actions go through init_node too). */
 static const sim_normalized_config_t *node_cfg_src = NULL;
 
+/* The board a firmware image runs on: the "board:" of a config mote type
+ * that names this image, else the image's extension.  NULL (with `err`
+ * set) when neither says — there is no default board any more. */
+static const sim_board_desc_t *board_for_firmware(const char *firmware_path,
+                                                  char *err, size_t errlen) {
+    const char *board = NULL;
+    if (node_cfg_src) {
+        for (int t = 0; t < node_cfg_src->mote_type_count && t < SIM_MAX_MOTE_TYPES; t++) {
+            const sim_mote_type_t *mt = &node_cfg_src->mote_types[t];
+            if (mt->board[0] && strcmp(mt->firmware, firmware_path) == 0) {
+                board = mt->board;
+                break;
+            }
+        }
+    }
+    return sim_board_resolve(firmware_path, board, err, errlen);
+}
+
 static int init_node(int idx, const char *firmware_path,
                      const char *secure_firmware_path, int node_id) {
+    char board_err[512];
+    const sim_board_desc_t *board =
+        board_for_firmware(firmware_path, board_err, sizeof(board_err));
+    if (!board) {
+        fprintf(stderr, "%s\n", board_err);
+        return -1;
+    }
     mixed_node_t *node = &nodes[idx];
     memset(node, 0, sizeof(*node));
     /* Clock deviation from config (Cooja MspClock deviation).  Set here, not
@@ -1441,7 +1466,7 @@ static int init_node(int idx, const char *firmware_path,
     /* Phase 3: one registry lookup owns the board decision — node kind,
      * arch platform name, and banner label all come from the row.
      * M23: the kind row owns boot + radio registration + ops. */
-    node->board = sim_registry_board_for_path(&g_registry, firmware_path);
+    node->board = board;
     const sim_mote_kind_t *kind =
         sim_registry_mote_kind_for(&g_registry, node->board->kind);
     node->type = kind->node_type;
@@ -2388,13 +2413,25 @@ int run_mixed_multinode_test(int argc, char **argv) {
 
     int64_t total_ns = (int64_t)sim_ms * MS_TO_NS;
 
+    /* Every image needs a board before anything boots: an unknown
+     * extension without a "board:" is a configuration error. */
+    for (int i = 0; i < firmware_count; i++) {
+        char board_err[512];
+        if (!board_for_firmware(firmware_paths[i], board_err, sizeof(board_err))) {
+            fprintf(stderr, "%s\n", board_err);
+            return SHELL_EXIT_INVALID;
+        }
+    }
+
     printf("=== Mixed-Platform Multi-Node Test ===\n");
     for (int i = 0; i < firmware_count; i++) {
         /* M60: the banner label is data on the mote-kind row, not a type
          * switch — adding a platform needs no runner edit. */
+        char board_err[512];
         const sim_mote_kind_t *kind =
             sim_registry_mote_kind_for(&g_registry,
-                sim_registry_board_for_path(&g_registry, firmware_paths[i])->kind);
+                board_for_firmware(firmware_paths[i], board_err,
+                                   sizeof(board_err))->kind);
         printf("Firmware[%d]: %s (%s)\n", i, firmware_paths[i],
                kind->banner_label);
     }

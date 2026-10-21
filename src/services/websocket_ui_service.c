@@ -27,17 +27,34 @@
  * sized for this much page; a larger one would be cut off there. */
 #define UI_PAGE_MAX  ((long)WS_SERVER_PAGE_MAX)
 
-/* Serve ui/index.html if it is a regular file of at most UI_PAGE_MAX bytes;
- * otherwise say why and leave the server's built-in page.  The file is
- * opened non-blocking and checked with fstat before it is read: a FIFO with
- * no writer would block a plain fopen() before the simulation starts, an
- * unseekable stream has no length to size the buffer with, and a directory
- * opens and reads as an empty page. */
+/* ui/index.html as built into the binary (build/ui/ui_page.c). */
+extern const unsigned char csim_ui_page[];
+extern const unsigned int csim_ui_page_len;
+
+/* Which page --ui serves:
+ *   - CSIM_UI_PAGE=<file>: that file;
+ *   - else ui/index.html in the current directory, when there is one: the
+ *     repo checkout, so a page being worked on is served without a rebuild;
+ *   - else the copy built into the binary, so the UI works from any
+ *     directory and from an installed binary.
+ * A file is served only if it is a regular file of at most UI_PAGE_MAX
+ * bytes; otherwise say why and leave the server's built-in page.  The file
+ * is opened non-blocking and checked with fstat before it is read: a FIFO
+ * with no writer would block a plain fopen() before the simulation starts,
+ * an unseekable stream has no length to size the buffer with, and a
+ * directory opens and reads as an empty page. */
 static void load_page(ws_server_t *server) {
-    int fd = open(UI_PAGE_PATH, O_RDONLY | O_NONBLOCK);
+    const char *env = getenv("CSIM_UI_PAGE");
+    const char *path = (env && *env) ? env : UI_PAGE_PATH;
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
+    if (fd < 0 && errno == ENOENT && path == (const char *)UI_PAGE_PATH) {
+        ws_server_set_html(server, (const char *)csim_ui_page,
+                           (int)csim_ui_page_len);
+        return;
+    }
     if (fd < 0) {
-        fprintf(stderr, "Warning: cannot open " UI_PAGE_PATH " (%s), serving "
-                        "default page\n", strerror(errno));
+        fprintf(stderr, "Warning: cannot open %s (%s), serving "
+                        "default page\n", path, strerror(errno));
         return;
     }
     struct stat st;
@@ -58,8 +75,8 @@ static void load_page(ws_server_t *server) {
     if (ok)
         ok = ws_server_set_html(server, html, (int)got) == 0;
     if (!ok) {
-        fprintf(stderr, "Warning: " UI_PAGE_PATH " is not a readable file of "
-                        "at most %ld bytes, serving default page\n", UI_PAGE_MAX);
+        fprintf(stderr, "Warning: %s is not a readable file of "
+                        "at most %ld bytes, serving default page\n", path, UI_PAGE_MAX);
     }
     free(html);
     close(fd);

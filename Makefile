@@ -207,6 +207,10 @@ CHIPS_OBJECTS = $(patsubst $(CHIPS_SRC_DIR)/%.c, $(CHIPS_BUILD_DIR)/%.o, $(CHIPS
 RISCV_OBJECTS = $(patsubst $(RISCV_SRC_DIR)/%.c, $(RISCV_BUILD_DIR)/%.o, $(RISCV_SOURCES))
 NATIVE_OBJECTS = $(patsubst $(NATIVE_SRC_DIR)/%.c, $(NATIVE_BUILD_DIR)/%.o, $(NATIVE_SOURCES))
 UI_OBJECTS = $(patsubst $(UI_SRC_DIR)/%.c, $(UI_BUILD_DIR)/%.o, $(UI_SOURCES))
+# The web UI page, built into the binary (tools/embed): --ui serves it from
+# any directory, and an installed cngsim needs no ui/ next to it.
+UI_PAGE_OBJECT = $(UI_BUILD_DIR)/ui_page.o
+UI_OBJECTS += $(UI_PAGE_OBJECT)
 LIB_OBJECTS = $(patsubst $(LIB_SRC_DIR)/%.c, $(LIB_BUILD_DIR)/%.o, $(LIB_SOURCES))
 
 # libyaml 0.2.5, parser half only (lib/yaml/README.md).  Built like QuickJS:
@@ -335,6 +339,15 @@ $(RISCV_BUILD_DIR)/%.o: $(RISCV_SRC_DIR)/%.c | $(RISCV_BUILD_DIR)
 
 $(NATIVE_BUILD_DIR)/%.o: $(NATIVE_SRC_DIR)/%.c | $(NATIVE_BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/embed: tools/embed/embed.c | $(BUILD_DIR)
+	$(CC) -O2 -o $@ $<
+
+$(UI_BUILD_DIR)/ui_page.c: ui/index.html $(BUILD_DIR)/embed | $(UI_BUILD_DIR)
+	./$(BUILD_DIR)/embed ui/index.html csim_ui_page > $@.tmp && mv $@.tmp $@
+
+$(UI_PAGE_OBJECT): $(UI_BUILD_DIR)/ui_page.c
+	$(CC) -O2 -c $< -o $@
 
 $(UI_BUILD_DIR)/%.o: $(UI_SRC_DIR)/%.c | $(UI_BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
