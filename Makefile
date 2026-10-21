@@ -264,7 +264,7 @@ ifeq ($(CONTIKI_DIR),)
   CONTIKI_DIR = ../contiki-ng
 endif
 
-.PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
+.PHONY: all install uninstall clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
 
 all: $(BUILD_DIR)/test_runner $(BUILD_DIR)/cngsim
 
@@ -457,6 +457,22 @@ chain-tests: $(BUILD_DIR)/test_runner
 # Build firmware for Cooja tests
 build-firmware:
 	CONTIKI_DIR=$(CONTIKI_DIR) ./tools/build-test-firmware.sh $(PATTERN)
+
+# Install cngsim for people: the command on PATH, its examples, firmware,
+# tools and guides in share/cooja-ng (its data directory).  test_runner goes
+# there too, where tools/run-cooja-tests.sh looks for it, not on PATH.
+#   make install PREFIX=~/.local      (default /usr/local; DESTDIR honoured)
+PREFIX ?= /usr/local
+install: $(BUILD_DIR)/cngsim $(BUILD_DIR)/test_runner
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/cooja-ng/build
+	install -m 755 $(BUILD_DIR)/cngsim $(DESTDIR)$(PREFIX)/bin/cngsim
+	install -m 755 $(BUILD_DIR)/test_runner $(DESTDIR)$(PREFIX)/share/cooja-ng/build/test_runner
+	tools/install-data.sh $(DESTDIR)$(PREFIX)/share/cooja-ng
+	@echo "Installed cngsim in $(DESTDIR)$(PREFIX)/bin.  Try: cngsim examples"
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/cngsim
+	rm -rf $(DESTDIR)$(PREFIX)/share/cooja-ng
 
 # Write csim.conf with CONTIKI_DIR
 configure:

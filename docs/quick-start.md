@@ -1,74 +1,75 @@
-<!-- DRAFT for 0.3.1 (docs/design/release-0.3.1-usability-plan.md §8.1).
-     Describes the planned `cngsim` command; none of it works yet. -->
-
 # Quick start
 
 Cooja-NG simulates networks of Contiki-NG nodes (also Zephyr and RIOT) on
 emulated hardware: Tmote Sky, CC2538, nRF52840, nRF54L15, CC1352R and more.
 It runs the real firmware images you would flash onto the boards, usually
-hundreds of times faster than real time. You can watch the network in your
-browser.
+hundreds of times faster than real time, and you can watch the network in
+your browser.
 
 If you have used Cooja before, see [Coming from Cooja](#coming-from-cooja).
 
 ## 1. Install
 
+Download a release for your machine and put its `bin/` on your PATH. On
 Linux (x86-64):
 
 ```sh
 curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.3.1/cooja-ng-v0.3.1-linux-x86_64.tar.gz | tar xz
 export PATH=$PWD/cooja-ng-v0.3.1-linux-x86_64/bin:$PATH
-```
-
-On a Mac, use `macos-arm64` (Apple Silicon) or `macos-x64` (Intel) in place
-of `linux-x86_64`.
-
-Check that it works:
-
-```sh
 cngsim --version
 ```
 
-> **Building from source** (Linux, macOS, FreeBSD): `git clone
-> https://github.com/mikroverk/cooja-ng && cd cooja-ng && make && make
-> install PREFIX=~/.local`. It needs only a C compiler; GNU Lightning is
-> optional and makes it faster.
+On a Mac, use `macos-arm64` (Apple Silicon) or `macos-x64` (Intel) in
+place of `linux-x86_64`. The package carries everything `cngsim` needs:
+the examples, the firmware they run, and these guides (`docs/`).
+
+**From source** (Linux, macOS, FreeBSD with `gmake`): a C compiler is
+enough. GNU Lightning is optional and makes it faster.
+
+```sh
+git clone https://github.com/mikroverk/cooja-ng && cd cooja-ng
+make && make install PREFIX=~/.local       # cngsim in ~/.local/bin
+```
+
+`build/cngsim` also runs straight from the checkout.
 
 ## 2. Run your first simulation
 
 ```sh
+cngsim examples              # what is there
 cngsim run rpl-udp-sky
 ```
 
-`rpl-udp-sky` is one of the bundled examples (`cngsim examples` lists them
-all). It has two Tmote Sky nodes. Node 2 joins node 1's RPL network and
-sends it UDP requests; node 1 answers each one:
+`rpl-udp-sky` has two Tmote Sky nodes. Node 2 joins node 1's RPL network
+and sends it a UDP request every ten seconds or so; node 1 answers each one:
 
 ```
-cooja-ng 0.3.1 · RPL-UDP on Tmote Sky · 2 nodes · seed 42 · 60 s
-    8.300 [Node 2/MSP430] [INFO: App       ] Not reachable yet
-   17.877 [Node 2/MSP430] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
-   17.896 [Node 1/MSP430] [INFO: App       ] Received request 'hello 0' from fd00::212:7402:2:202
-   17.897 [Node 1/MSP430] [INFO: App       ] Sending response.
-   17.943 [Node 2/MSP430] [INFO: App       ] Received response 'hello 0' from fd00::212:7401:1:101
-   ...
-  ✓ "Sending request" on node 2 (17.877 s)
-  ✓ "Received request" on node 1 (17.896 s)
-  ✓ "Received response" ×3 on node 2 (37.083 s)
-PASSED · 37.1 s simulated in 0.04 s (2800x real time)
+cooja-ng 0.3.1 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
+    ...
+    9.423 [Node 2/MSP430] [INFO: App       ] Not reachable yet
+   19.000 [Node 2/MSP430] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
+  ✓ "Sending request" on node 2 (19.000 s)
+   19.019 [Node 1/MSP430] [INFO: App       ] Received request 'hello 0' from fd00::212:7402:2:202
+  ✓ "Received request" on node 1 (19.019 s)
+   19.063 [Node 2/MSP430] [INFO: App       ] Received response 'hello 0' from fd00::212:7401:1:101
+    ...
+  ✓ "Received response" ×3 on node 2 (38.203 s)
+PASSED · 38.2 s simulated in 0.04 s (851x real time)
 ```
 
-How to read the output:
-- Each line is something a node printed on its serial console. The line
-  starts with the **simulated** time in seconds, followed by the node it
-  came from.
-- The ✓ lines are the example's checks.
-- The exit code is `0` when every check passes, so `cngsim run` can go
-  straight into a CI job. The other exit codes are listed in `cngsim help
-  run`.
+How to read it:
+- Each line is something a node printed on its serial console. It starts
+  with the **simulated** time in seconds, then the node it came from.
+- The ✓ lines are the example's checks. The run ends as soon as all of
+  them have passed.
+- `cngsim` exits with 0 when every check passes and with 1 when one fails,
+  so a run can go straight into a CI job. `cngsim help` lists the other
+  exit codes.
 
-The same seed always gives the same run, down to the nanosecond. Use
-`--seed 7` to get a different one.
+The same seed always gives the same run, down to the nanosecond.
+`--seed 7` gives another run, just as reproducible. `-q` prints only the
+verdict; `-v` prints everything the simulator knows (radio frames, chip
+counters).
 
 ## 3. Watch it
 
@@ -76,126 +77,150 @@ The same seed always gives the same run, down to the nanosecond. Use
 cngsim run rpl-udp-sky --ui
 ```
 
-Your browser opens at `http://127.0.0.1:8080/`, with the simulation paused.
-Press **Play** (or Space) in the browser, or Enter in the terminal. To skip
-the pause, add `--start`. Things to try:
-- **Network view:** each node is a dot, and the lines are radio links. Drag
-  node 2 away from node 1 until the link breaks. Its console reports `Not
-  reachable` until you drag it back.
-- **Consoles:** one per node. Type into the box under a node to send it
-  serial input.
+Your browser opens at `http://127.0.0.1:8080/` with the simulation
+paused. Press **Play** (or Space) in the browser, or Enter in the
+terminal; add `--start` to skip the pause. It runs at real time; the speed
+slider goes faster. Things to try:
+
+- **Drag node 2** out of node 1's range (its circle). Its console reports
+  `Not reachable yet` until you bring it back.
+- **Consoles:** one per node, in the sidebar. Type a line in the box under
+  a node's console to send it to that node.
 - **Packets:** every radio frame, decoded (802.15.4, 6LoWPAN, IPv6, RPL,
   UDP).
-- **Timeline:** radio activity per node over time. Scroll to zoom, and drag
+- **Timeline:** radio activity per node over time. Scroll to zoom, drag
   to pan.
-- **Speed slider:** from 1x (real time) up to as fast as your machine goes.
 
-When the simulated duration ends, the simulation pauses. Press Ctrl-C in the
-terminal to quit.
+When the checks have passed, or the simulated time is up, the simulation
+pauses and the terminal says so. Play runs on; Ctrl-C ends the run with its
+verdict.
 
 ## 4. Make your own setup
 
-Simulations are plain YAML files. To start a new one:
+A simulation is a YAML file. Start one from a template:
 
 ```sh
-cngsim new rpl-udp --board sky -n 6 --layout grid -o my-net.yaml
+cngsim new rpl-udp --board sky -n 9 --layout grid -o my-net.yaml
 cngsim run my-net.yaml --ui
 ```
 
-`my-net.yaml` comes out commented. The parts you will want to change:
+(`cngsim new` with no arguments asks.) `my-net.yaml` comes out commented;
+the parts you will want to change:
 
 ```yaml
 version: 2
 title: "My RPL network"
-timeout_ms: 120000          # how long to simulate (simulated ms)
-seed: 42
+timeout_ms: 120000          # how long to simulate, in simulated milliseconds
+seed: 42                    # the same seed gives the same run
 
 medium:
-  type: udgm                # unit-disk radio model, as in Cooja
-  tx_range: 50              # metres
+  type: udgm                # unit-disk graph, as in Cooja: in range = received
+  tx_range: 45              # metres
 
-mote_types:                 # each firmware image you use, with a name
+mote_types:                 # each firmware image, with a name
   - { name: server, firmware: udp-server.sky }
   - { name: client, firmware: udp-client.sky }
 
 nodes:
   - { type: server, id: 1, x: 0, y: 0 }
-  - { type: client, count: 5, layout: grid, columns: 3, spacing: 30, origin: [30, 0] }
+  - { type: client, id: 2, count: 8, layout: grid, columns: 3, spacing: 30, x: 30, y: 0 }
+
+test:
+  steps:
+    - { wait: "Received response", node: 4 }
 ```
 
-- Firmware paths are relative to the YAML file.
-- Layouts place nodes for you: `grid`, `line`, `circle` and `random`.
-  `random` is still reproducible, because it follows `seed`. You can also
-  give single nodes an `x` and `y` of their own.
-- `cngsim check my-net.yaml` validates a file without running it. A typo in
-  a key name is an error, not something silently ignored.
+- Paths are relative to the YAML file.
+- One node entry can place many nodes: `count` plus a `layout`, starting
+  at `x`, `y`:
+  - `grid` takes `columns` and `spacing`;
+  - `line` takes `spacing`;
+  - `circle` takes `radius`;
+  - `random` takes `width` and `height`. It follows `seed`, so it is the
+    same every time.
+- `cngsim check my-net.yaml` loads a file the way `run` would, without
+  running it. A misspelt key is an error, not something silently ignored.
 
-**Editing in the browser:** with `--ui`, use **Add node** (pick one of the
-file's mote types and click where to put it), right-click a node to remove
-or reboot it, drag nodes around, and press **Save** to download the result
-as a new YAML file.
+**In the browser:**
+- **Add node** at the top: pick a mote type, then click where the node
+  goes.
+- **Right-click a node** to reboot or remove it. Drag nodes to move them.
+- **Save** downloads the setup as it is now, as a YAML file that
+  `cngsim run` takes.
+
+The [examples](../examples/) are commented starting points too:
+`cngsim examples` prints where they are.
 
 ## 5. Use your own Contiki-NG firmware
 
-Build the app for one of the supported boards as you normally would. For a
-Tmote Sky:
+Build the app as you would for the board. For a Tmote Sky:
 
 ```sh
 cd contiki-ng/examples/hello-world
-make TARGET=sky
+make TARGET=sky                 # writes hello-world.sky
 ```
 
-Then name the image in your YAML:
+and name the image in your setup:
 
 ```yaml
 mote_types:
   - { name: hello, firmware: ~/contiki-ng/examples/hello-world/hello-world.sky }
 ```
 
-Some boards' images don't end in the board's name (`.nrf`, `.simplelink`,
-`.zoul`, or a plain `.elf`). For those, say which board it is:
+An image named `<app>.<board>` runs as that board (`.nrf52840` runs as
+the nRF52840 DK). For any other name (Contiki-NG's `.nrf`, `.simplelink`
+and `.zoul`, or a plain `.elf`), say which board it is:
+
+```sh
+make TARGET=nrf BOARD=nrf54l15/dk         # writes hello-world.nrf
+```
 
 ```yaml
 mote_types:
-  - { name: hello, board: nrf52840-dk,
-      firmware: ~/contiki-ng/examples/hello-world/hello-world.nrf52840 }
+  - { name: hello, board: nrf54l15-dk,
+      firmware: ~/contiki-ng/examples/hello-world/hello-world.nrf }
 ```
 
-`cngsim boards` lists every board with the `TARGET`/`BOARD` that builds for
-it:
+`cngsim boards` lists the boards and the `TARGET`/`BOARD` that builds for
+each:
 
 ```
-board               cpu                radio                       contiki-ng
-sky                 MSP430F1611        CC2420 (2.4 GHz)            TARGET=sky
-cc2538dk            Cortex-M3          on-chip 802.15.4            TARGET=cc2538dk
-nrf52840-dk         Cortex-M4F         on-chip 802.15.4            TARGET=nrf52840 BOARD=dk
-nrf54l15-dk         Cortex-M33         on-chip 802.15.4            TARGET=nrf BOARD=nrf54l15/dk
-cc1352r1-launchpad  Cortex-M4F         sub-GHz + 2.4 GHz RF core   TARGET=simplelink BOARD=launchpad/cc1352r1
+board                                         cpu                 radio                       build with (Contiki-NG)
+sky                  Tmote Sky                MSP430F1611         CC2420 2.4 GHz              TARGET=sky
+cc2538dk             TI CC2538DK              Cortex-M3           802.15.4 2.4 GHz            TARGET=cc2538dk
+nrf52840-dk          nRF52840 DK              Cortex-M4F          802.15.4 2.4 GHz            TARGET=nrf52840 BOARD=dk
+nrf54l15-dk          nRF54L15 DK              Cortex-M33 + RV32E  802.15.4 2.4 GHz            TARGET=nrf BOARD=nrf54l15/dk
+cc1352r1-launchpad   TI LAUNCHXL-CC1352R1     Cortex-M4F          sub-GHz + 2.4 GHz RF core   TARGET=simplelink BOARD=launchpad/cc1352r1
 ...
 ```
 
-Zephyr and RIOT images work the same way. See [zephyr.md](zephyr.md) and
-[riot.md](riot.md).
+Zephyr and RIOT images work the same way: see [zephyr.md](zephyr.md) and
+[riot.md](riot.md). Native Cooja motes (`TARGET=cooja`, `.cooja`) run
+too.
 
 ## 6. Add checks
 
-A `test:` section turns a simulation into a test with a pass/fail result:
+A `test:` section turns a simulation into a test with a pass/fail exit
+code:
 
 ```yaml
 test:
   steps:                                  # in order; each waits for a console line
     - { wait: "Sending request", node: 2 }
-    - { wait: "Received response", node: 2, count: 3 }
+    - { wait: "Received response", node: 2, count: 3, timeout_ms: 60000 }
   fail_on: ["ERROR", "assertion"]         # any node printing these fails the run
+  validators:                             # counted over the whole run, judged at the end
+    - { pattern: "Received request", node: 1, min_count: 2 }
 ```
 
-Cooja test scripts (JavaScript, with `YIELD`, `WAIT_UNTIL`, `log.testOK()`
-and so on) also run. Use `js_script: my-test.js`, or put the script inline
-with `js_script_inline:`. The full format is in
+Cooja test scripts (JavaScript with `YIELD`, `WAIT_UNTIL`,
+`log.testOK()` ...) run too: `js_script: my-test.js`, or the script inline
+as `js_script_inline:`. The whole format is in
 [test-format.md](test-format.md).
 
-For an interactive console with breakpoints, `expect` and scripted test
-sessions, run `cngsim run my-net.yaml --shell` (see [shell.md](shell.md)).
+For an interactive session with breakpoints, `expect` and scripted
+console tests, use `cngsim run my-net.yaml --shell` or `--script
+check.cnsh` (see [shell.md](shell.md)).
 
 ## Coming from Cooja
 
@@ -203,19 +228,19 @@ sessions, run `cngsim run my-net.yaml --shell` (see [shell.md](shell.md)).
 |---|---|
 | `./gradlew run`, File > Open `sim.csc` | `cngsim run sim.yaml --ui` |
 | `--no-gui sim.csc` | `cngsim run sim.yaml` |
-| File > New, Add motes (random / linear / ellipse) | `cngsim new`, or `count:` + `layout:` in the YAML, or **Add node** in the browser |
-| Create mote type > Compile | build with `make TARGET=…` and name the image in `mote_types` |
-| Network, Mote output, Timeline, Radio messages | the browser's network view, consoles, Timeline and Packets tabs |
+| File > New, Add motes (random / linear / ellipse) | `cngsim new`; `count:` + `layout:` in the YAML; **Add node** in the browser |
+| Create mote type > Compile | build with `make TARGET=…`, name the image in `mote_types` |
+| Network, Mote output, Timeline, Radio messages | the browser's network view, consoles, Timeline and Packets |
+| Simulation > Save | **Save** in the browser, or `--save-config out.yaml` |
 | Script editor | `test:` steps, or your Cooja JS script as `js_script:` |
-| An existing `.csc` | `cngsim convert sim.csc -o sim.yaml` (needs python3; Sky, Z1 and Cooja motes) |
+| An existing `.csc` | `cngsim convert sim.csc` (needs python3; Sky, Z1 and Cooja motes) |
 
-Running Contiki-NG's own Cooja test suite under Cooja-NG is described in
+Contiki-NG's own Cooja test suite runs under Cooja-NG too:
 [contiki-ng-testing.md](contiki-ng-testing.md).
 
 ## Next
 
-- `cngsim help`: every command and option.
+- `cngsim help` and `cngsim help run`: every command and option.
 - [test-format.md](test-format.md): the YAML format in full.
 - [shell.md](shell.md): the interactive shell and command scripts.
-- [ui-replay.md](ui-replay.md): record a run and replay it in the browser
-  without the simulator.
+- [ui-replay.md](ui-replay.md): record a run, replay it in a browser.

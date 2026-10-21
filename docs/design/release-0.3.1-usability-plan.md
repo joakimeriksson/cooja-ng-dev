@@ -1,6 +1,28 @@
 # Release 0.3.1: Cooja-NG for people
 
-Status: **planned (2026-10-20; decisions in §10 taken 2026-10-21)**. Nothing here is implemented yet.
+Status: **implemented (2026-10-21)**, on branch `feat/cngsim`: U1–U9, with
+the deviations below.  Decisions in §10 taken 2026-10-21; the binding ones
+are in the refactor plan's Decisions Log.
+
+**Where the implementation differs from this plan:**
+- **The runner stays in `test/`.**  `cngsim` links
+  `test/test_mixed_multinode.o` beside the library objects instead of the
+  runner moving into the library (§3.3).  It is the same object either way;
+  moving it is a separate refactor.
+- **The quiet output is a filter in cngsim, not gates in the runner (§5).**
+  `cngsim` runs the simulation with its stdout and stderr through a filter
+  thread, so the runner's prints, and `test_runner`'s output, are
+  untouched.  The format coupling is guarded by `tools/check-cngsim.sh`.
+- **`--save-config` paths are unchanged (§4.1).**  It still writes paths as
+  the config gave them; rewriting them relative to the output would change
+  what existing scripts compare.  Config-relative lookup makes the common
+  case (saving next to the original) work.
+- **Not done:** the radio panel in the UI (§6.3 extras; the shell's `radio`
+  covers it), and the nRF52840 console timestamps that run backwards (an
+  engine timing change, left for its own PR with a baseline review).
+- **Added on the way:** a `--ui` run holds open when its checks finish
+  (pause plus a message) instead of ending under the browser, and the
+  first Ctrl-C ends a `cngsim` run the normal way, with its verdict.
 
 Cooja-NG works well for the people who built it: from a repo checkout, with
 the right working directory, and with the mode names and flags already in
