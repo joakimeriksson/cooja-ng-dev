@@ -17,6 +17,12 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `--help` prints the usage, now listing every mode and option.
 - **More than 16 mote types, or more nodes than the limit, is a load
   error.**  Mote types beyond 8 used to be dropped without a word.
+- **Warnings are errors.** The build is warning-free on gcc 13–15 and
+  clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
+  compiler that reports something new. The vendored QuickJS header is a
+  system include (`-isystem`), so its function-pointer cast no longer warns
+  in every file that includes `js_node.h`. `make debug -jN` no longer races
+  `clean` against the compile.
 
 ### Added
 - **`cngsim`, the command for people** (`docs/quick-start.md`).  `cngsim run
@@ -64,14 +70,6 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   identity words are read from an LP-CC1312R7. Contiki-NG support is
   contiki-ng/contiki-ng#3285, not merged yet
   (`firmware/cc1312r7-launchpad/PROVENANCE.md`).
-
-### Changed
-- **Warnings are errors.** The build is warning-free on gcc 13–15 and
-  clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
-  compiler that reports something new. The vendored QuickJS header is a
-  system include (`-isystem`), so its function-pointer cast no longer warns
-  in every file that includes `js_node.h`. `make debug -jN` no longer races
-  `clean` against the compile.
 
 ### Fixed
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now

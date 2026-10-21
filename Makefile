@@ -341,13 +341,13 @@ $(NATIVE_BUILD_DIR)/%.o: $(NATIVE_SRC_DIR)/%.c | $(NATIVE_BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/embed: tools/embed/embed.c | $(BUILD_DIR)
-	$(CC) -O2 -o $@ $<
+	$(CC) -O2 $(WARNFLAGS) -std=c11 -o $@ $<
 
 $(UI_BUILD_DIR)/ui_page.c: ui/index.html $(BUILD_DIR)/embed | $(UI_BUILD_DIR)
 	./$(BUILD_DIR)/embed ui/index.html csim_ui_page > $@.tmp && mv $@.tmp $@
 
 $(UI_PAGE_OBJECT): $(UI_BUILD_DIR)/ui_page.c
-	$(CC) -O2 -c $< -o $@
+	$(CC) -O2 $(WARNFLAGS) -c $< -o $@
 
 $(UI_BUILD_DIR)/%.o: $(UI_SRC_DIR)/%.c | $(UI_BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@

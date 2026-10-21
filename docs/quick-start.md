@@ -31,7 +31,9 @@ git clone https://github.com/mikroverk/cooja-ng && cd cooja-ng
 make && make install PREFIX=~/.local       # cngsim in ~/.local/bin
 ```
 
-`build/cngsim` also runs straight from the checkout.
+`build/cngsim` also runs straight from the checkout. Warnings are errors
+in this build; if a compiler newer than the ones CI uses stops on one,
+`make WERROR=0` builds anyway (and the warning is worth an issue).
 
 ## 2. Run your first simulation
 
