@@ -54,6 +54,7 @@ sends raw requests shaped like the ones a browser would send, asserting:
 
 Usage: tools/check-ui-access.py        (RUNNER=... to override the binary)
 """
+import json
 import os
 import re
 import socket
@@ -201,6 +202,42 @@ def ws_next(s):
         n = struct.unpack('>H' if n == 126 else '>Q', ext)[0]
     payload = recv_exact(s, n)
     return None if payload is None else (head[0] & 0x0f, payload)
+
+
+def ws_text_frames(port, send=None, seconds=2.0):
+    """Text frames (parsed JSON) from a fresh connection that asks for the
+    full state, then sends `send` (a dict), for up to `seconds`."""
+    s = ws_open(port)
+    s.settimeout(0.3)
+    ws_send(s, 0x1, json.dumps({'cmd': 'full'}).encode())
+    if send:
+        ws_send(s, 0x1, json.dumps(send).encode())
+    out, deadline = [], time.time() + seconds
+    while time.time() < deadline:
+        try:
+            f = ws_next(s)
+        except socket.timeout:
+            continue
+        if f is None:
+            break
+        if f[0] == 0x1:
+            try:
+                out.append(json.loads(f[1]))
+            except ValueError:
+                pass
+    s.close()
+    return out
+
+
+def setup_edit(port):
+    frames = [f for f in ws_text_frames(port) if f.get('type') == 'setup']
+    return bool(frames and frames[-1].get('edit'))
+
+
+def save_answers(port):
+    frames = ws_text_frames(port, {'cmd': 'save', 'token': 'probe'})
+    return any(f.get('type') == 'config' and f.get('token') == 'probe' and
+               'version: 2' in f.get('yaml', '') for f in frames)
 
 
 def pong_for(port, size, fin=True):
@@ -550,6 +587,23 @@ def main():
         expect('cross-origin page', status(a, port, host=here, origin='http://evil.example'), '403')
     finally:
         r.close()
+
+    # Editing (Add node / Remove / Reboot / serial input / Save) is on for a
+    # loopback UI and off on --ui-bind unless --ui-edit: a UI shared on a
+    # network is look-only by default.  Save is the probe: it answers with
+    # the setup as YAML only when editing is allowed.
+    for label, extra, want in (('loopback', (), True),
+                               ('--ui-bind 0.0.0.0', ('--ui-bind', '0.0.0.0'), False),
+                               ('--ui-bind 0.0.0.0 --ui-edit',
+                                ('--ui-bind', '0.0.0.0', '--ui-edit'), True)):
+        port = free_port()
+        print(f'== editing from the browser: {label} (port {port})')
+        r = Runner(port, *extra)
+        try:
+            expect('setup frame says edit', setup_edit(port), want)
+            expect('Save answers with the setup', save_answers(port), want)
+        finally:
+            r.close()
 
     if failed:
         sys.exit(f'check-ui-access: FAIL: {failed} case(s)')

@@ -35,6 +35,7 @@
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -56,6 +57,8 @@ extern char **environ;
 extern int run_mixed_multinode_test(int argc, char **argv);
 extern int csim_cli_enter_resumes;
 extern int csim_cli_pause_at_end;
+extern int csim_cli_hold_verdict;
+extern volatile sig_atomic_t csim_cli_stop;
 
 #define EXIT_INVALID 2
 
@@ -416,7 +419,7 @@ static void stdout_line(int out, char *line) {
         }
     } else if (strncmp(t, "Speed ratio:", 12) == 0) {
         if (sscanf(t, "Speed ratio: %lfx", &F.speed) == 1) F.have_speed = 1;
-    } else if (strncmp(t, "Paused at the end", 17) == 0 ||
+    } else if (strncmp(t, "Paused at the end", 17) == 0 || strncmp(t, "Checks ", 7) == 0 ||
                strncmp(t, "--wall-timeout", 14) == 0 || strstr(t, "rror") ||
                strstr(t, "arning")) {
         out_fmt(out, "%s\n", t);
@@ -505,6 +508,17 @@ static int parse_duration_ms(const char *s, long *ms) {
     else return -1;
     *ms = (long)(v * mult + 0.5);
     return 0;
+}
+
+/* Ctrl-C: the first one ends the run the normal way (the verdict, the exit
+ * code, --save-config); a second one, if that hangs, ends cngsim at once. */
+static void on_sigint(int sig) {
+    if (csim_cli_stop) {
+        signal(sig, SIG_DFL);
+        raise(sig);
+        return;
+    }
+    csim_cli_stop = 1;
 }
 
 #define MAX_ARGS 128
@@ -658,8 +672,15 @@ static int cmd_run(int argc, char **argv) {
         F.enter_ok = !start && !passthrough && isatty(STDIN_FILENO);
         csim_cli_enter_resumes = F.enter_ok;
         csim_cli_pause_at_end = 1;
+        csim_cli_hold_verdict = 1;
     }
     rargv[rargc] = NULL;
+    if (!passthrough) {       /* the shell owns Ctrl-C in a session */
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = on_sigint;
+        sigaction(SIGINT, &sa, NULL);
+    }
 
     if (verbose || passthrough) {
         if (verbose && !passthrough) F.trace = TRACE_ALL;

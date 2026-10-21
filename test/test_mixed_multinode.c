@@ -122,6 +122,17 @@ static int verbose = 1;
  * its duration instead of running on until Ctrl-C. */
 int csim_cli_enter_resumes = 0;
 int csim_cli_pause_at_end = 0;
+int csim_cli_hold_verdict = 0;
+/* Set from cngsim's SIGINT handler: end the run the normal way (reports,
+ * verdict, --save-config) at the next loop turn. */
+volatile sig_atomic_t csim_cli_stop = 0;
+
+/* With hold_verdict set (a cngsim --ui run), the checks deciding the run do
+ * not end it either: the browser would lose its simulation the moment the
+ * last step passed.  Say so once and pause; Play runs on, and the verdict
+ * is reported (and sets the exit code) when the run ends.  True = keep
+ * going.  Defined below the services it uses. */
+static bool cli_hold_after_verdict(int64_t sim_ns, int result);
 /* M9.2: RF routing state lives in the kernel-owned radio bus.  The
  * aliases keep call sites unchanged until the dispatch functions
  * migrate into the bus (M9.3/9.4). */
@@ -1810,6 +1821,65 @@ static void ctl_restart(void *u) {
 /* --ui-bind ADDR; NULL = loopback.  File scope because the shell's "ui"
  * command starts the UI mid-run and must listen where --ui would have. */
 static const char *g_ui_bind = NULL;
+/* --ui-edit: let a UI on --ui-bind change the simulation too (on loopback
+ * it always may). */
+static bool g_ui_edit = false;
+
+/* Tell the UI what it may offer: editing (on loopback, or --ui-edit), and
+ * the mote types Add node can create — the config's named types, else one
+ * per distinct firmware image the nodes run, named by its file name. */
+static void ui_apply_setup(void) {
+    static char name_buf[SIM_MAX_MOTE_TYPES][64];
+    const char *names[SIM_MAX_MOTE_TYPES], *fw[SIM_MAX_MOTE_TYPES],
+               *sfw[SIM_MAX_MOTE_TYPES];
+    int n = 0;
+    if (node_cfg_src && node_cfg_src->mote_type_count > 0) {
+        for (int t = 0; t < node_cfg_src->mote_type_count && n < SIM_MAX_MOTE_TYPES; t++) {
+            const sim_mote_type_t *mt = &node_cfg_src->mote_types[t];
+            const char *f = mt->firmware[0] ? mt->firmware
+                                            : node_cfg_src->mote_type_firmware[t];
+            if (!f[0]) continue;
+            const char *base = strrchr(f, '/');
+            snprintf(name_buf[n], sizeof(name_buf[n]), "%s",
+                     mt->name[0] ? mt->name : (base ? base + 1 : f));
+            names[n] = name_buf[n];
+            fw[n] = f;
+            sfw[n] = mt->secure_firmware;
+            n++;
+        }
+    } else {
+        int nc = ctl_node_count(NULL);
+        for (int i = 0; i < nc && n < SIM_MAX_MOTE_TYPES; i++) {
+            const char *f = nodes[i].firmware_path;
+            if (!f[0]) continue;
+            int seen = 0;
+            for (int k = 0; k < n; k++)
+                if (strcmp(fw[k], f) == 0) seen = 1;
+            if (seen) continue;
+            const char *base = strrchr(f, '/');
+            snprintf(name_buf[n], sizeof(name_buf[n]), "%s", base ? base + 1 : f);
+            names[n] = name_buf[n];
+            fw[n] = f;
+            sfw[n] = nodes[i].secure_firmware_path;
+            n++;
+        }
+    }
+    bool loopback = !g_ui_bind || strncmp(g_ui_bind, "127.", 4) == 0;
+    ui_service_set_setup(&ui_svc, loopback || g_ui_edit, n, names, fw, sfw);
+}
+
+static bool cli_hold_after_verdict(int64_t sim_ns, int result) {
+    static bool held = false;
+    if (!csim_cli_hold_verdict || !ui_service_active(&ui_svc)) return false;
+    if (!held) {
+        held = true;
+        sim_control_pause(&sim_ctl);
+        printf("Checks %s at %.3f s: paused (Play runs on, Ctrl-C ends the run)\n",
+               result > 0 ? "passed" : "failed", (double)sim_ns / 1e9);
+        fflush(stdout);
+    }
+    return true;
+}
 static int ctl_start_ui(void *u, int port, char *url, size_t urlsz) {
     (void)u;
     if (ui_service_active(&ui_svc)) return -1;
@@ -1819,6 +1889,7 @@ static int ctl_start_ui(void *u, int port, char *url, size_t urlsz) {
                           &sim_ctl))
         return -1;
     ui_svc.rt = &sim_rt;
+    ui_apply_setup();
     shell_svc.external_resume = true;
     ws_server_url(g_ui_bind, port, url, urlsz);
     return 0;
@@ -2189,6 +2260,9 @@ int run_mixed_multinode_test(int argc, char **argv) {
         }
         else if (strcmp(argv[i], "--ui-record") == 0 && i + 1 < argc) {
             ui_record_path = argv[++i];
+        }
+        else if (strcmp(argv[i], "--ui-edit") == 0) {
+            g_ui_edit = true;
         }
         else if (strcmp(argv[i], "--ui-bind") == 0 && i + 1 < argc) {
             /* The UI accepts commands: listening beyond loopback is opt-in. */
@@ -2563,6 +2637,8 @@ sim_restart:
         if (nodes[i].clock_deviation != 1.0)
             printf("  Node %d: clock deviation=%.10f\n", nodes[i].id, nodes[i].clock_deviation);
     }
+    if (ui_service_active(&ui_svc))
+        ui_apply_setup();      /* the nodes' images are known now */
 
     /* GDB stubs (M37: the gdb service binds one TCP listener per
      * --gdb-tagged node, attaches the arch vtable, sets each cpu->gdb_stub,
@@ -3135,6 +3211,7 @@ sim_restart:
         }
         /* A stop requested while paused (shell `exit`) must not run one
          * more slice. */
+        if (csim_cli_stop) sim_runtime_request_stop(&sim_rt);
         if (sim_runtime_stop_requested(&sim_rt)) break;
         if (sim_ctl.speed_epoch != pace_epoch) {
             pace_epoch = sim_ctl.speed_epoch;
@@ -3358,8 +3435,10 @@ sim_restart:
             }
 
             /* Check JS timeout and test completion */
-            if (js_engine.finished != 0)
-                break;
+            if (js_engine.finished != 0) {
+                if (!cli_hold_after_verdict(sim_ns, js_engine.finished))
+                    break;
+            } else
             if (js_test_check_timeout(&js_engine, sim_ns / 1000) != 0)
                 break;
         }
@@ -3461,7 +3540,8 @@ sim_restart:
 
         /* Test engine: check per-step timeout (M35: json_test service) */
         json_test_check_step_timeout(&json_test_svc, sim_ns, sim_ms);
-        if (json_test_finished(&json_test_svc))
+        if (json_test_finished(&json_test_svc) &&
+            !cli_hold_after_verdict(sim_ns, json_test_finished(&json_test_svc)))
             break;
 
         /* WebSocket UI: poll and broadcast state (M39: serialization in the
