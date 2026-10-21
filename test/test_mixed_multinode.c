@@ -59,6 +59,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <math.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -112,6 +113,15 @@ static int num_nodes = 0;
  * skip work that matters. */
 static bool have_native = false;
 static int verbose = 1;
+
+/* Set by the cngsim frontend before it calls run_mixed_multinode_test()
+ * (src/cli/cngsim.c); test_runner leaves both off, so its runs and output
+ * are unchanged.  enter_resumes: while paused, a line on stdin resumes
+ * (the "press Enter to start" of a paused --ui run; not with the shell,
+ * which owns stdin).  pause_at_end: a --ui run pauses once at the end of
+ * its duration instead of running on until Ctrl-C. */
+int csim_cli_enter_resumes = 0;
+int csim_cli_pause_at_end = 0;
 /* M9.2: RF routing state lives in the kernel-owned radio bus.  The
  * aliases keep call sites unchanged until the dispatch functions
  * migrate into the bus (M9.3/9.4). */
@@ -3132,9 +3142,28 @@ sim_restart:
             pace_base_ns = sim_ns;
         }
 
+        if (csim_cli_pause_at_end && sim_ns >= end_ns &&
+            ui_service_active(&ui_svc) && !sim_control_paused(&sim_ctl)) {
+            csim_cli_pause_at_end = 0;
+            sim_control_pause(&sim_ctl);
+            printf("Paused at the end of the simulated duration (%.3f s): "
+                   "Play runs on, Ctrl-C quits\n", (double)sim_ns / 1e9);
+            fflush(stdout);
+        }
+
         /* When paused, poll the WebSocket / shell input and sleep, but skip
          * to the UI broadcast (no event is dispatched — §3.12). */
         if (sim_control_paused(&sim_ctl)) {
+            if (csim_cli_enter_resumes && !shell_service_active(&shell_svc)) {
+                struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+                char line[256];
+                if (poll(&pfd, 1, 0) > 0 &&
+                    fgets(line, sizeof(line), stdin) != NULL) {
+                    csim_cli_enter_resumes = 0;
+                    sim_control_resume(&sim_ctl);
+                    continue;
+                }
+            }
             if (ui_service_active(&ui_svc)) ui_service_poll(&ui_svc);
             if (shell_service_active(&shell_svc))
                 shell_service_pump_paused(&shell_svc, 50);   /* reads + runs commands */

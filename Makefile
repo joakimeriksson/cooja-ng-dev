@@ -266,7 +266,7 @@ endif
 
 .PHONY: all clean test bench test-firmware test-arm cooja-tests chain-tests build-firmware configure plugins test-ge lib lib-link-check
 
-all: $(BUILD_DIR)/test_runner
+all: $(BUILD_DIR)/test_runner $(BUILD_DIR)/cngsim
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -378,6 +378,19 @@ $(BUILD_DIR)/test_%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
 CSIM_LIB_OBJECTS = $(COMMON_OBJECTS) $(SIM_OBJECTS) $(SERVICES_OBJECTS) $(MOTES_OBJECTS) $(OBJECTS) $(ARM_OBJECTS) $(CHIPS_OBJECTS) $(RISCV_OBJECTS) $(NATIVE_OBJECTS) $(UI_OBJECTS) $(LIB_OBJECTS) $(QUICKJS_OBJECTS) $(YAML_OBJECTS) $(LINENOISE_OBJECTS)
 
 $(BUILD_DIR)/test_runner: $(CSIM_LIB_OBJECTS) $(TEST_OBJECTS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# cngsim: the command for people (src/cli/cngsim.c).  The simulator plus the
+# runner test_runner uses (test_mixed_multinode.o), so a run is the same run
+# in both binaries; only what reaches the terminal differs.
+CLI_SRC_DIR = src/cli
+CLI_BUILD_DIR = build/cli
+$(CLI_BUILD_DIR):
+	mkdir -p $(CLI_BUILD_DIR)
+$(CLI_BUILD_DIR)/%.o: $(CLI_SRC_DIR)/%.c | $(CLI_BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/cngsim: $(CSIM_LIB_OBJECTS) $(BUILD_DIR)/test_test_mixed_multinode.o $(CLI_BUILD_DIR)/cngsim.o | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # The objects are LTO bitcode, so the archiver has to understand it to write
