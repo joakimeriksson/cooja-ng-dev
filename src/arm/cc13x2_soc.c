@@ -17,6 +17,8 @@
 
 extern const size_t  cc13x2_rom_image_size;
 extern const uint8_t cc13x2_rom_image[];
+extern const size_t  cc13x2x7_rom_image_size;
+extern const uint8_t cc13x2x7_rom_image[];
 
 /* CC13X2_TRACE=1: log every access to a window modelled only as a plain
  * register store, with the PC — the first thing to read when firmware
@@ -106,6 +108,7 @@ enum {
     P_RFC_RAT,
     P_AUX_TDC,
     P_AUX_EVCTL,
+    P_IOC,
 };
 
 typedef struct {
@@ -144,7 +147,7 @@ static const page_desc_t page_descs[] = {
     { 0x40043000, 0x1000, "RFC_RAT",    P_RFC_RAT,   true  },
     { 0x40044000, 0x1000, "RFC_FSCA",   P_STORE,     false },
     { 0x40080000, 0x1000, "WDT",        P_WDT,       false },
-    { 0x40081000, 0x1000, "IOC",        P_STORE,     false },
+    { 0x40081000, 0x1000, "IOC",        P_IOC,       false },
     { 0x40082000, 0x1000, "PRCM",       P_PRCM,      true  },
     { 0x40083000, 0x1000, "EVENT",      P_STORE,     false },
     { 0x40084000, 0x1000, "SMPH",       P_SMPH,      false },
@@ -255,9 +258,45 @@ static const uint32_t fcfg1_launchpad[268] = {
     /* 0x420 */ 0x04c10011, 0x09ac04ff, 0x05980012, 0x0b260017,
 };
 
+#define FCFG1_USER_ID            0x294
+#define FCFG1_ICEPICK_DEVICE_ID  0x318
+#define FCFG1_IOCONF             0x344
+
+/* The parts.  The CC1352R is the LaunchPad above, as read.  The CC1312R7
+ * takes the same FCFG1 with the words that say which chip this is
+ * replaced, as read from an LP-CC1312R7 with openocd (FCFG1 and PRCM):
+ *   ICEPICK_DEVICE_ID 0x1BB7702F: PG_REV 1 (case 1, "PG1.1 or later"),
+ *     WAFER_ID 0xBB77 (FAMILY_CC13x2x7_CC26x2x7; any other wafer ID makes
+ *     ThisLibraryIsFor_CC13x2x7_CC26x2x7_HaltIfViolated() spin), TI.
+ *   USER_ID 0x10828000: PROTOCOL 0x8 with CC13 = 1 and PA = 0
+ *     (CHIP_TYPE_CC1312R7), PKG 2 (7x7 RGZ), PG_REV 1.
+ *   IOCONF 0xFFFFFF1E: GPIO_CNT 30 (the CC1352R has 28; the PIN driver
+ *     sizes its pin range from it).
+ *   RFCMODEHWOPT 0x21: modes 0 (RF_MODE_AUTO) and 5.  Bits [3:1] are 0, so
+ *     ChipInfo_GetSupportedProtocol_BV() returns 0 on silicon too.
+ *   MISC_CONF_1 0xFFFFFF00, as on the CC1352R.
+ * The trim words are still the CC1352R's (91 of the 268 words differ on
+ * the R7, mostly trims, and its FCFG1 goes on past 0x430); the model does
+ * not interpret them. */
+const cc13x2_part_t cc13x2_part_cc1352r = {
+    .name = "CC1352R",
+    .icepick_id = 0x3BB4102Fu, .user_id = 0x3082F000u, .ioconf = 0xFFFFFF1Cu,
+    .rfcmodehwopt = 0x2Fu,
+    .rom = cc13x2_rom_image, .rom_size = &cc13x2_rom_image_size,
+};
+const cc13x2_part_t cc13x2_part_cc1312r7 = {
+    .name = "CC1312R7",
+    .icepick_id = 0x1BB7702Fu, .user_id = 0x10828000u, .ioconf = 0xFFFFFF1Eu,
+    .rfcmodehwopt = 0x21u,
+    .rom = cc13x2x7_rom_image, .rom_size = &cc13x2x7_rom_image_size,
+};
+
 static void fcfg1_init(cc13x2_soc_t *soc) {
     memset(soc->fcfg1, 0, sizeof(soc->fcfg1));
     memcpy(soc->fcfg1, fcfg1_launchpad, sizeof(fcfg1_launchpad));
+    soc->fcfg1[FCFG1_ICEPICK_DEVICE_ID / 4] = soc->part->icepick_id;
+    soc->fcfg1[FCFG1_USER_ID / 4]           = soc->part->user_id;
+    soc->fcfg1[FCFG1_IOCONF / 4]            = soc->part->ioconf;
     uint32_t *f = soc->fcfg1;
     f[FCFG1_MAC_15_4_0 / 4]        = soc->mac_15_4[0];
     f[FCFG1_MAC_15_4_1 / 4]        = soc->mac_15_4[1];
@@ -895,14 +934,25 @@ static uint32_t iocfg(cc13x2_soc_t *soc, int dio) {
     return soc->pg_ioc ? REG(soc->pg_ioc, (uint32_t)dio * 4u) : 0;
 }
 
+/* IOCFGn (0x00..0x78, one word per DIO): a plain store, with the pull-up
+ * and input-enable bits mirrored into masks so a DIN read does not walk all
+ * 31 words.  A reset zeroes the store and the masks together. */
+static void ioc_write(cc13x2_soc_t *soc, cc13x2_page_t *p, uint32_t off, uint32_t val) {
+    uint32_t a = off & ~3u;
+    REG(p, a) = merge_write(soc, REG(p, a), off, val);
+    if (a >= (uint32_t)CC13X2_NUM_DIO * 4u) return;
+    uint32_t bit = 1u << (a / 4u), cfg = REG(p, a);
+    cc13x2_gpio_t *g = &soc->gpio;
+    g->pull_up  = ((cfg & IOCFG_PULL_CTL_M) == IOCFG_PULL_UP) ? (g->pull_up | bit)
+                                                              : (g->pull_up & ~bit);
+    g->input_en = (cfg & IOCFG_IE) ? (g->input_en | bit) : (g->input_en & ~bit);
+}
+
 /* The level on each pad: driven from outside (a button), else by the
  * output driver, else by the IOCFG pull (an unpulled input reads 0). */
 static uint32_t gpio_levels(cc13x2_soc_t *soc) {
     cc13x2_gpio_t *g = &soc->gpio;
-    uint32_t v = g->dout & g->doe, pulled = 0;
-    for (int dio = 0; dio < CC13X2_NUM_DIO; dio++)
-        if ((iocfg(soc, dio) & IOCFG_PULL_CTL_M) == IOCFG_PULL_UP) pulled |= 1u << dio;
-    v |= pulled & ~g->doe;
+    uint32_t v = (g->dout & g->doe) | (g->pull_up & ~g->doe);
     v = (v & ~g->din_forced) | (g->din_ext & g->din_forced);
     return v & GPIO_PIN_MASK;
 }
@@ -910,10 +960,7 @@ static uint32_t gpio_levels(cc13x2_soc_t *soc) {
 /* DIN: the pad level of input-enabled DIOs; an output reads back its own
  * level (driverlib's GPIO_readDio on an output pin). */
 static uint32_t gpio_din(cc13x2_soc_t *soc) {
-    uint32_t ie = soc->gpio.doe;
-    for (int dio = 0; dio < CC13X2_NUM_DIO; dio++)
-        if (iocfg(soc, dio) & IOCFG_IE) ie |= 1u << dio;
-    return gpio_levels(soc) & ie;
+    return gpio_levels(soc) & (soc->gpio.doe | soc->gpio.input_en);
 }
 
 /* An outside level on a DIO (button, `gpio` in the shell); level < 0 lets
@@ -1526,9 +1573,18 @@ static uint32_t vims_read(cc13x2_page_t *p, uint32_t off) {
     return REG(p, a) >> ((off & 3u) * 8u);
 }
 
+/* The flash the SoC config gives the core (arm_config_t::flash_size): the
+ * one place a part's flash size is written down. */
+static uint32_t soc_flash_size(const cc13x2_soc_t *soc) {
+    return soc->plat->cpu.flash_end - soc->plat->cpu.flash_base;
+}
+
 /* FLASH controller: identification and an always-idle state machine.
- * FLASH_SIZE.SECTORS = 44 x 8 KB = 352 KB; FCFG_B0_SSIZE0 = 44 sectors of
- * 8 KB (B0_SECT_SIZE in KB). inc/hw_flash.h. */
+ * FLASH_SIZE.SECTORS = the part's 8 KB sectors (44 = 352 KB on the CC1352R,
+ * 88 = 704 KB on the CC1312R7).  FCFG_B0_SSIZE0 does not follow the part:
+ * silicon reads 0x002C0008 on the CC1352R1, the CC1312R1 and the CC1312R7
+ * alike (B0_NUM_SECTORS 44, B0_SECT_SIZE 8 KB), and driverlib reads only the
+ * sector size.  inc/hw_flash.h. */
 #define FLASH_STAT          0x001C
 #define FLASH_FLASH_SIZE    0x002C
 #define FLASH_FSM_STAT      0x2208
@@ -1536,8 +1592,8 @@ static uint32_t vims_read(cc13x2_page_t *p, uint32_t off) {
 static uint32_t flash_read(cc13x2_page_t *p, uint32_t off) {
     uint32_t a = off & ~3u, v;
     switch (a) {
-    case FLASH_FLASH_SIZE:     v = 44u; break;
-    case FLASH_FCFG_B0_SSIZE0: v = (44u << 16) | 8u; break;
+    case FLASH_FLASH_SIZE:     v = soc_flash_size(p->soc) / CC13X2_FLASH_SECTOR; break;
+    case FLASH_FCFG_B0_SSIZE0: v = 0x002C0008u; break;
     case FLASH_STAT:           v = 0u; break;       /* not busy */
     case FLASH_FSM_STAT:       v = 0x4u; break;     /* INV_DAT idle */
     default:                   v = REG(p, a); break;
@@ -1579,7 +1635,7 @@ static uint32_t page_off(cc13x2_page_t *p, uint32_t addr) {
 
 static void trace_access(cc13x2_page_t *p, uint32_t off, bool wr, uint32_t v) {
     if (!trace_on()) return;
-    if (p->kind != P_STORE && cc13x2_trace < 2) return;
+    if (p->kind != P_STORE && p->kind != P_IOC && cc13x2_trace < 2) return;
     if (p->kind == P_ROM || p->kind == P_GPRAM || p->kind == P_RFC_RAM) return;
     arm_cpu_t *cpu = &p->soc->plat->cpu;
     fprintf(stderr, "[cc13x2] %12.6f %c %-10s +0x%03x %s 0x%08x  pc=0x%08x\n",
@@ -1596,8 +1652,8 @@ static int page_read_impl(void *user, uint32_t addr) {
     case P_ROM:
         v = 0;
         for (int i = 0; i < 4; i++)
-            if (off + (uint32_t)i < cc13x2_rom_image_size)
-                v |= (uint32_t)cc13x2_rom_image[off + (uint32_t)i] << (8 * i);
+            if (off + (uint32_t)i < *soc->part->rom_size)
+                v |= (uint32_t)soc->part->rom[off + (uint32_t)i] << (8 * i);
         return (int)v;
     case P_GPRAM:
         memcpy(&v, &soc->gpram[off & ~3u], 4);
@@ -1611,9 +1667,9 @@ static int page_read_impl(void *user, uint32_t addr) {
     case P_CCFG: {
         /* CCFG is the last 8 KB flash sector seen through this window:
          * CCFG_O_* run 0x1FA8..0x1FFF (inc/hw_ccfg.h), the CCFG struct the
-         * image links at 0x57FA8. */
+         * image links at 0x57FA8 (352 KB) or 0xAFFA8 (704 KB). */
         arm_cpu_t *cpu = &soc->plat->cpu;
-        return (int)(arm_read32(cpu, (CC13X2_FLASH_SIZE - CC13X2_CCFG_SIZE) + (off & ~3u))
+        return (int)(arm_read32(cpu, (soc_flash_size(soc) - CC13X2_CCFG_SIZE) + (off & ~3u))
                      >> ((off & 3u) * 8u));
     }
     case P_PRCM:      return (int)prcm_read(soc, p, off);
@@ -1656,6 +1712,7 @@ static int page_read_impl(void *user, uint32_t addr) {
         break;
     case P_AON_IOC:
     case P_HAPI:
+    case P_IOC:
     case P_STORE:
         break;
     }
@@ -1690,6 +1747,7 @@ static void page_write_impl(void *user, uint32_t addr, uint32_t val) {
     case P_AON_PMCTL: aon_pmctl_write(soc, p, off, val); return;
     case P_AON_RTC:   aon_rtc_write(soc, off, val); return;
     case P_GPIO:      gpio_write(soc, off, val); return;
+    case P_IOC:       ioc_write(soc, p, off, val); return;
     case P_UART0:     uart_write(soc, off, val); return;
     case P_TRNG:      trng_write(soc, p, off, val); return;
     case P_DDI0:      ddi0_write(soc, off, val); return;
@@ -1782,8 +1840,8 @@ static void soc_reset_state(cc13x2_soc_t *soc, bool power_on) {
     /* PRCM.RFCMODEHWOPT: the RF modes this part may select (chipinfo.c
      * reads bits [3:1] as the protocol vector: BLE, 15.4, proprietary;
      * RF_open() refuses RF_MODE_AUTO (0) unless bit 0 is set).
-     * 0x2F as read from the LaunchPad. */
-    if ((p = soc->pg_prcm)) REG(p, PRCM_RFCMODEHWOPT) = 0x2Fu;
+     * 0x2F as read from the CC1352R1 LaunchPad; see cc13x2_part_t. */
+    if ((p = soc->pg_prcm)) REG(p, PRCM_RFCMODEHWOPT) = soc->part->rfcmodehwopt;
     /* SysTick, NVIC: arm_platform_reset_peripherals. */
 }
 
@@ -1791,6 +1849,8 @@ static void cc13x2_soc_init(arm_platform_t *plat) {
     cc13x2_soc_t *soc = calloc(1, sizeof(*soc));
     plat->soc = soc;
     soc->plat = plat;
+    soc->part = (plat->config && plat->config->soc_part)
+                    ? plat->config->soc_part : &cc13x2_part_cc1352r;
     arm_cpu_t *cpu = &plat->cpu;
 
     soc->num_pages = NUM_PAGE_DESCS;
