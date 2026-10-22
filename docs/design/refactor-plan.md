@@ -3292,9 +3292,9 @@ the same patch.
 - **`cngsim` is a frontend; it never simulates differently (0.3.1).**  It
   links the runner `test_runner` uses (`test_mixed_multinode.o`) and calls
   `run_mixed_multinode_test` with the same arguments, filtering only what
-  reaches the terminal; its three runner hooks (`csim_cli_*`: Enter resumes,
-  pause at the end, hold after the verdict, clean Ctrl-C) are off for
-  `test_runner`.  `tools/check-cngsim.sh` compares their console lines and
+  reaches the terminal; its runner hooks (`csim_cli_*`: Enter resumes,
+  pause at the end, hold after the verdict, clean Ctrl-C, and how far the
+  run got, read back for the verdict line) are off for `test_runner`.  `tools/check-cngsim.sh` compares their console lines and
   exit codes.  `test_runner`'s output stays the determinism gates' input and
   is not trimmed for people.
 - **No default board (0.3.1).**  An unknown firmware extension is an error;
@@ -3314,6 +3314,15 @@ the same patch.
   running), because adding a node loads an image and `.cooja` is native
   code; Save returns YAML text instead of writing a path.  Editing is on for
   a loopback UI only, unless `--ui-edit`.
+- **Ctrl-C is exit 130 in `cngsim`, not 7 (0.3.1).**  128 + SIGINT, the
+  shell's convention, for a person ending a run before it is decided; 7
+  stays the protocol's "cancelled".  A Ctrl-C after the duration or the
+  checks decided a `--ui` run is how it is closed and keeps the verdict's
+  code.  `cngsim` durations take a unit (`60s`, `500ms`): a bare number is
+  refused, because `-t` is ms and `--wall-timeout` is s in `test_runner`.
+- **Node ids are unique at load (0.3.1).**  Two nodes with one id (easy with
+  a layout's ids followed by a listed node) are a load error, after ids are
+  filled in, so an explicit id that equals an auto-assigned one is too.
 
 ## Doc Status
 

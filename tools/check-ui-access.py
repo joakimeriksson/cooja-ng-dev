@@ -33,10 +33,11 @@ sends raw requests shaped like the ones a browser would send, asserting:
     is refused when the options are parsed, and a --ui that cannot start
     (port in use) ends the run -- neither is ignored for the whole run;
   - a ui/index.html that is a FIFO with no writer, or a directory, does not
-    hang startup or serve an empty page: the built-in page is served; an
-    empty one is served as it is, without a warning; one at the size limit
-    is served whole and one just over it draws the warning and the
-    built-in page, rather than being cut off where the client's queue ends;
+    hang startup or serve an empty page: the page built into the binary is
+    served; an empty one is served as it is, without a warning; one at the
+    size limit is served whole and one just over it draws the warning and
+    the built-in page, rather than being cut off where the client's queue
+    ends;
   - a request that does not fit the input buffer is answered 431, not
     dropped, and 6 KB of cookies (localhost cookies are shared across
     ports) still gets the page; a client still writing such a request when
@@ -503,9 +504,9 @@ def main():
                        kind not in ('an empty file', 'at the size limit'))
                 if kind == 'at the size limit':
                     expect('served whole', page_length(port), PAGE_MAX)
-                elif kind == 'over the size limit':
-                    expect('the built-in page instead, not a cut-off one',
-                           page_length(port) < 4096, True)
+                elif kind != 'an empty file':
+                    expect('the built-in page instead', page_length(port),
+                           os.path.getsize(os.path.join(ROOT, 'ui', 'index.html')))
             finally:
                 r.close()
 
@@ -602,6 +603,12 @@ def main():
         try:
             expect('setup frame says edit', setup_edit(port), want)
             expect('Save answers with the setup', save_answers(port), want)
+            if want:
+                # longer than a node's input queue: refused whole, not sent
+                # cut short without its newline
+                ws_text_frames(port, {'cmd': 'send', 'node': 1, 'data': 'x' * 600})
+                expect('an over-long console line is refused', b'not sent' in r.errors(),
+                       True)
         finally:
             r.close()
 

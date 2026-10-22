@@ -139,7 +139,7 @@ only gives them friendly names.
 | Option | Meaning | Today |
 |---|---|---|
 | `--ui [PORT]` | Web UI: loopback only, prints the URL, opens the browser (`--no-open` to skip), starts **paused** at 1x. Starting must be one action: a big Play button in the page (or Space), or **Enter in the terminal**, which prints `Paused — press Play in the browser, or Enter here to start`. `--start` skips the pause. | `--ui` (no open, 10x, running) |
-| `--duration 60s` / `-t` | simulated duration; accepts units (`500ms`, `2m`) like `--wall-timeout` | `-t ms` |
+| `--duration 60s` / `-t` | simulated duration, with its unit (`60s`, `500ms`, `2m`); a bare number is refused (`-t` is ms in `test_runner`, `--wall-timeout` is s) | `-t ms` |
 | `--seed N`, `--speed N\|max\|realtime` | unchanged | same |
 | `--trace radio\|packets\|boot\|stats\|all` | turns the developer output back on, one kind at a time | always on |
 | `-v` / `--verbose` | `test_runner`'s full output, unchanged | default |
@@ -155,8 +155,9 @@ bundled example library (§4.3) when no file by that name exists. That makes
 the quick-start's first command work before the user has any files at all.
 
 **Exit codes** are the existing table (`test/test_main.c:70-75`): 0 pass,
-1 assertion, 2 invalid request, 6 wall timeout, 7 cancelled. `cngsim help`
-documents them.
+1 assertion, 2 invalid request, 6 wall timeout, 7 cancelled; plus 130 when
+Ctrl-C ends a run before it is decided (`INTERRUPTED`, with how far it
+got). `cngsim help` documents them.
 
 ### 3.3 How it is built
 

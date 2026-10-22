@@ -344,7 +344,7 @@ $(BUILD_DIR)/embed: tools/embed/embed.c | $(BUILD_DIR)
 	$(CC) -O2 $(WARNFLAGS) -std=c11 -o $@ $<
 
 $(UI_BUILD_DIR)/ui_page.c: ui/index.html $(BUILD_DIR)/embed | $(UI_BUILD_DIR)
-	./$(BUILD_DIR)/embed ui/index.html csim_ui_page > $@.tmp && mv $@.tmp $@
+	$(BUILD_DIR)/embed ui/index.html csim_ui_page > $@.tmp && mv $@.tmp $@
 
 $(UI_PAGE_OBJECT): $(UI_BUILD_DIR)/ui_page.c
 	$(CC) -O2 $(WARNFLAGS) -c $< -o $@

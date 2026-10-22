@@ -170,7 +170,9 @@ nodes:
 
 A node entry with `count` and `layout` stands for that many nodes of its
 type, placed from `x`, `y` the way Cooja's Add-motes positioners place
-them.  `id`, when given, is the first node's; the rest follow it.
+them.  `id`, when given, is the first node's; the rest follow it.  Ids
+must not repeat across the expanded list: `{ id: 2, count: 16 }` followed
+by `{ id: 10 }` is a load error.
 
 ```yaml
 nodes:

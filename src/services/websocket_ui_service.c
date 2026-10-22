@@ -38,24 +38,28 @@ extern const unsigned int csim_ui_page_len;
  *   - else the copy built into the binary, so the UI works from any
  *     directory and from an installed binary.
  * A file is served only if it is a regular file of at most UI_PAGE_MAX
- * bytes; otherwise say why and leave the server's built-in page.  The file
- * is opened non-blocking and checked with fstat before it is read: a FIFO
- * with no writer would block a plain fopen() before the simulation starts,
- * an unseekable stream has no length to size the buffer with, and a
- * directory opens and reads as an empty page. */
+ * bytes; otherwise say why and serve the built-in copy.  The file is opened
+ * non-blocking and checked with fstat before it is read: a FIFO with no
+ * writer would block a plain fopen() before the simulation starts, an
+ * unseekable stream has no length to size the buffer with, and a directory
+ * opens and reads as an empty page. */
+static void serve_builtin_page(ws_server_t *server) {
+    ws_server_set_html(server, (const char *)csim_ui_page, (int)csim_ui_page_len);
+}
+
 static void load_page(ws_server_t *server) {
     const char *env = getenv("CSIM_UI_PAGE");
     bool from_env = env && *env;
     const char *path = from_env ? env : UI_PAGE_PATH;
     int fd = open(path, O_RDONLY | O_NONBLOCK);
     if (fd < 0 && errno == ENOENT && !from_env) {
-        ws_server_set_html(server, (const char *)csim_ui_page,
-                           (int)csim_ui_page_len);
+        serve_builtin_page(server);         /* no checkout here: the usual case */
         return;
     }
     if (fd < 0) {
-        fprintf(stderr, "Warning: cannot open %s (%s), serving "
-                        "default page\n", path, strerror(errno));
+        fprintf(stderr, "Warning: cannot open %s (%s), serving the built-in "
+                        "page\n", path, strerror(errno));
+        serve_builtin_page(server);
         return;
     }
     struct stat st;
@@ -76,8 +80,9 @@ static void load_page(ws_server_t *server) {
     if (ok)
         ok = ws_server_set_html(server, html, (int)got) == 0;
     if (!ok) {
-        fprintf(stderr, "Warning: %s is not a readable file of "
-                        "at most %ld bytes, serving default page\n", path, UI_PAGE_MAX);
+        fprintf(stderr, "Warning: %s is not a readable file of at most %ld "
+                        "bytes, serving the built-in page\n", path, UI_PAGE_MAX);
+        serve_builtin_page(server);
     }
     free(html);
     close(fd);
@@ -151,14 +156,21 @@ static int next_free_id(websocket_ui_service_t *svc) {
  * another viewer's. */
 static void save_to_browser(websocket_ui_service_t *svc, const char *token) {
     if (!svc->ctl->ops.save_config) return;
+    /* save_config writes a file and loads it back (a save that does not
+     * load is refused), so the text passes through one: a fresh one from
+     * mkstemp, never a predictable name another user could plant first. */
     const char *td = getenv("TMPDIR");
     char path[512];
-    snprintf(path, sizeof(path), "%s/csim-ui-save-%d.yaml",
-             td && *td ? td : "/tmp", (int)getpid());
+    snprintf(path, sizeof(path), "%s/csim-ui-save-XXXXXX.yaml",
+             td && *td ? td : "/tmp");
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "type", "config");
     cJSON_AddStringToObject(o, "token", token ? token : "");
-    if (svc->ctl->ops.save_config(svc->ctl->ops.user, path) == 0) {
+    int tfd = mkstemps(path, 5);
+    if (tfd >= 0) close(tfd);
+    if (tfd < 0) {
+        cJSON_AddStringToObject(o, "error", "no temporary file for the setup");
+    } else if (svc->ctl->ops.save_config(svc->ctl->ops.user, path) == 0) {
         FILE *f = fopen(path, "rb");
         char *buf = NULL;
         long len = 0;
@@ -176,7 +188,7 @@ static void save_to_browser(websocket_ui_service_t *svc, const char *token) {
     } else {
         cJSON_AddStringToObject(o, "error", "the setup could not be saved");
     }
-    unlink(path);
+    if (tfd >= 0) unlink(path);
     char *txt = cJSON_PrintUnformatted(o);
     if (txt) {
         ws_server_broadcast(svc->server, txt, (int)strlen(txt));
@@ -213,11 +225,20 @@ static bool handle_edit(websocket_ui_service_t *svc, const char *cmd, cJSON *roo
     } else if (strcmp(cmd, "send") == 0) {
         cJSON *jd = cJSON_GetObjectItem(root, "data");
         if (node > 0 && cJSON_IsString(jd)) {
-            char line[512];
-            int len = snprintf(line, sizeof(line), "%s\n", jd->valuestring);
-            if (len >= (int)sizeof(line)) len = (int)sizeof(line) - 1;
-            sim_control_send(svc->ctl, node, (const uint8_t *)line, len,
-                             SIM_CONTROL_WAKE | SIM_CONTROL_RETRY);
+            /* The line and its newline must fit what sim_control queues for
+             * a node that is not reading yet; a longer one is refused whole
+             * rather than cut short without its newline. */
+            char line[SIM_CONTROL_PENDING_MAX];
+            size_t dl = strlen(jd->valuestring);
+            if (dl + 1 > sizeof(line)) {
+                fprintf(stderr, "ui: a line of %zu bytes for node %d is longer "
+                        "than %d: not sent\n", dl, node, SIM_CONTROL_PENDING_MAX - 1);
+            } else {
+                memcpy(line, jd->valuestring, dl);
+                line[dl] = '\n';
+                sim_control_send(svc->ctl, node, (const uint8_t *)line, (int)dl + 1,
+                                 SIM_CONTROL_WAKE | SIM_CONTROL_RETRY);
+            }
         }
     } else if (strcmp(cmd, "save") == 0) {
         cJSON *jtok = cJSON_GetObjectItem(root, "token");

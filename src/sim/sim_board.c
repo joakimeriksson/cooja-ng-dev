@@ -95,7 +95,17 @@ const sim_board_desc_t *sim_board_resolve(const char *path, const char *board,
                      board);
             return NULL;
         }
-        if (by_ext && by_ext->name != named->name &&
+        /* A generic extension (".nrf52840", a SoC rather than a board)
+         * names a default board; `board` may pick another board with that
+         * SoC name, e.g. nrf52840-dongle.  Anything else contradicts it. */
+        const char *ext = path ? strrchr(path, '.') : NULL;
+        size_t el = ext ? strlen(ext + 1) : 0;
+        int variant = by_ext && by_ext->name && named->name && el > 0 &&
+                      strcmp(ext, by_ext->extension) == 0 &&
+                      strcmp(ext + 1, by_ext->name) != 0 &&
+                      strncmp(named->name, ext + 1, el) == 0 &&
+                      named->name[el] == '-';
+        if (by_ext && !variant && by_ext->name != named->name &&
             (!by_ext->name || strcmp(by_ext->name, named->name) != 0)) {
             snprintf(err, errlen, "%s: the file name says %s, but board is '%s'",
                      path, by_ext->name ? by_ext->name : by_ext->label, board);
@@ -109,7 +119,8 @@ const sim_board_desc_t *sim_board_resolve(const char *path, const char *board,
         const char *dot = strrchr(base, '.');
         snprintf(err, errlen,
                  "%s: no board for the extension '%s'; name the board with "
-                 "'board: <name>' on the mote type (cngsim boards lists them)",
+                 "'board: <name>' on its mote type, or --board <name> for an "
+                 "image on the command line (cngsim boards lists them)",
                  path ? path : "(none)", dot ? dot : "(none)");
         return NULL;
     }

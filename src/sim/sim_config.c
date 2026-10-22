@@ -80,7 +80,8 @@ static int  parse_test(cJSON *test, sim_normalized_config_t *cfg);
  * written and opened relative to the current directory, as it always was —
  * every config in the repo names repo-root paths and is run from there, so
  * those load exactly as before. */
-static void resolve_one(char *p, size_t sz, const char *dir) {
+static void resolve_one(char *p, size_t sz, const char *dir, char *fallback,
+                        size_t fallback_sz) {
     if (!p[0]) return;
     char buf[1024];
     if (p[0] == '~' && p[1] == '/') {
@@ -95,6 +96,8 @@ static void resolve_one(char *p, size_t sz, const char *dir) {
     char real[PATH_MAX];
     if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz)
         snprintf(p, sz, "%s", real);
+    else if (!fallback[0] && access(p, F_OK) == 0)
+        snprintf(fallback, fallback_sz, "%s", p);   /* found from the cwd only */
 }
 
 static void resolve_paths(sim_normalized_config_t *cfg, const char *config_path) {
@@ -103,7 +106,8 @@ static void resolve_paths(sim_normalized_config_t *cfg, const char *config_path)
     if (slash && (size_t)(slash - config_path) < sizeof(dir))
         snprintf(dir, sizeof(dir), "%.*s", (int)(slash - config_path), config_path);
     if (slash == config_path) snprintf(dir, sizeof(dir), "/");
-#define RESOLVE(field) resolve_one((field), sizeof(field), dir)
+#define RESOLVE(field) resolve_one((field), sizeof(field), dir, cfg->cwd_fallback, \
+                                   sizeof(cfg->cwd_fallback))
     for (int i = 0; i < cfg->node_count; i++) {
         RESOLVE(cfg->nodes[i].firmware);
         RESOLVE(cfg->nodes[i].secure_firmware);
@@ -209,6 +213,18 @@ int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
     for (int i = 0; i < cfg->node_count; i++) {
         if (cfg->nodes[i].id == 0)
             cfg->nodes[i].id = i + 1;
+    }
+    /* Two nodes with one id would share an address and a console label;
+     * a layout ({ id: 2, count: 16 }) followed by { id: 10 } makes it easy. */
+    for (int i = 0; i < cfg->node_count; i++) {
+        for (int j = 0; j < i; j++) {
+            if (cfg->nodes[i].id == cfg->nodes[j].id) {
+                fprintf(stderr, "%s: node id %d is used twice (nodes %d and %d "
+                        "in the expanded list)\n", json_path, cfg->nodes[i].id,
+                        j + 1, i + 1);
+                return -1;
+            }
+        }
     }
     resolve_paths(cfg, json_path);
     return 0;
@@ -631,16 +647,19 @@ static int expand_layout(sim_normalized_config_t *cfg, const cJSON *item,
                 "together\n", entry);
         return -1;
     }
-    int n = cnt->valueint;
-    if (n < 1 || (double)n != cnt->valuedouble) {
+    /* Bounded as a double before any conversion: (int) of a value out of
+     * int's range is undefined, and first + n could overflow. */
+    if (!cJSON_IsNumber(cnt) || cnt->valuedouble < 1 ||
+        cnt->valuedouble != floor(cnt->valuedouble)) {
         fprintf(stderr, "sim_config: node entry %d: count must be a whole number "
                 ">= 1\n", entry);
         return -1;
     }
-    if (first + n > MAX_SIM_NODES) {
+    if (cnt->valuedouble > (double)(MAX_SIM_NODES - first)) {
         fprintf(stderr, "sim_config: too many nodes (max %d)\n", MAX_SIM_NODES);
         return -1;
     }
+    int n = (int)cnt->valuedouble;
     const char *kind = lay->valuestring;
     int have_columns, have_spacing, have_radius, have_width, have_height;
     double x0 = get_num(item, "x", 0.0, NULL), y0 = get_num(item, "y", 0.0, NULL);
@@ -651,8 +670,9 @@ static int expand_layout(sim_normalized_config_t *cfg, const cJSON *item,
     double height = get_num(item, "height", 0, &have_height);
     const char *need = NULL;
     if (strcmp(kind, "grid") == 0) {
-        if (!have_columns || columns < 1 || columns != (int)columns)
-            need = "columns (a whole number >= 1)";
+        if (!have_columns || columns < 1 || columns > MAX_SIM_NODES ||
+            columns != floor(columns))
+            need = "columns (a whole number from 1 to the node limit)";
         else if (!have_spacing || spacing <= 0)
             need = "spacing (> 0)";
     } else if (strcmp(kind, "line") == 0) {

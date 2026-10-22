@@ -65,8 +65,9 @@ How to read it:
 - The ✓ lines are the example's checks. The run ends as soon as all of
   them have passed.
 - `cngsim` exits with 0 when every check passes and with 1 when one fails,
-  so a run can go straight into a CI job. `cngsim help` lists the other
-  exit codes.
+  so a run can go straight into a CI job. Ctrl-C ends a run early: it says
+  `INTERRUPTED` and how far the simulation got, and exits with 130.
+  `cngsim help` lists the other exit codes.
 
 The same seed always gives the same run, down to the nanosecond.
 `--seed 7` gives another run, just as reproducible. `-q` prints only the
@@ -132,7 +133,9 @@ test:
     - { wait: "Received response", node: 4 }
 ```
 
-- Paths are relative to the YAML file.
+- Paths are relative to the YAML file. `cngsim new` names the firmware
+  that comes with cooja-ng by its absolute path, so the file still runs
+  after you move it.
 - One node entry can place many nodes: `count` plus a `layout`, starting
   at `x`, `y`:
   - `grid` takes `columns` and `spacing`;
@@ -170,8 +173,9 @@ mote_types:
 ```
 
 An image named `<app>.<board>` runs as that board (`.nrf52840` runs as
-the nRF52840 DK). For any other name (Contiki-NG's `.nrf`, `.simplelink`
-and `.zoul`, or a plain `.elf`), say which board it is:
+the nRF52840 DK, unless `board: nrf52840-dongle` says otherwise). For any
+other name (Contiki-NG's `.nrf`, `.simplelink` and `.zoul`, or a plain
+`.elf`), say which board it is:
 
 ```sh
 make TARGET=nrf BOARD=nrf54l15/dk         # writes hello-world.nrf
@@ -182,6 +186,9 @@ mote_types:
   - { name: hello, board: nrf54l15-dk,
       firmware: ~/contiki-ng/examples/hello-world/hello-world.nrf }
 ```
+
+An image run on its own, without a setup file, takes the board from the
+command line: `cngsim run hello-world.nrf --board nrf54l15-dk`.
 
 `cngsim boards` lists the boards and the `TARGET`/`BOARD` that builds for
 each:

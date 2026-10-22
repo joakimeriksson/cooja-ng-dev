@@ -36,8 +36,9 @@
 #include "radio_medium.h"
 #include "sim_event_queue.h"   /* SIM_EQ_MAX_NODES */
 #include "sim_control.h"       /* pause/speed/move go through the control API */
+#include "sim_config.h"        /* SIM_MAX_MOTE_TYPES */
 
-#define UI_SVC_MAX_TYPES 16
+#define UI_SVC_MAX_TYPES SIM_MAX_MOTE_TYPES
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,7 +81,6 @@ typedef struct websocket_ui_service {
     char   type_name[UI_SVC_MAX_TYPES][64];
     char   type_fw[UI_SVC_MAX_TYPES][256];
     char   type_sfw[UI_SVC_MAX_TYPES][256];
-    int    setup_sent;            /* the "setup" frame went out with this full state */
 
     /* Shared runner state (pointers set at start; service never writes the
      * node_states it doesn't own — it does own prev_* delta snapshots). */

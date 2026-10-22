@@ -59,8 +59,12 @@ extern int csim_cli_enter_resumes;
 extern int csim_cli_pause_at_end;
 extern int csim_cli_hold_verdict;
 extern volatile sig_atomic_t csim_cli_stop;
+extern int64_t csim_cli_simulated_ns;
+extern double csim_cli_paused_ms;
+extern int csim_cli_run_complete;
 
 #define EXIT_INVALID 2
+#define EXIT_INTERRUPTED 130    /* 128 + SIGINT: the shell's convention for Ctrl-C */
 
 static void fail(const char *fmt, ...) {
     va_list ap;
@@ -88,6 +92,15 @@ static int is_file(const char *p) {
 static int is_dir(const char *p) {
     struct stat st;
     return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* "8080": all digits, 1..65535 (so `--ui 2node.yaml` is not a port). */
+static int is_port(const char *s) {
+    if (!*s) return 0;
+    for (const char *c = s; *c; c++)
+        if (!isdigit((unsigned char)*c)) return 0;
+    long v = strtol(s, NULL, 10);
+    return v >= 1 && v <= 65535 && strlen(s) <= 5;
 }
 
 /* ---- data directory ------------------------------------------------------ */
@@ -436,12 +449,16 @@ static int is_radio_trace(const char *s) {
 
 /* A line on stderr that tells the user something went wrong.  Everything
  * else there is a developer trace: kept (the last ERR_KEEP lines) and shown
- * only if the run then fails without a verdict, where it may explain why. */
+ * only if the run then fails without a verdict, where it may explain why.
+ * The words are the ones the loader, the runner and the services use in
+ * their messages to people.  Words that radio and CPU traces use ("abort",
+ * "fault") are left out, or every such trace would reach the terminal; a
+ * new message for people should use one of these words. */
 static int looks_like_error(const char *s) {
     static const char *const words[] = {
         "rror", "annot ", "ailed", "arning", "nknown", "nvalid", "issing",
         "no board", "not found", "No such", "must ", "needs ", "too many",
-        "refus", "denied", "abort", "fault", "Fault",
+        "refus", "denied", "not sent",
     };
     for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++)
         if (strstr(s, words[i])) return 1;
@@ -496,12 +513,17 @@ static void *filter_thread(void *p) {
 
 /* ---- run --------------------------------------------------------------- */
 
+/* A simulated duration, which must carry its unit: "60s", "500ms", "2m".
+ * A bare number is refused rather than guessed — test_runner's -t takes
+ * milliseconds and --wall-timeout seconds, so "-t 10" would be 10 ms to one
+ * reader and 10 s to the next.  -2 = a number without a unit. */
 static int parse_duration_ms(const char *s, long *ms) {
     char *end;
     double v = strtod(s, &end);
-    if (end == s || v < 0) return -1;
-    double mult = 1.0;                         /* a bare number is ms, like -t */
-    if (strcmp(end, "ms") == 0 || *end == '\0') mult = 1.0;
+    if (end == s || !(v >= 0) || v > 1e12) return -1;
+    if (*end == '\0') return -2;
+    double mult;
+    if (strcmp(end, "ms") == 0) mult = 1.0;
     else if (strcmp(end, "s") == 0) mult = 1000.0;
     else if (strcmp(end, "m") == 0 || strcmp(end, "min") == 0) mult = 60000.0;
     else if (strcmp(end, "h") == 0) mult = 3600000.0;
@@ -530,9 +552,9 @@ static int cmd_run(int argc, char **argv) {
     int ntargets = 0;
     int ui = 0, start = 0, verbose = 0, passthrough = 0, have_speed = 0;
     const char *port = "8080";
-    long duration_ms = -1;
-    static char numbuf[8][32];
-    int nb = 0;
+    long duration_ms = -1;          /* the last --duration given wins */
+    static char duration_arg[32];
+    const char *board = NULL;
 
     memset(&F, 0, sizeof(F));
 #define PUSH(x) do { if (rargc >= MAX_ARGS - 1) { fail("too many arguments"); return EXIT_INVALID; } \
@@ -546,7 +568,7 @@ static int cmd_run(int argc, char **argv) {
         const char *a = argv[i];
         if (strcmp(a, "--ui") == 0) {
             ui = 1;
-            if (i + 1 < argc && isdigit((unsigned char)argv[i + 1][0])) port = argv[++i];
+            if (i + 1 < argc && is_port(argv[i + 1])) port = argv[++i];
         } else if (strcmp(a, "--no-open") == 0) {
             F.no_open = 1;
         } else if (strcmp(a, "--start") == 0) {
@@ -568,13 +590,16 @@ static int cmd_run(int argc, char **argv) {
             }
         } else if (strcmp(a, "--duration") == 0 || strcmp(a, "-t") == 0) {
             NEED_VALUE();
-            if (parse_duration_ms(argv[++i], &duration_ms) != 0) {
+            int dr = parse_duration_ms(argv[++i], &duration_ms);
+            if (dr == -2) {
+                fail("run: %s %s: give the unit, e.g. %ss or %sms", a, argv[i],
+                     argv[i], argv[i]);
+                return EXIT_INVALID;
+            }
+            if (dr != 0) {
                 fail("run: bad duration '%s' (try 60s, 500ms, 2m)", argv[i]);
                 return EXIT_INVALID;
             }
-            snprintf(numbuf[nb], sizeof(numbuf[nb]), "%ld", duration_ms);
-            OPT("-t");
-            OPT(numbuf[nb++]);
         } else if (strcmp(a, "--speed") == 0) {
             NEED_VALUE();
             have_speed = 1;
@@ -596,9 +621,16 @@ static int cmd_run(int argc, char **argv) {
         } else if (strcmp(a, "--shell") == 0) {
             passthrough = 1;
             OPT(a);
+        } else if (strcmp(a, "--renode") == 0) {
+            OPT(a);           /* ADDR:MAIN:ASYNC, or bare: from CSIM_RENODE */
+            if (i + 1 < argc && argv[i + 1][0] != '-' && strchr(argv[i + 1], ':') &&
+                !is_file(argv[i + 1]))
+                OPT(argv[++i]);
+        } else if (strcmp(a, "--board") == 0) {
+            NEED_VALUE();
+            board = argv[++i];
         } else if (strcmp(a, "--paused") == 0 || strcmp(a, "--ui-edit") == 0 ||
-                   strcmp(a, "--gdb-wait") == 0 || strcmp(a, "--realtime") == 0 ||
-                   strcmp(a, "--renode") == 0) {
+                   strcmp(a, "--gdb-wait") == 0 || strcmp(a, "--realtime") == 0) {
             OPT(a);
         } else if (a[0] == '-') {
             fail("run: unknown option '%s' (cngsim help run)", a);
@@ -631,6 +663,16 @@ static int cmd_run(int argc, char **argv) {
         }
         if (sim_config_load(&cfg, cfg_path) != 0) return EXIT_INVALID;
         have_cfg = 1;
+        if (board) {
+            fail("run: --board is for firmware images on the command line; in a "
+                 "setup file, put  board: %s  on the mote type", board);
+            return EXIT_INVALID;
+        }
+        if (cfg.cwd_fallback[0])
+            fprintf(stderr, "cngsim: note: %s is not next to %s, so it was taken "
+                    "from the current directory; the setup works only when run from "
+                    "here (name it relative to the setup file)\n",
+                    cfg.cwd_fallback, cfg_path);
         PUSH(cfg_path);
         snprintf(F.title, sizeof(F.title), "%s", cfg.title);
         F.nodes = cfg.node_count;
@@ -648,10 +690,23 @@ static int cmd_run(int argc, char **argv) {
             }
             PUSH(targets[i]);
         }
+        if (board) {
+            if (!sim_board_find(board)) {
+                fail("run: unknown board '%s' (cngsim boards lists them)", board);
+                return EXIT_INVALID;
+            }
+            PUSH("--board");
+            PUSH(board);
+        }
         F.nodes = ntargets;
         F.duration_s = 20.0;
     }
-    if (duration_ms >= 0) F.duration_s = duration_ms / 1000.0;
+    if (duration_ms >= 0) {
+        F.duration_s = duration_ms / 1000.0;
+        snprintf(duration_arg, sizeof(duration_arg), "%ld", duration_ms);
+        PUSH("-t");
+        PUSH(duration_arg);
+    }
     for (int i = 0; i < nopts; i++) {
         if (strcmp(opts[i], "--seed") == 0 && i + 1 < nopts) F.seed = atoi(opts[i + 1]);
         if (strcmp(opts[i], "-n") == 0 && i + 1 < nopts) F.nodes = atoi(opts[i + 1]);
@@ -684,7 +739,8 @@ static int cmd_run(int argc, char **argv) {
 
     if (verbose || passthrough) {
         if (verbose && !passthrough) F.trace = TRACE_ALL;
-        return run_mixed_multinode_test(rargc, rargv);
+        int vrc = run_mixed_multinode_test(rargc, rargv);
+        return csim_cli_stop && !csim_cli_run_complete ? EXIT_INTERRUPTED : vrc;
     }
 
     /* The simulation's stdout and stderr go through the filter threads. */
@@ -700,7 +756,6 @@ static int cmd_run(int argc, char **argv) {
     dup2(pe[1], STDERR_FILENO);
     close(po[1]);
     close(pe[1]);
-    setvbuf(stdout, NULL, _IOLBF, 0);
     filt_arg_t fo = { po[0], saved_out, 1 }, fe = { pe[0], saved_err, 0 };
     pthread_t to, te;
     pthread_create(&to, NULL, filter_thread, &fo);
@@ -725,27 +780,51 @@ static int cmd_run(int argc, char **argv) {
             fprintf(stderr, "  %s\n", err_ring[k % ERR_KEEP]);
     }
     if (rc == EXIT_INVALID && !F.running) return rc;    /* the error said it all */
-    const char *word = F.verdict[0] ? F.verdict
+    /* Ctrl-C is the user ending the run, not a check failing: its own word
+     * and exit code, whatever the unfinished checks reported.  (7 stays the
+     * code for a cancellation through the protocol.) */
+    int interrupted = csim_cli_stop && !csim_cli_run_complete;
+    if (interrupted) rc = EXIT_INTERRUPTED;
+    const char *word = interrupted ? "INTERRUPTED"
+                     : F.verdict[0] ? F.verdict
                      : rc == 0 ? "DONE" : rc == 1 ? "FAILED"
                      : rc == 6 ? "WALL TIMEOUT" : rc == 7 ? "CANCELLED" : "ERROR";
     char summary[512];
     int n = snprintf(summary, sizeof(summary), "%s", word);
-    if (F.verdict[0] && strcmp(F.verdict, "FAILED") == 0 && F.fail_reason[0])
+    if (!interrupted && F.verdict[0] && strcmp(F.verdict, "FAILED") == 0 && F.fail_reason[0])
         n += snprintf(summary + n, sizeof(summary) - (size_t)n, ": %s", F.fail_reason);
-    double sim_s = F.have_test_end ? F.test_end_s : F.sim_s;
+    /* How far the simulation got (the runner's "Simulated time" line is the
+     * requested duration), and the wall time it ran, not the time it sat
+     * paused waiting for Play. */
+    double sim_s = F.have_test_end ? F.test_end_s : (double)csim_cli_simulated_ns / 1e9;
+    double wall_s = F.wall_s - csim_cli_paused_ms / 1000.0;
+    if (wall_s < 0) wall_s = 0;
     if ((F.have_test_end || F.have_sim) && F.have_wall) {
         n += snprintf(summary + n, sizeof(summary) - (size_t)n,
                       sim_s < 1.0 ? " · %.3f s simulated in %.2f s"
-                                  : " · %.1f s simulated in %.2f s", sim_s, F.wall_s);
-        if (F.wall_s > 0 && sim_s > 0)
+                                  : " · %.1f s simulated in %.2f s", sim_s, wall_s);
+        if (csim_cli_paused_ms >= 1000.0)
+            n += snprintf(summary + n, sizeof(summary) - (size_t)n, ", %.0f s paused",
+                          csim_cli_paused_ms / 1000.0);
+        if (wall_s > 0 && sim_s > 0)
             snprintf(summary + n, sizeof(summary) - (size_t)n, " (%.0fx real time)",
-                     sim_s / F.wall_s);
+                     sim_s / wall_s);
     }
     printf("%s\n", summary);
     return rc;
 }
 
 /* ---- check ------------------------------------------------------------- */
+
+/* A node id the setup has: configured, or created by an "add" action. */
+static int node_known(const sim_normalized_config_t *cfg, int id) {
+    for (int i = 0; i < cfg->node_count; i++)
+        if (cfg->nodes[i].id == id) return 1;
+    for (int k = 0; cfg->has_test && k < cfg->test.action_count; k++)
+        if (cfg->test.actions[k].type == TEST_ACTION_ADD && cfg->test.actions[k].node == id)
+            return 1;
+    return 0;
+}
 
 static int cmd_check(int argc, char **argv) {
     if (argc != 1) {
@@ -780,19 +859,53 @@ static int cmd_check(int argc, char **argv) {
             bad++;
         }
     }
-    if (cfg.mote_type_count == 0) {          /* v1: firmware on each node */
+    if (cfg.version < 2) {   /* v1: each node names its firmware, mote_types or not */
         for (int i = 0; i < cfg.node_count; i++) {
+            const sim_node_config_t *nd = &cfg.nodes[i];
             char err[512];
-            if (!sim_board_resolve(cfg.nodes[i].firmware, NULL, err, sizeof(err))) {
+            const sim_board_desc_t *b = sim_board_resolve(nd->firmware, NULL, err, sizeof(err));
+            if (!b) {
                 fprintf(stderr, "%s: %s\n", argv[0], err);
                 bad++;
-            } else if (access(cfg.nodes[i].firmware, R_OK) != 0) {
-                fprintf(stderr, "%s: node %d: cannot read %s\n", argv[0],
-                        cfg.nodes[i].id, cfg.nodes[i].firmware);
+            } else if (b->kind != SIM_BOARD_KIND_RENODE && access(nd->firmware, R_OK) != 0) {
+                fprintf(stderr, "%s: node %d: cannot read %s\n", argv[0], nd->id,
+                        nd->firmware);
+                bad++;
+            }
+            if (nd->secure_firmware[0] && access(nd->secure_firmware, R_OK) != 0) {
+                fprintf(stderr, "%s: node %d: cannot read %s\n", argv[0], nd->id,
+                        nd->secure_firmware);
                 bad++;
             }
         }
     }
+    /* A check or an action that names a node the setup does not have would
+     * wait for, or act on, nothing.  Nodes an "add" action creates count. */
+    if (cfg.has_test) {
+        const sim_test_config_t *tc = &cfg.test;
+        int auto_add = 0;
+        for (int k = 0; k < tc->action_count; k++)
+            if (tc->actions[k].type == TEST_ACTION_ADD && tc->actions[k].node <= 0)
+                auto_add = 1;          /* its id is chosen at run time */
+#define CHECK_NODE(what, idx, id) do { \
+            if ((id) > 0 && !auto_add && !node_known(&cfg, (id))) { \
+                fprintf(stderr, "%s: test %s %d names node %d, which the setup " \
+                        "does not have\n", argv[0], (what), (idx) + 1, (id)); \
+                bad++; \
+            } } while (0)
+        for (int k = 0; k < tc->step_count; k++) CHECK_NODE("step", k, tc->steps[k].node);
+        for (int k = 0; k < tc->validator_count; k++)
+            CHECK_NODE("validator", k, tc->validators[k].node);
+        for (int k = 0; k < tc->action_count; k++)
+            if (tc->actions[k].type != TEST_ACTION_ADD &&
+                tc->actions[k].type != TEST_ACTION_SEND_ALL)
+                CHECK_NODE("action", k, tc->actions[k].node);
+#undef CHECK_NODE
+    }
+    if (cfg.cwd_fallback[0])
+        fprintf(stderr, "%s: note: %s is not next to the setup, so it was taken from "
+                "the current directory; the setup works only when run from here\n",
+                argv[0], cfg.cwd_fallback);
     if (cfg.has_js_script && cfg.js_script_path[0] && access(cfg.js_script_path, R_OK) != 0) {
         fprintf(stderr, "%s: cannot read js_script %s\n", argv[0], cfg.js_script_path);
         bad++;
@@ -813,14 +926,18 @@ static int cmd_check(int argc, char **argv) {
     printf("\n");
     for (int t = 0; t < cfg.mote_type_count; t++) {
         const sim_mote_type_t *mt = &cfg.mote_types[t];
-        char err[512];
-        const sim_board_desc_t *b = sim_board_resolve(mt->firmware, mt->board, err, sizeof(err));
+        /* a v1 config's mote types are only firmware, in the index table */
+        const char *fw = mt->firmware[0] ? mt->firmware : cfg.mote_type_firmware[t];
+        char err[512], name[64];
+        snprintf(name, sizeof(name), "%s", mt->name[0] ? mt->name : "");
+        if (!name[0]) snprintf(name, sizeof(name), "type %d", t);
+        const sim_board_desc_t *b = sim_board_resolve(fw, mt->board, err, sizeof(err));
         int users = 0;
         for (int i = 0; i < cfg.node_count; i++)
-            if (strcmp(cfg.nodes[i].type_name, mt->name) == 0) users++;
-        printf("  %-12s %-20s %2d node%s  %s\n", mt->name,
-               b ? (b->name ? b->name : b->label) : "?", users, users == 1 ? " " : "s",
-               mt->firmware);
+            if (mt->name[0] ? strcmp(cfg.nodes[i].type_name, mt->name) == 0
+                            : strcmp(cfg.nodes[i].firmware, fw) == 0) users++;
+        printf("  %-12s %-20s %2d node%s  %s\n", name,
+               b ? (b->name ? b->name : b->label) : "?", users, users == 1 ? " " : "s", fw);
     }
     sim_config_free(&cfg);
     return 0;
@@ -832,17 +949,20 @@ typedef struct {
     const char *name, *blurb;
     const char *roles[2], *images[2];
     const char *expect;                   /* console line the check waits for */
+    int expect_radio;                     /* the check needs a radio path */
 } template_t;
 
 static const template_t templates[] = {
     { "rpl-udp", "an RPL network: node 1 is the UDP server and the RPL root, the "
       "others are clients that send it requests",
-      { "server", "client" }, { "udp-server", "udp-client" }, "Received response" },
+      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1 },
     { "nullnet", "broadcast without IP: every node broadcasts and prints what "
-      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received" },
+      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1 },
     { "hello", "hello world on every node", { "node", NULL }, { "hello-world", NULL },
-      "Hello, world" },
+      "Hello, world", 0 },
 };
+
+#define RPL_UDP_MAX_NODES 16          /* the server and 15 clients */
 
 static const template_t *find_template(const char *name) {
     for (size_t i = 0; i < sizeof(templates) / sizeof(templates[0]); i++)
@@ -850,51 +970,152 @@ static const template_t *find_template(const char *name) {
     return NULL;
 }
 
-/* `path` as the YAML should name it from `dir`: relative when that stays
- * short, else absolute ("~/..." under the home directory). */
-static void path_from(const char *dir, const char *path, char *out, size_t n) {
-    char a[PATH_MAX], b[PATH_MAX];
-    if (!realpath(dir, a) || !realpath(path, b)) {
-        snprintf(out, n, "%s", path);
-        return;
+/* What `new` writes: the template, the board's bundled images and the
+ * layout, all decided before the file is written. */
+typedef struct {
+    const template_t *tp;
+    const char *board, *layout, *outp;
+    char (*fw)[PATH_MAX];
+    int n, clients, columns, seed;
+    long duration_ms;
+    double spacing, range, radius, side;
+} new_spec_t;
+
+/* A YAML double-quoted scalar: any path survives (": ", " #", quotes). */
+static void put_quoted(FILE *f, const char *s) {
+    fputc('"', f);
+    for (; *s; s++) {
+        if (*s == '"' || *s == '\\') fputc('\\', f);
+        fputc(*s, f);
     }
-    size_t la = strlen(a), i = 0, common;
-    while (a[i] && a[i] == b[i]) i++;
-    if (a[i] == '\0' && b[i] == '/') {
-        common = i;                       /* the file is under dir */
-    } else {
-        while (i > 0 && a[i - 1] != '/') i--;
-        common = i ? i - 1 : 0;           /* the last '/' both share */
-    }
-    int ups = 0;
-    if (common < la) {
-        ups = 1;
-        for (size_t k = common + 1; k < la; k++)
-            if (a[k] == '/') ups++;
-    }
-    if (common > 0 && ups <= 2) {
-        out[0] = '\0';
-        for (int k = 0; k < ups; k++) strncat(out, "../", n - strlen(out) - 1);
-        strncat(out, b + common + 1, n - strlen(out) - 1);
-        return;
-    }
-    const char *home = getenv("HOME");
-    size_t hl = home ? strlen(home) : 0;
-    if (hl && strncmp(b, home, hl) == 0 && b[hl] == '/')
-        snprintf(out, n, "~%s", b + hl);
-    else
-        snprintf(out, n, "%s", b);
+    fputc('"', f);
 }
 
+/* The whole setup file; with `far` > 0 also its check, which waits on that
+ * node.  Returns 0, or -1 if the file cannot be written. */
+static int write_setup(const char *path, const new_spec_t *sp, int far) {
+    const template_t *tp = sp->tp;
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f, "# %c%s.\n", toupper((unsigned char)tp->blurb[0]), tp->blurb + 1);
+    fprintf(f, "# Written by: cngsim new %s --board %s -n %d --layout %s\n", tp->name,
+            sp->board, sp->n, sp->layout);
+    fprintf(f, "# Run it:   cngsim run %s\n# Watch it: cngsim run %s --ui\n\n", sp->outp,
+            sp->outp);
+    char kv[128];
+#define KV(comment, ...) do { snprintf(kv, sizeof(kv), __VA_ARGS__); \
+        fprintf(f, "%-26s# %s\n", kv, comment); } while (0)
+    fprintf(f, "version: 2\n");
+    fprintf(f, "title: \"%s on %s, %d node%s (%s)\"\n", tp->name, sp->board, sp->n,
+            sp->n == 1 ? "" : "s", sp->layout);
+    KV("how long to simulate (simulated time, ms)", "timeout_ms: %ld", sp->duration_ms);
+    KV("the same seed gives the same run; change it for another", "seed: %d", sp->seed);
+    KV("nodes boot at random times within the first second", "startup_delay_ms: 1000");
+    fprintf(f, "\nmedium:\n");
+    KV("unit-disk graph, as in Cooja: within range means received", "  type: udgm");
+    KV("radio range, metres", "  tx_range: %g", sp->range);
+    KV("a sender this close disturbs reception", "  interference_range: %g", sp->range * 2);
+#undef KV
+    fprintf(f, "\n");
+    fprintf(f, "# The firmware the nodes run, one entry per image: here the images that\n");
+    fprintf(f, "# come with cooja-ng.  Your own can be named relative to this file.  An\n");
+    fprintf(f, "# image not named <app>.<board> (an .elf, .nrf, .simplelink) also needs\n");
+    fprintf(f, "# board: <name>  (cngsim boards lists them).\n");
+    fprintf(f, "mote_types:\n");
+    for (int r = 0; r < 2 && tp->roles[r]; r++) {
+        fprintf(f, "  - { name: %s, firmware: ", tp->roles[r]);
+        put_quoted(f, sp->fw[r]);
+        fprintf(f, " }\n");
+    }
+    fprintf(f, "\n# Positions in metres.  One entry can place many nodes: count + layout\n");
+    fprintf(f, "# (grid: columns, spacing; line: spacing; circle: radius; random: width,\n");
+    fprintf(f, "# height), starting at x, y.  Or list nodes one by one with an id, x and y.\n");
+    fprintf(f, "nodes:\n");
+    const char *role = tp->roles[1] ? tp->roles[1] : tp->roles[0];
+    double x0 = 0;
+    int first_id = 1;
+    if (tp->roles[1]) {
+        fprintf(f, "  - { type: %s, id: 1, x: 0, y: 0 }\n", tp->roles[0]);
+        x0 = sp->spacing;
+        first_id = 2;
+    }
+    if (strcmp(sp->layout, "grid") == 0)
+        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: grid, columns: %d, spacing: %g, x: %g, y: 0 }\n",
+                role, first_id, sp->clients, sp->columns, sp->spacing, x0);
+    else if (strcmp(sp->layout, "line") == 0)
+        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: line, spacing: %g, x: %g, y: 0 }\n",
+                role, first_id, sp->clients, sp->spacing, x0);
+    else if (strcmp(sp->layout, "circle") == 0)
+        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: circle, radius: %g, x: 0, y: 0 }\n",
+                role, first_id, sp->clients, floor(sp->radius * 10) / 10);
+    else
+        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: random, width: %g, height: %g, x: 0, y: 0 }\n",
+                role, first_id, sp->clients, sp->side, sp->side);
+    if (far > 0) {
+        fprintf(f, "\n# Checks.  The run passes when every step is seen, in order, and exits\n");
+        fprintf(f, "# with 0; otherwise with 1.  test-format.md has more (validators, fail_on,\n");
+        fprintf(f, "# Cooja JavaScript test scripts).\n");
+        fprintf(f, "test:\n  steps:\n");
+        fprintf(f, "    - { wait: \"%s\", node: %d }%s\n", tp->expect, far,
+                tp->roles[1] ? "   # the farthest client got an answer" : "");
+    }
+    int bad = ferror(f);
+    if (fclose(f) != 0) bad = 1;
+    return bad ? -1 : 0;
+}
+
+/* The most radio hops (links shorter than `range`) any node is from the
+ * first node, node 1, or -1 when some node has no path to it at all. */
+static int hops_to_node1(const sim_normalized_config_t *cfg, double range) {
+    int n = cfg->node_count, hops[MAX_SIM_NODES], queue[MAX_SIM_NODES];
+    int head = 0, tail = 0, count = 1, deepest = 0;
+    for (int i = 0; i < n; i++) hops[i] = -1;
+    hops[0] = 0;
+    queue[tail++] = 0;
+    while (head < tail) {
+        int a = queue[head++];
+        for (int b = 0; b < n; b++) {
+            if (hops[b] >= 0) continue;
+            double dx = cfg->nodes[a].x - cfg->nodes[b].x, dy = cfg->nodes[a].y - cfg->nodes[b].y;
+            if (dx * dx + dy * dy < range * range) {
+                hops[b] = hops[a] + 1;
+                if (hops[b] > deepest) deepest = hops[b];
+                queue[tail++] = b;
+                count++;
+            }
+        }
+    }
+    return count == n ? deepest : -1;
+}
+
+/* The id of the node farthest from node 1: the one the check waits on. */
+static int farthest_from_node1(const sim_normalized_config_t *cfg, int skip_first) {
+    int far = cfg->nodes[cfg->node_count - 1].id;
+    double best = -1;
+    for (int k = skip_first ? 1 : 0; k < cfg->node_count; k++) {
+        double dx = cfg->nodes[k].x - cfg->nodes[0].x, dy = cfg->nodes[k].y - cfg->nodes[0].y;
+        double d = dx * dx + dy * dy;
+        if (d > best) { best = d; far = cfg->nodes[k].id; }
+    }
+    return far;
+}
+
+/* Ask, and take the answer into `out`; an empty answer keeps `dflt`.
+ * `dflt` may be `out` itself (the callers pass the current value), so it is
+ * copied before fgets overwrites it. */
 static void prompt(const char *q, const char *dflt, char *out, size_t n) {
-    printf("%s [%s]: ", q, dflt);
+    char keep[PATH_MAX];
+    snprintf(keep, sizeof(keep), "%s", dflt);
+    printf("%s [%s]: ", q, keep);
     fflush(stdout);
     if (!fgets(out, (int)n, stdin)) out[0] = '\0';
     out[strcspn(out, "\r\n")] = '\0';
     char *s = out;
-    while (*s == ' ') s++;
+    while (*s == ' ' || *s == '\t') s++;
     memmove(out, s, strlen(s) + 1);
-    if (!out[0]) snprintf(out, n, "%s", dflt);
+    size_t len = strlen(out);
+    while (len > 0 && (out[len - 1] == ' ' || out[len - 1] == '\t')) out[--len] = '\0';
+    if (!out[0]) snprintf(out, n, "%s", keep);
 }
 
 static int cmd_new(int argc, char **argv) {
@@ -903,6 +1124,7 @@ static int cmd_new(int argc, char **argv) {
     int n = 4, seed = 42, force = 0, asked = 0;
     double spacing = 30.0;
     long duration_ms = 120000;
+    int duration_given = 0;
     int i = 0;
     if (argc > 0 && argv[0][0] != '-') snprintf(tname, sizeof(tname), "%s", argv[i++]);
     for (; i < argc; i++) {
@@ -921,10 +1143,16 @@ static int cmd_new(int argc, char **argv) {
         else if (strcmp(a, "-o") == 0) snprintf(outp, sizeof(outp), "%s", v);
         else if (strcmp(a, "--seed") == 0) seed = atoi(v);
         else if (strcmp(a, "--duration") == 0) {
-            if (parse_duration_ms(v, &duration_ms) != 0) {
+            int dr = parse_duration_ms(v, &duration_ms);
+            if (dr == -2) {
+                fail("new: --duration %s: give the unit, e.g. %ss", v, v);
+                return EXIT_INVALID;
+            }
+            if (dr != 0) {
                 fail("new: bad duration '%s' (try 120s, 5m)", v);
                 return EXIT_INVALID;
             }
+            duration_given = 1;
         } else {
             fail("new: unknown option '%s' (cngsim help new)", a);
             return EXIT_INVALID;
@@ -948,6 +1176,16 @@ static int cmd_new(int argc, char **argv) {
     }
     if (n < 1 || n > MAX_SIM_NODES || (tp->roles[1] && n < 2)) {
         fail("new: %d nodes: give %s1 to %d", n, tp->roles[1] ? "2 (a server and a client) " : "", MAX_SIM_NODES);
+        return EXIT_INVALID;
+    }
+    /* The bundled udp-server is stock Contiki-NG: its routing table holds
+     * 16 entries (NETSTACK_MAX_ROUTE_ENTRIES), and a 16th client is never
+     * answered -- measured on Sky, CC2538 and nRF52840 images alike. */
+    if (tp->roles[1] && n > RPL_UDP_MAX_NODES) {
+        fail("new: %d nodes: the bundled udp-server answers %d clients (Contiki-NG's "
+             "routing table holds %d routes), so give -n %d or fewer; for a larger "
+             "network build the server with a larger NETSTACK_MAX_ROUTE_ENTRIES",
+             n, RPL_UDP_MAX_NODES - 1, RPL_UDP_MAX_NODES, RPL_UDP_MAX_NODES);
         return EXIT_INVALID;
     }
     if (strcmp(layout, "grid") && strcmp(layout, "line") && strcmp(layout, "circle") &&
@@ -1001,100 +1239,86 @@ static int cmd_new(int argc, char **argv) {
                  tp->images[r], board, tp->name, have);
             return EXIT_INVALID;
         }
-        path_from(outdir, img, fw[r], sizeof(fw[r]));
+        /* Bundled firmware is named by its absolute path, so the setup
+         * still runs after it is moved; only the user's own files are
+         * worth naming relative to the setup. */
+        if (!realpath(img, fw[r])) snprintf(fw[r], sizeof(fw[r]), "%s", img);
     }
 
-    int clients = tp->roles[1] ? n - 1 : n;
-    int columns = (int)ceil(sqrt((double)(clients > 0 ? clients : 1)));
-    double range = spacing * 1.5;
-    FILE *f = fopen(outp, "w");
-    if (!f) {
-        fail("new: cannot write %s: %s", outp, strerror(errno));
+    new_spec_t sp = {
+        .tp = tp, .board = board, .layout = layout, .outp = outp, .fw = fw,
+        .n = n, .seed = seed, .duration_ms = duration_ms, .spacing = spacing,
+    };
+    sp.clients = tp->roles[1] ? n - 1 : n;
+    sp.columns = (int)ceil(sqrt((double)(sp.clients > 0 ? sp.clients : 1)));
+    sp.range = spacing * 1.5;
+    /* circle: evenly spaced round the server, but never farther from it
+     * than the radio reaches (from 11 nodes up spacing*clients/2pi would
+     * be); without a server the ring itself carries the traffic. */
+    sp.radius = spacing * sp.clients / (2.0 * M_PI);
+    if (sp.radius < spacing) sp.radius = spacing;
+    if (tp->roles[1] && sp.radius > 0.95 * sp.range) sp.radius = 0.95 * sp.range;
+    sp.side = round(spacing * sqrt((double)sp.clients) * 10) / 10;
+
+    /* Built in a temporary file next to the output and renamed into place
+     * once it loads, so a failure never leaves a partial setup behind. */
+    char tmp[PATH_MAX + 32];
+    snprintf(tmp, sizeof(tmp), "%s/.cngsim-new-XXXXXX.yaml", outdir);
+    int tfd = mkstemps(tmp, 5);
+    if (tfd < 0) {
+        fail("new: cannot write in %s: %s", outdir, strerror(errno));
         return EXIT_INVALID;
     }
-    fprintf(f, "# %c%s.\n", toupper((unsigned char)tp->blurb[0]), tp->blurb + 1);
-    fprintf(f, "# Written by: cngsim new %s --board %s -n %d --layout %s\n", tp->name, board, n, layout);
-    fprintf(f, "# Run it:   cngsim run %s\n# Watch it: cngsim run %s --ui\n\n", outp, outp);
-    char kv[128];
-#define KV(comment, ...) do { snprintf(kv, sizeof(kv), __VA_ARGS__); \
-        fprintf(f, "%-26s# %s\n", kv, comment); } while (0)
-    fprintf(f, "version: 2\n");
-    fprintf(f, "title: \"%s on %s, %d node%s (%s)\"\n", tp->name, board, n, n == 1 ? "" : "s", layout);
-    KV("how long to simulate (simulated time, ms)", "timeout_ms: %ld", duration_ms);
-    KV("the same seed gives the same run; change it for another", "seed: %d", seed);
-    KV("nodes boot at random times within the first second", "startup_delay_ms: 1000");
-    fprintf(f, "\nmedium:\n");
-    KV("unit-disk graph, as in Cooja: within range means received", "  type: udgm");
-    KV("radio range, metres", "  tx_range: %g", range);
-    KV("a sender this close disturbs reception", "  interference_range: %g", range * 2);
-#undef KV
-    fprintf(f, "\n");
-    fprintf(f, "# The firmware the nodes run, one entry per image.  Paths are relative to\n");
-    fprintf(f, "# this file.  An image not named <app>.<board> (an .elf, .nrf, .simplelink)\n");
-    fprintf(f, "# also needs  board: <name>  (cngsim boards lists them).\n");
-    fprintf(f, "mote_types:\n");
-    for (int r = 0; r < 2 && tp->roles[r]; r++)
-        fprintf(f, "  - { name: %s, firmware: %s }\n", tp->roles[r], fw[r]);
-    fprintf(f, "\n# Positions in metres.  One entry can place many nodes: count + layout\n");
-    fprintf(f, "# (grid: columns, spacing; line: spacing; circle: radius; random: width,\n");
-    fprintf(f, "# height), starting at x, y.  Or list nodes one by one with an id, x and y.\n");
-    fprintf(f, "nodes:\n");
-    const char *role = tp->roles[1] ? tp->roles[1] : tp->roles[0];
-    double x0 = 0;
-    int first_id = 1;
-    if (tp->roles[1]) {
-        fprintf(f, "  - { type: %s, id: 1, x: 0, y: 0 }\n", tp->roles[0]);
-        x0 = spacing;
-        first_id = 2;
-    }
-    if (strcmp(layout, "grid") == 0)
-        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: grid, columns: %d, spacing: %g, x: %g, y: 0 }\n",
-                role, first_id, clients, columns, spacing, x0);
-    else if (strcmp(layout, "line") == 0)
-        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: line, spacing: %g, x: %g, y: 0 }\n",
-                role, first_id, clients, spacing, x0);
-    else if (strcmp(layout, "circle") == 0) {
-        double r = spacing * clients / (2.0 * M_PI);
-        if (r < spacing) r = spacing;
-        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: circle, radius: %g, x: 0, y: 0 }\n",
-                role, first_id, clients, round(r * 10) / 10);
-    } else {
-        double side = round(spacing * sqrt((double)clients) * 10) / 10;
-        fprintf(f, "  - { type: %s, id: %d, count: %d, layout: random, width: %g, height: %g, x: 0, y: 0 }\n",
-                role, first_id, clients, side, side);
-    }
-    fclose(f);
+    close(tfd);
 
-    /* The check waits for the node farthest from node 1: placed by the
-     * loader, so load what was written. */
+    /* Place the nodes, load what was written (the loader expands layouts),
+     * and check every node has a radio path to node 1.  A random scatter
+     * that leaves one out is drawn again in a smaller square: the same
+     * draws, scaled, so it always ends up connected. */
     static sim_normalized_config_t cfg;
-    if (sim_config_load(&cfg, outp) != 0) {
-        fail("new: wrote %s, but it does not load (a bug: please report it)", outp);
-        return EXIT_INVALID;
+    int far = 0, hops = 0;
+    for (int attempt = 0; attempt < 40; attempt++) {
+        if (write_setup(tmp, &sp, 0) != 0 || sim_config_load(&cfg, tmp) != 0) {
+            unlink(tmp);
+            fail("new: the setup for %s does not load (a bug: please report it)", outp);
+            return EXIT_INVALID;
+        }
+        hops = tp->expect_radio ? hops_to_node1(&cfg, sp.range) : 0;
+        far = farthest_from_node1(&cfg, tp->roles[1] != NULL);
+        sim_config_free(&cfg);
+        if (hops >= 0 || strcmp(layout, "random") != 0) break;
+        sp.side = round(sp.side * 0.9 * 10) / 10;
     }
-    int far = cfg.nodes[cfg.node_count - 1].id;
-    double best = -1;
-    for (int k = tp->roles[1] ? 1 : 0; k < cfg.node_count; k++) {
-        double dx = cfg.nodes[k].x - cfg.nodes[0].x, dy = cfg.nodes[k].y - cfg.nodes[0].y;
-        double d = dx * dx + dy * dy;
-        if (d > best) { best = d; far = cfg.nodes[k].id; }
+    if (hops < 0)
+        fprintf(stderr, "cngsim: warning: in this layout not every node has a radio "
+                "path to node 1; try a smaller --spacing or another layout\n");
+    /* RPL needs time per hop before the farthest client is answered:
+     * measured on the bundled Sky images, a line of 7 hops passes at 119 s
+     * and one of 15 at 250 s.  Unless asked for a duration, give it
+     * 60 s + 20 s a hop, and never less than the 120 s default. */
+    if (tp->roles[1] && hops > 0) {
+        long need_ms = (60 + 20L * hops) * 1000;
+        if (!duration_given && need_ms > sp.duration_ms)
+            sp.duration_ms = need_ms;
+        else if (duration_given && need_ms > sp.duration_ms)
+            fprintf(stderr, "cngsim: warning: the farthest client is %d hops from the "
+                    "server; %ld s may be too short for it to be answered (about %ld s "
+                    "is enough)\n", hops, sp.duration_ms / 1000, need_ms / 1000);
+    }
+    if (write_setup(tmp, &sp, far) != 0 || sim_config_load(&cfg, tmp) != 0) {
+        unlink(tmp);
+        fail("new: the setup for %s does not load (a bug: please report it)", outp);
+        return EXIT_INVALID;
     }
     sim_config_free(&cfg);
-    f = fopen(outp, "a");
-    if (!f) {
+    if (rename(tmp, outp) != 0) {
         fail("new: cannot write %s: %s", outp, strerror(errno));
+        unlink(tmp);
         return EXIT_INVALID;
     }
-    fprintf(f, "\n# Checks.  The run passes when every step is seen, in order, and exits\n");
-    fprintf(f, "# with 0; otherwise with 1.  test-format.md has more (validators, fail_on,\n");
-    fprintf(f, "# Cooja JavaScript test scripts).\n");
-    fprintf(f, "test:\n  steps:\n");
-    fprintf(f, "    - { wait: \"%s\", node: %d }%s\n", tp->expect, far,
-            tp->roles[1] ? "   # the farthest client got an answer" : "");
-    fclose(f);
 
     printf("Wrote %s: %d %s node%s, %s layout, %g m radio range.\n", outp, n, board,
-           n == 1 ? "" : "s", layout, range);
+           n == 1 ? "" : "s", layout, sp.range);
     printf("  Run it:   cngsim run %s\n  Watch it: cngsim run %s --ui\n", outp, outp);
     (void)asked;
     return 0;
@@ -1134,21 +1358,33 @@ static int cmd_convert(int argc, char **argv) {
         fail("convert: %s not found (set CNGSIM_DATA)", script);
         return EXIT_INVALID;
     }
+    /* The converter writes its JSON to stdout, here a fresh file from
+     * mkstemp (never a predictable name), and its errors to the terminal. */
     char tmp[PATH_MAX];
     const char *td = getenv("TMPDIR");
-    snprintf(tmp, sizeof(tmp), "%s/cngsim-convert-%d.json", td && *td ? td : "/tmp", (int)getpid());
+    snprintf(tmp, sizeof(tmp), "%s/cngsim-convert-XXXXXX.json", td && *td ? td : "/tmp");
+    int tfd = mkstemps(tmp, 5);
+    if (tfd < 0) {
+        fail("convert: no temporary file: %s", strerror(errno));
+        return EXIT_INVALID;
+    }
     char *pargv[48];
     int pn = 0;
     pargv[pn++] = "python3";
     pargv[pn++] = script;
     pargv[pn++] = (char *)in;
     pargv[pn++] = "--js-native";
-    pargv[pn++] = "-o";
-    pargv[pn++] = tmp;
     for (int i = 0; i < nextra; i++) pargv[pn++] = extra[i];
     pargv[pn] = NULL;
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, tfd, STDOUT_FILENO);
     pid_t pid;
-    if (posix_spawnp(&pid, "python3", NULL, NULL, pargv, environ) != 0) {
+    int sp_rc = posix_spawnp(&pid, "python3", &fa, NULL, pargv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    close(tfd);
+    if (sp_rc != 0) {
+        unlink(tmp);
         fail("convert: needs python3 on PATH");
         return EXIT_INVALID;
     }
@@ -1171,10 +1407,42 @@ static int cmd_convert(int argc, char **argv) {
     char hdr[PATH_MAX + 64];
     snprintf(hdr, sizeof(hdr), "converted from %s by cngsim %s", in, CSIM_VERSION);
     rc = sim_config_write_yaml(&cfg, f, hdr);
-    fclose(f);
+    if (fclose(f) != 0) rc = -1;
+    if (rc != 0) {
+        sim_config_free(&cfg);
+        return EXIT_INVALID;
+    }
+    /* The firmware a .csc names is built from Contiki-NG sources, often not
+     * yet: say which images run needs first, rather than "run it". */
+    char outdir[PATH_MAX];
+    snprintf(outdir, sizeof(outdir), "%s", out);
+    char *sl = strrchr(outdir, '/');
+    if (sl) *sl = '\0'; else snprintf(outdir, sizeof(outdir), ".");
+    int missing = 0;
+    for (int i = 0; i < cfg.node_count; i++) {
+        const char *fw = cfg.nodes[i].firmware;
+        if (!fw[0]) continue;
+        const sim_board_desc_t *b = sim_board_for_path(fw);
+        if (b && (b->kind == SIM_BOARD_KIND_RENODE || b->kind == SIM_BOARD_KIND_EXTERNAL ||
+                  b->kind == SIM_BOARD_KIND_JS))
+            continue;
+        char at[PATH_MAX * 2];
+        if (fw[0] == '/') snprintf(at, sizeof(at), "%s", fw);
+        else snprintf(at, sizeof(at), "%s/%s", outdir, fw);
+        int dup = 0;
+        for (int j = 0; j < i; j++)
+            if (strcmp(cfg.nodes[j].firmware, fw) == 0) dup = 1;
+        if (dup || is_file(at) || (fw[0] != '/' && is_file(fw))) continue;
+        if (!missing++)
+            printf("Wrote %s.  It needs firmware that is not built yet:\n", out);
+        printf("  %s\n", at);
+    }
     sim_config_free(&cfg);
-    if (rc != 0) return EXIT_INVALID;
-    printf("Wrote %s.  Run it: cngsim run %s\n", out, out);
+    if (missing)
+        printf("Build %s (docs/contiki-ng-testing.md), then: cngsim run %s\n",
+               missing == 1 ? "it" : "them", out);
+    else
+        printf("Wrote %s.  Run it: cngsim run %s\n", out, out);
     return 0;
 }
 
@@ -1193,7 +1461,8 @@ static void help(FILE *f) {
         "  cngsim help [command] | --version\n"
         "\n"
         "Start with:  cngsim examples   then   cngsim run <example> --ui\n"
-        "Exit codes:  0 pass, 1 a check failed, 2 bad input, 6 wall-clock timeout, 7 cancelled\n"
+        "Exit codes:  0 pass, 1 a check failed, 2 bad input, 6 wall-clock timeout,\n"
+        "             7 cancelled (through the protocol), 130 interrupted (Ctrl-C)\n"
         "Guide:       docs/quick-start.md\n", CSIM_VERSION);
 }
 
@@ -1209,7 +1478,7 @@ static void help_run(void) {
         "                        opens paused, at real time; --start runs at once,\n"
         "                        --no-open does not open the browser\n"
         "  --ui-edit             allow adding/removing nodes from a UI on --ui-bind\n"
-        "  --duration 60s        simulated time (also 500ms, 2m; a bare number is ms)\n"
+        "  --duration 60s, -t    simulated time, with its unit: 60s, 500ms, 2m\n"
         "  --seed N              another run, as reproducible as the first\n"
         "  --speed N|max|realtime  pacing (headless runs are unpaced)\n"
         "  --shell               interactive command line (docs/shell.md)\n"
@@ -1220,6 +1489,8 @@ static void help_run(void) {
         "  --plugin LIB.so       load a plugin (service or radio medium)\n"
         "  --wall-timeout DUR    give up after this much real time (exit 6)\n"
         "  -n N                  with firmware files: the number of nodes\n"
+        "  --board NAME          with firmware files: the board they run on, for an\n"
+        "                        image not named <app>.<board> (cngsim boards)\n"
         "  -q / -v               the verdict only / everything (test_runner's output)\n"
         "  --trace radio|boot|stats|all   add the developer output, by kind\n");
 }
@@ -1232,10 +1503,12 @@ static void help_new(void) {
         "With no arguments on a terminal, it asks.\n"
         "\n"
         "  --board NAME        the board (default sky; cngsim boards lists them)\n"
-        "  -n N                the number of nodes (default 4)\n"
+        "  -n N                the number of nodes (default 4; rpl-udp takes up to 16,\n"
+        "                      as many as the bundled server answers)\n"
         "  --layout L          grid, line, circle or random (default grid)\n"
         "  --spacing M         metres between nodes (default 30; the range is 1.5x)\n"
-        "  --duration D        simulated time (default 120s)\n"
+        "  --duration D        simulated time, with its unit (default 120s, longer\n"
+        "                      for an RPL network many hops deep)\n"
         "  --seed N            (default 42)\n"
         "  -o FILE             (default sim.yaml; --force overwrites)\n");
 }
@@ -1257,6 +1530,12 @@ static int cmd_help(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    /* Line-buffered from the start: `run` points fd 1 at a pipe to its
+     * output filter, where stdio would otherwise buffer whole blocks and the
+     * consoles would arrive in bursts.  setvbuf is only defined before the
+     * stream's first use, so it is set here, not when the pipe goes in;
+     * the FILE keeps its mode across the dup2. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
     snprintf(g_argv0, sizeof(g_argv0), "%s", argv[0]);
     if (argc < 2) {
         help(stderr);

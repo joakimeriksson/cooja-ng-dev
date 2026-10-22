@@ -17,6 +17,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `--help` prints the usage, now listing every mode and option.
 - **More than 16 mote types, or more nodes than the limit, is a load
   error.**  Mote types beyond 8 used to be dropped without a word.
+- **Two nodes with the same id is a load error**, including an explicit id
+  equal to the one an unnumbered node is given.  They used to share an
+  address and a console label.
 - **Warnings are errors.** The build is warning-free on gcc 13–15 and
   clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
   compiler that reports something new. The vendored QuickJS header is a
@@ -33,7 +36,12 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `check` validates one, `examples` and `boards` list what there is, and
   `convert` takes a Cooja `.csc`.  It runs the same simulation as
   `test_runner test` (CI compares their console lines and exit codes),
-  which stays the developer and CI binary.
+  which stays the developer and CI binary.  Its durations take a unit
+  (`--duration 60s`, `500ms`), and Ctrl-C ends a run with `INTERRUPTED`,
+  how far it got, and exit 130.  `new` places every node within radio
+  reach of node 1 and gives an RPL network time for its depth; the bundled
+  `udp-server` answers 15 clients (Contiki-NG's 16-route table), so
+  `new rpl-udp` takes up to 16 nodes.
 - **Edit a running simulation in the web UI**: add nodes of the setup's
   mote types, remove and reboot nodes, send a line to a node's console,
   and save the setup as YAML.  On by default on a loopback UI; a UI on
@@ -42,7 +50,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **Layouts**: a node entry with `count` and `layout` (`grid`, `line`,
   `circle`, `random`) places many nodes, as Cooja's Add-motes dialog does.
 - **`board:` on a mote type** names the board, so Contiki-NG's `.nrf`,
-  `.simplelink` and `.zoul` images, or any `.elf`, run without renaming.
+  `.simplelink` and `.zoul` images, or any `.elf`, run without renaming;
+  on a `.nrf52840` image it picks the board variant (`nrf52840-dongle`).
+  `--board NAME` does the same for images given on the command line.
 - **Firmware paths are relative to the config file** (falling back to the
   current directory, as before), so a setup and its firmware can live
   anywhere.
@@ -72,6 +82,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   (`firmware/cc1312r7-launchpad/PROVENANCE.md`).
 
 ### Fixed
+- **A UI Restart of a run with checks** carried the first run's verdict
+  into the second, which then ended the moment it started.  The checks
+  start over with the simulation.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.

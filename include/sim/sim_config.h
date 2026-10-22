@@ -162,6 +162,11 @@ typedef struct {
     char js_script_path[512];       /* path to .js file */
     char *js_script_inline;         /* inline script (malloc'd, or NULL) */
 
+    /* The first file the config names that was found only relative to the
+     * current directory, not to the config's ("" = none).  cngsim warns
+     * about it: such a setup breaks when it is run from somewhere else. */
+    char cwd_fallback[256];
+
     /* Mote types (for getMoteTypes()[index] mapping).  The legacy
      * index-keyed firmware table is read by TEST_ACTION_ADD at runtime; the
      * v2 parser writes both it and the richer mote_types[] table below. */

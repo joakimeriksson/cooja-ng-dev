@@ -6,9 +6,12 @@
 #      `test_runner test X` (cngsim only changes what reaches the terminal).
 #   2. The examples run by name from another directory and pass.
 #   3. `cngsim new` writes a setup for each template that `cngsim check`
-#      accepts and that runs and passes.
+#      accepts and that runs and passes -- up to 16 nodes in every layout,
+#      still after it is moved, and with every default taken on a terminal.
 #   4. Bad input fails with exit 2 and says why: an unknown command, an
-#      unknown example, an image with no board.
+#      unknown example, an image with no board, a duration without a unit,
+#      checks that name a node the setup does not have.
+#   5. Ctrl-C ends a run with exit 130 and INTERRUPTED, not a failed check.
 #
 # Usage: tools/check-cngsim.sh   (after make; run from the repo root)
 set -u
@@ -72,6 +75,41 @@ for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "nullnet sky 4 cir
     out=$("$CNGSIM" run "$f" -q 2>&1) && ok "new $spec: $out" || bad "new $spec: $out"
 done
 
+echo "== cngsim new: layouts that reach node 1, a moved setup, the defaults"
+# From 11 nodes up the circle's radius used to exceed the radio range.
+for spec in "12 circle" "16 line" "16 random" "16 grid"; do
+    set -- $spec
+    f="$WORK/new/big-$2.yaml"
+    "$CNGSIM" new rpl-udp -n "$1" --layout "$2" -o "$f" >/dev/null 2>&1 \
+        && out=$("$CNGSIM" run "$f" -q 2>&1) && ok "new rpl-udp -n $1 $2: $out" \
+        || bad "new rpl-udp -n $1 $2: ${out:-not written}"
+done
+mkdir -p "$WORK/elsewhere"
+mv "$WORK/new/big-circle.yaml" "$WORK/elsewhere/"
+(cd / && "$CNGSIM" run "$WORK/elsewhere/big-circle.yaml" -q >/dev/null 2>&1) \
+    && ok "a setup from new runs after it is moved" || bad "a setup from new runs after it is moved"
+# Enter at every prompt takes the bracketed defaults (the default used to be
+# wiped by the answer it shared a buffer with).
+python3 - "$CNGSIM" "$WORK/tty" <<'PY' && ok "new on a terminal: Enter takes the defaults" \
+    || bad "new on a terminal: Enter takes the defaults"
+import os, pty, sys, time
+os.makedirs(sys.argv[2], exist_ok=True)
+pid, fd = pty.fork()
+if pid == 0:
+    os.chdir(sys.argv[2])
+    os.execv(sys.argv[1], [sys.argv[1], 'new'])
+for _ in range(5):
+    time.sleep(0.3)
+    os.write(fd, b'\n')
+try:
+    while os.read(fd, 4096):
+        pass
+except OSError:
+    pass
+_, st = os.waitpid(pid, 0)
+sys.exit(0 if st == 0 and os.path.exists(os.path.join(sys.argv[2], 'sim.yaml')) else 1)
+PY
+
 echo "== bad input exits 2 and says why"
 expect2() {   # label, command...
     label=$1; shift
@@ -88,6 +126,34 @@ expect2 "test_runner: unknown mode" "$RUNNER" frobnicate
 sed 's/name: a,/name: a, board: sky,/' "$WORK/noboard.yaml" > "$WORK/board.yaml"
 "$CNGSIM" run "$WORK/board.yaml" --duration 1s -q >/dev/null 2>&1 \
     && ok "the same .elf with board: sky runs" || bad "the same .elf with board: sky runs"
+expect2 "an .elf on the command line with no --board" "$CNGSIM" run "$WORK/hello.elf" --duration 1s
+"$CNGSIM" run "$WORK/hello.elf" --board sky --duration 1s -q >/dev/null 2>&1 \
+    && ok "the .elf with --board sky runs" || bad "the .elf with --board sky runs"
+cp "$ROOT/firmware/nrf52840-dongle/hello-world.nrf52840-dongle" "$WORK/hello.nrf52840"
+printf 'version: 2\nmote_types:\n  - { name: a, board: nrf52840-dongle, firmware: hello.nrf52840 }\nnodes:\n  - { type: a, id: 1 }\n' \
+    > "$WORK/dongle.yaml"
+"$CNGSIM" run "$WORK/dongle.yaml" --duration 1s -q >/dev/null 2>&1 \
+    && ok "board: nrf52840-dongle on a .nrf52840 image" || bad "board: nrf52840-dongle on a .nrf52840 image"
+expect2 "a duration without a unit" "$CNGSIM" run hello-sky -t 10
+expect2 "rpl-udp with more nodes than the server answers" "$CNGSIM" new rpl-udp -n 17 -o "$WORK/x.yaml"
+sed 's/node: 17 }/node: 77 }/' "$ROOT/examples/grid-sky.yaml" > "$ROOT/examples/.check-n77.yaml"
+expect2 "check: a step names a node the setup does not have" "$CNGSIM" check "$ROOT/examples/.check-n77.yaml"
+rm -f "$ROOT/examples/.check-n77.yaml"
+printf '{ "nodes": [ { "firmware": "%s" }, { "firmware": "%s/missing.sky" } ],\n  "mote_types": [ { "firmware": "%s" } ] }\n' \
+    "$ROOT/firmware/sky/hello-world.sky" "$WORK" "$ROOT/firmware/sky/hello-world.sky" > "$WORK/v1.json"
+expect2 "check: a v1 setup with mote_types and a missing image" "$CNGSIM" check "$WORK/v1.json"
+
+echo "== Ctrl-C is an interruption, not a failed check"
+"$CNGSIM" run rpl-udp-sky --duration 3000s --speed 1 > "$WORK/int.out" 2>&1 &
+pid=$!
+sleep 3
+kill -INT "$pid"
+wait "$pid"; rc=$?
+if [ "$rc" = 130 ] && grep -q '^INTERRUPTED' "$WORK/int.out"; then
+    ok "exit 130: $(tail -1 "$WORK/int.out")"
+else
+    bad "Ctrl-C: exit $rc, '$(tail -1 "$WORK/int.out")'"
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "check-cngsim: OK"; else echo "check-cngsim: $fails failed"; fi
