@@ -803,15 +803,48 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     requestAnimationFrame(replayTick);
   }
 
+  // ?wasm=SCENARIO: the simulator runs in this tab, compiled to WebAssembly
+  // in a Web Worker (experiments/browser-wasm).  The worker carries the same
+  // stream and commands as the WebSocket, so it stands in for one.
+  const wasmScenario = new URLSearchParams(window.location.search).get('wasm');
+  class WorkerSocket {
+    constructor(scenario) {
+      this.readyState = 0;
+      this.binaryType = 'arraybuffer';
+      this.worker = new Worker('worker.js');
+      this.worker.onmessage = (e) => {
+        const m = e.data;
+        if (m.ready) { this.readyState = 1; if (this.onopen) this.onopen(); }
+        else if (m.text !== undefined) { if (this.onmessage) this.onmessage({data: m.text}); }
+        else if (m.binary) { if (this.onmessage) this.onmessage({data: m.binary}); }
+        else if (m.log !== undefined) console.log('[csim]', m.log);
+        else if (m.error) { console.error('[csim]', m.error); this.close(); }
+      };
+      this.worker.onerror = (e) => { console.error('[csim]', e.message); this.close(); };
+      const extra = new URLSearchParams(window.location.search).getAll('arg');
+      this.worker.postMessage({type: 'start', scenario, extra});
+    }
+    send(s) { this.worker.postMessage({type: 'ws', data: s}); }
+    close() {
+      if (this.readyState === 3) return;
+      this.readyState = 3;
+      this.worker.terminate();
+      if (this.onclose) this.onclose();
+    }
+  }
+
   function connect() {
     const loc = window.location;
-    ws = new WebSocket('ws://' + loc.host + '/ws');
+    ws = wasmScenario ? new WorkerSocket(wasmScenario)
+                      : new WebSocket('ws://' + loc.host + '/ws');
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
-      connDot.className = 'connected'; connDot.title = 'Connected';
+      connDot.className = 'connected'; connDot.title = wasmScenario ? 'Running in this browser' : 'Connected';
       ws.send(JSON.stringify({cmd: 'full'}));
     };
-    ws.onclose = () => { connDot.className = ''; connDot.title = 'Disconnected'; setTimeout(connect, 2000); };
+    // A worker that stopped does not come back by itself: reconnecting would
+    // start the scenario over.
+    ws.onclose = () => { connDot.className = ''; connDot.title = 'Disconnected'; if (!wasmScenario) setTimeout(connect, 2000); };
     ws.onerror = () => ws.close();
     ws.onmessage = (ev) => {
       try {
