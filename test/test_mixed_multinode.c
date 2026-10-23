@@ -3068,6 +3068,7 @@ sim_restart:
      * never comes — into a clean exit instead of a stuck process.  It
      * never influences the simulation: it only ends the run. */
     bool wall_timeout_hit = false;
+    bool ui_test_verdict_noted = false;   /* --ui: the verdict, said once */
 
     int ss_has_command = sim_external_command_launched(&external_cmd);
     int64_t clock_quantum_end = INT64_MIN;   /* end of the master's current quantum */
@@ -3395,8 +3396,19 @@ sim_restart:
 
         /* Test engine: check per-step timeout (M35: json_test service) */
         json_test_check_step_timeout(&json_test_svc, sim_ns, sim_ms);
-        if (json_test_finished(&json_test_svc))
-            break;
+        if (json_test_finished(&json_test_svc)) {
+            /* With the web UI the verdict does not end the run, as -t does
+             * not: the viewer keeps the network until the UI ends it (close,
+             * restart, --wall-timeout).  The report still comes at the end. */
+            if (!ui_service_active(&ui_svc))
+                break;
+            if (!ui_test_verdict_noted) {
+                ui_test_verdict_noted = true;
+                printf("  --ui: test %s at %lld ms; the run continues\n",
+                       json_test_finished(&json_test_svc) > 0 ? "passed" : "failed",
+                       (long long)(sim_ns / MS_TO_NS));
+            }
+        }
 
         /* WebSocket UI: poll and broadcast state (M39: serialization in the
          * websocket_ui service; the runner keeps the broadcast cadence +

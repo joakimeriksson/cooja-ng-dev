@@ -35,6 +35,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `clean` against the compile.
 
 ### Fixed
+- **`--ui`: a config whose test steps finished ended the run**, about two
+  seconds into the TSCH demo, while `-t` already did not. With the web UI
+  on, the verdict is now printed when it is decided and the run continues
+  until the UI ends it; the full report still comes at the end. Headless
+  and `--ui-record` runs are unchanged.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.
