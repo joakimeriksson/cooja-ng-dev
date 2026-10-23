@@ -224,7 +224,7 @@ receiver_radio) explicitly.
 
 ## Backward compatibility
 
-Single-radio platforms (sky, esb, z1, wismote, exp5438, cc430,
+Single-radio platforms (sky, z1,
 cc2538dk, openmote) require zero changes:
 
 - Their chip driver pushes via the same `sim_host_t.radio_set_channel`

@@ -18,9 +18,6 @@ static const sim_board_desc_t boards[] = {
     /* MSP430 family */
     { ".sky",          "sky",             SIM_BOARD_KIND_MSP430, "MSP430/Sky"      },
     { ".z1",           "z1",              SIM_BOARD_KIND_MSP430, "MSP430/Z1"       },
-    { ".esb",          "esb",             SIM_BOARD_KIND_MSP430, "MSP430/ESB"      },
-    { ".wismote",      "wismote",         SIM_BOARD_KIND_MSP430, "MSP430/WisMote"  },
-    { ".exp5438",      "exp5438",         SIM_BOARD_KIND_MSP430, "MSP430/exp5438"  },
     { ".msp430fr5969", "fr5969",          SIM_BOARD_KIND_MSP430, "MSP430/FR5969"   },
     /* ARM family.  (Labels are accurate per board now — the old runner
      * banner said "ARM/CC2538DK" for every ARM board.) */

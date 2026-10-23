@@ -34,6 +34,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   in every file that includes `js_node.h`. `make debug -jN` no longer races
   `clean` against the compile.
 
+### Removed
+- **ESB, WisMote, MSP-EXP5438 and CC430** (`esb`, `wismote`, `exp5438`,
+  `cc430`) and the MSP430F149 and CC430F5137 MCU configs, which only those
+  boards used. Each board was the CPU with LEDs and a console: no radio
+  was modelled (TR1001, CC2520, the CC430's RF1A), Contiki-NG has no port
+  for any of them, and nothing tested them. A `.esb`, `.wismote` or
+  `.exp5438` firmware file now falls back to the Tmote Sky, as any unknown
+  extension does. The MSP430F5437 config stays as the MSP430X core of the
+  CPU tests; no board uses it.
+
 ### Fixed
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
