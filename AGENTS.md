@@ -222,7 +222,7 @@ ACLK is fixed at 32,768 Hz (crystal). SMCLK = DCO / divider.
 | Platform | MCU | CC2420 | Console | Notes |
 |----------|-----|--------|---------|-------|
 | **sky** | MSP430F1611 | Yes | USART1 | Tmote Sky, primary test target |
-| **z1** | MSP430F2617 | No | USART0 | Zolertia Z1 |
+| **z1** | MSP430F2617 | Yes | USART0 | Zolertia Z1 |
 | **cc2538dk** | CC2538 (ARM Cortex-M3) | Yes (on-chip) | UART0 | TI SmartRF06 + CC2538EM |
 
 ## MCU Configurations

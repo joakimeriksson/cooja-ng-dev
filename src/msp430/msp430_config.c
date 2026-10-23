@@ -2,8 +2,6 @@
  * MSP430 MCU configuration definitions
  */
 #include "msp430_config.h"
-#include <string.h>
-#include <ctype.h>
 
 /* MSP430f1611: 16-bit classic, 64KB address space */
 const msp430_config_t msp430f1611_config = {
@@ -213,26 +211,3 @@ const msp430_config_t msp430fr5969_config = {
     },
 };
 
-/* All known MCU configs */
-static const msp430_config_t *all_configs[] = {
-    &msp430f1611_config,
-    &msp430f2617_config,
-    &msp430f5437_config,
-    &msp430fr5969_config,
-    NULL
-};
-
-const msp430_config_t *msp430_config_find(const char *name) {
-    if (!name) return NULL;
-    for (int i = 0; all_configs[i]; i++) {
-        /* Case-insensitive comparison */
-        const char *a = name;
-        const char *b = all_configs[i]->name;
-        while (*a && *b && tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
-            a++;
-            b++;
-        }
-        if (*a == '\0' && *b == '\0') return all_configs[i];
-    }
-    return NULL;
-}
