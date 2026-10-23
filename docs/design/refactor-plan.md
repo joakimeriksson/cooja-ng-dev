@@ -3289,6 +3289,16 @@ the same patch.
   never with `-Wno-...` or `-Wno-error=...` in `CFLAGS`.  Vendored code
   under `lib/` is silenced per directory (`-w` on its objects, `-isystem`
   for its headers), not patched.
+- **With the web UI on, nothing but the UI (or `--wall-timeout`) ends the
+  run.**  Neither `-t` nor a test verdict — JSON steps or a JS script —
+  leaves the main loop while `ui_service_active()`: the verdict is printed
+  once when decided (`--ui: test passed at N ms; the run continues`) and
+  the full report comes at the end.  A UI or shell restart is a new run
+  and re-arms the test; a `--wall-timeout` after the verdict keeps its
+  exit code (only a run cut short before its verdict exits 6).  Headless
+  and `--ui-record` runs end on the verdict exactly as before.  Reason: a
+  viewer (the native page or the browser build's live demos) must not see
+  the network freeze because a test passed.
 
 ## Doc Status
 
