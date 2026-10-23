@@ -30,12 +30,8 @@ jobs:
       - name: Record the demo replays
         run: WALL=900 tools/record-demos.sh _site/demos
       - name: Build the simulator for the browser (WebAssembly)
-        env:
-          EMSDK_VERSION: 6.0.13
         run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
-          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
-          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+          .github/scripts/install-emsdk.sh "$RUNNER_TEMP/emsdk"   # shared with test.yml
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
           make -C experiments/browser-wasm -j"$(nproc)" web check
       - name: Assemble the site

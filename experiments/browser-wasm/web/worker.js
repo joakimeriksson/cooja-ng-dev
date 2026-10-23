@@ -11,12 +11,17 @@
 //   {type: 'start', scenario: '<key in scenarios.json>', extra: [args...]}
 //   {type: 'ws', data: '<JSON command>'}       // what the page would send on a WebSocket
 // Messages to the page:
-//   {ready: true}  {text: '...'}  {binary: ArrayBuffer}  {log: '...'}  {error: '...'}
+//   {ready: true}  {text: '...'}  {binary: ArrayBuffer}  {log: '...'}
+//   {exit: code, tail: '...'}   the runner returned (tail: its last output lines)
+//   {error: '...'}              it could not start, or aborted
+//
+// The page sends commands only after {ready}, so `mod` is always set when
+// one arrives; after the run has ended they are dropped.
 
 importScripts('csim-web.js');
 
 let mod = null;
-const early = [];          // page commands that arrive before the module is up
+let ended = false;
 
 function toModule(s) {
   const bytes = new TextEncoder().encode(s);
@@ -34,19 +39,20 @@ async function fetchBytes(path) {
 
 async function start(key, extra) {
   const scenarios = await (await fetch('scenarios.json')).json();
+  if (!Object.hasOwn(scenarios, key)) throw new Error(`unknown scenario '${key}'`);
   const sc = scenarios[key];
-  if (!sc) throw new Error(`unknown scenario '${key}'`);
   const files = await Promise.all(sc.files.map(async f => [f, await fetchBytes(f)]));
 
   // The runner's stdout/stderr (packet traces, progress) only reach the page
-  // with ?arg=--log; otherwise the last lines are kept for an error report.
+  // with ?arg=--log; the last lines are always kept for the exit report.
   const verbose = (extra || []).includes('--log');
   const tail = [];
-  const keep = s => { tail.push(s); if (tail.length > 40) tail.shift(); };
+  const out = s => { tail.push(s); if (tail.length > 40) tail.shift(); if (verbose) postMessage({ log: s }); };
   mod = await createCsim({
-    print: s => { if (verbose) postMessage({ log: s }); },
-    printErr: s => { if (verbose) postMessage({ log: s }); else keep(s); },
-    onAbort: what => postMessage({ error: `simulator aborted: ${what}\n` + tail.join('\n') }),
+    print: out,
+    printErr: out,
+    onExit: code => { ended = true; postMessage({ exit: code, tail: tail.join('\n') }); },
+    onAbort: what => { ended = true; postMessage({ error: `simulator aborted: ${what}\n` + tail.join('\n') }); },
   });
   mod.FS.mkdir('/sim');
   for (const [f, bytes] of files) {
@@ -57,8 +63,8 @@ async function start(key, extra) {
   mod.FS.chdir('/sim');
 
   postMessage({ ready: true });
-  for (const c of early.splice(0)) toModule(c);
-  // Returns at the first yield; the run continues from the event loop.
+  // Returns at the first yield; the run continues from the event loop, and
+  // onExit reports its end.
   mod.callMain(sc.args.concat(['--ui'], (extra || []).filter(a => a !== '--log')));
 }
 
@@ -66,7 +72,7 @@ onmessage = (e) => {
   const m = e.data;
   if (m.type === 'start') {
     start(m.scenario, m.extra).catch(err => postMessage({ error: String(err && err.message || err) }));
-  } else if (m.type === 'ws') {
-    if (mod) toModule(m.data); else early.push(m.data);
+  } else if (m.type === 'ws' && mod && !ended) {
+    toModule(m.data);
   }
 };

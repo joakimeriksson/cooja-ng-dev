@@ -14,7 +14,11 @@
 
 ROOT := $(abspath ../..)
 
-# The top-level Makefile turns the JIT on when pkg-config finds Lightning.
+# The top-level Makefile, for its source lists and flags only: with
+# CSIM_SOURCES_ONLY it defines no rules, so none of its targets (or its
+# dependency files) leak in here.  It turns the JIT on when pkg-config finds
+# Lightning; the browser build is interpreter only.
+CSIM_SOURCES_ONLY := 1
 override LIGHTNING_CFLAGS :=
 override LIGHTNING_LIBS :=
 include $(ROOT)/Makefile
@@ -35,13 +39,20 @@ VENDOR_SOURCES := $(QUICKJS_SOURCES) $(YAML_SOURCES) $(LINENOISE_SOURCES)
 WASM_OBJECTS := $(patsubst %.c,$(WOUT)/%.o,$(WASM_SOURCES))
 VENDOR_OBJECTS := $(patsubst %.c,$(WOUT)/%.o,$(VENDOR_SOURCES))
 # The browser build swaps the WebSocket server for the worker's message port
-# (src/ws_server_worker.c implements the same ws_server.h); nothing else
-# differs from the CLI build.
-WEB_OBJECTS := $(filter-out $(WOUT)/src/ui/ws_server.o,$(WASM_OBJECTS)) \
+# (src/ws_server_worker.c implements the same ws_server.h), and gives the
+# runner a main that hands its exit code on (src/web_main.c: under ASYNCIFY a
+# returned value is lost).  Nothing else differs from the CLI build.
+WEB_OBJECTS := $(filter-out $(WOUT)/src/ui/ws_server.o $(WOUT)/test/test_main.o,$(WASM_OBJECTS)) \
+               $(WOUT)/web/test/test_main.o \
+               $(WOUT)/experiments/browser-wasm/src/web_main.o \
                $(WOUT)/experiments/browser-wasm/src/ws_server_worker.o
 
+# Include paths made absolute, so that the dependency files name headers
+# that exist from here (relative to the repository root they never do, and
+# every object would always be out of date).
+ABS_INCLUDES := $(foreach w,$(INCLUDES),$(if $(filter -%,$(w)),$(w),$(ROOT)/$(w)))
 WASM_CFLAGS := -O3 $(WARNFLAGS) -std=c11 -ffp-contract=off -D_GNU_SOURCE \
-               $(INCLUDES) -I include/ui -MMD -MP
+               $(ABS_INCLUDES) -MMD -MP
 
 COMMON_LDFLAGS := -lm -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=8MB
 
@@ -54,7 +65,7 @@ CLI_LDFLAGS := $(COMMON_LDFLAGS) -sNODERAWFS=1 -sENVIRONMENT=node \
 # runner loop yields to the worker's event loop (ASYNCIFY) so the page can
 # pause, step and talk to the UI service while it runs.
 WEB_LDFLAGS := $(COMMON_LDFLAGS) -sENVIRONMENT=worker -sMODULARIZE=1 \
-               -sEXPORT_NAME=createCsim -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 \
+               -sEXPORT_NAME=createCsim -sINVOKE_RUN=0 -sEXIT_RUNTIME=1 \
                -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sASYNCIFY_IGNORE_INDIRECT=1 \
                -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_csim_wasm_ui_recv \
                -sEXPORTED_RUNTIME_METHODS=callMain,FS,HEAPU8
@@ -71,19 +82,23 @@ web: $(DIST)/web/csim-web.js $(DIST)/web/player.html $(DIST)/web/worker.js \
 
 $(WOUT)/%.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
-	cd $(ROOT) && $(EMCC) $(WASM_CFLAGS) -c $< -o $@
+	$(EMCC) $(WASM_CFLAGS) -c $< -o $@
+
+$(WOUT)/web/test/test_main.o: $(ROOT)/test/test_main.c
+	@mkdir -p $(dir $@)
+	$(EMCC) $(WASM_CFLAGS) -Dmain=csim_runner_main -c $< -o $@
 
 # Vendored code: built quiet, like the native rules do.  QuickJS tests the
 # pre-2.0 `EMSCRIPTEN` macro; current emcc defines only __EMSCRIPTEN__.
 $(WOUT)/lib/quickjs/%.o: $(ROOT)/lib/quickjs/%.c
 	@mkdir -p $(dir $@)
-	cd $(ROOT) && $(EMCC) -O2 -std=c11 -ffp-contract=off -D_GNU_SOURCE -DEMSCRIPTEN -I lib/quickjs -DCONFIG_VERSION=\"2024-01-13\" -w -c $< -o $@
+	$(EMCC) -O2 -std=c11 -ffp-contract=off -D_GNU_SOURCE -DEMSCRIPTEN -I $(ROOT)/lib/quickjs -DCONFIG_VERSION=\"2024-01-13\" -w -c $< -o $@
 $(WOUT)/lib/yaml/%.o: $(ROOT)/lib/yaml/%.c
 	@mkdir -p $(dir $@)
-	cd $(ROOT) && $(EMCC) -O2 -std=c11 -D_GNU_SOURCE -I lib/yaml $(YAML_DEFS) -w -c $< -o $@
+	$(EMCC) -O2 -std=c11 -D_GNU_SOURCE -I $(ROOT)/lib/yaml $(YAML_DEFS) -w -c $< -o $@
 $(WOUT)/lib/linenoise/%.o: $(ROOT)/lib/linenoise/%.c
 	@mkdir -p $(dir $@)
-	cd $(ROOT) && $(EMCC) -O2 -std=c11 -D_GNU_SOURCE -I lib/linenoise -w -c $< -o $@
+	$(EMCC) -O2 -std=c11 -D_GNU_SOURCE -I $(ROOT)/lib/linenoise -w -c $< -o $@
 
 $(DIST)/csim-cli.js: $(WASM_OBJECTS) $(VENDOR_OBJECTS)
 	@mkdir -p $(dir $@)
@@ -110,8 +125,9 @@ $(DIST)/web/scenarios.json: web/scenarios.json $(addprefix $(ROOT)/,$(SCENARIO_F
 	cd $(ROOT) && for f in $(SCENARIO_FILES); do mkdir -p $(DIST)/web/files/$$(dirname $$f) && cp $$f $(DIST)/web/files/$$f; done
 	cp $< $@
 
-# The web build's objects and ASYNCIFY, run under Node: for measuring what
-# the UI service and the yields cost without a browser in the way.
+# The web build's objects and ASYNCIFY, run under Node: the second parity
+# build (`make check`), and for measuring what the UI service and the yields
+# cost without a browser in the way.
 profile: $(DIST)/csim-ui-node.js
 
 $(DIST)/csim-ui-node.js: $(WEB_OBJECTS) $(VENDOR_OBJECTS)
@@ -120,7 +136,9 @@ $(DIST)/csim-ui-node.js: $(WEB_OBJECTS) $(VENDOR_OBJECTS)
 	    -sEXIT_RUNTIME=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sASYNCIFY_IGNORE_INDIRECT=1 \
 	    --profiling-funcs
 
-check: cli
+# Both builds against native: the plain one, and the page's own objects with
+# ASYNCIFY (csim-ui-node.js), so what is published is what was compared.
+check: cli profile
 	./check-parity.sh
 
 # The landing page with the live build beside it, as the Pages workflow
@@ -139,4 +157,4 @@ serve: site
 clean-wasm:
 	rm -rf $(WOUT) $(DIST)
 
--include $(WASM_OBJECTS:.o=.d)
+-include $(sort $(WASM_OBJECTS:.o=.d) $(WEB_OBJECTS:.o=.d))

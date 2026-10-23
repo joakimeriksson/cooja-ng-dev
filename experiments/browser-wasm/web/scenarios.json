@@ -5,6 +5,10 @@
       "multinode",
       "firmware/sky/hello-world.sky"
     ],
+    "check": [
+      "-t",
+      "60000"
+    ],
     "files": [
       "firmware/sky/hello-world.sky"
     ]
@@ -15,6 +19,10 @@
       "multinode",
       "firmware/sky/udp-server.sky",
       "firmware/sky/udp-client.sky"
+    ],
+    "check": [
+      "-t",
+      "60000"
     ],
     "files": [
       "firmware/sky/udp-server.sky",
@@ -40,6 +48,10 @@
       "test",
       "configs/ui-rpl-udp-grid.json"
     ],
+    "check": [
+      "-t",
+      "60000"
+    ],
     "files": [
       "configs/ui-rpl-udp-grid.json",
       "firmware/cc2538dk/udp-server.cc2538dk",
@@ -51,6 +63,10 @@
     "args": [
       "test",
       "configs/udgm-100node-grid-sky.json"
+    ],
+    "check": [
+      "-t",
+      "20000"
     ],
     "files": [
       "configs/udgm-100node-grid-sky.json",

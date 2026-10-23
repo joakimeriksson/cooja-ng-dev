@@ -33,12 +33,13 @@ console, and `&arg=<flag>` to pass any other runner flag.
 
 ## Two builds
 
-| | `dist/csim-cli.js` | `dist/web/csim-web.js` |
-|---|---|---|
-| Runs in | Node | a Web Worker |
-| Files | the repository's, directly (`NODERAWFS`) | fetched into MEMFS from `files/` |
-| UI | none: a drop-in for `build/test_runner` | `--ui`: the web UI stream, sent to the page by postMessage |
-| Purpose | parity with native (`make check`, CI) | the live page |
+| | `dist/csim-cli.js` | `dist/web/csim-web.js` | `dist/csim-ui-node.js` |
+|---|---|---|---|
+| Runs in | Node | a Web Worker | Node |
+| Objects | the native build's | + `ws_server_worker.c`, `web_main.c` | the same as the page |
+| ASYNCIFY | no | yes | yes |
+| Files | the repository's, directly (`NODERAWFS`) | fetched into MEMFS from `files/` | the repository's, directly |
+| Purpose | parity with native | the live page | parity of what the page runs; profiling |
 
 ## How the page runs a simulation
 
@@ -53,8 +54,13 @@ player.html (ui/index.html)  --postMessage-->  worker.js  -->  csim-web.wasm
 - `src/ws_server_worker.c` implements `include/ui/ws_server.h`, the same
   10-function interface as the native `src/ui/ws_server.c`. Broadcasts become
   `postMessage`, and the page's commands (pause, play, speed, move, restart)
-  come in through `csim_wasm_ui_recv()`. This file is the only C code that
-  differs between the browser build and the native one.
+  come in through `csim_wasm_ui_recv()`.
+- `src/web_main.c` is the page's `main`: the runner's own `main` (built as
+  `csim_runner_main`) is resumed from the event loop after its first yield,
+  so the value it returns would be lost; `web_main` exits with it, and
+  `worker.js` reports it to the page (`{exit, tail}`), which shows why the
+  run stopped. These two files are the only C code that differs from the
+  native build.
 - The runner's main loop already polls the UI service on every pass, so that
   poll is where the simulation hands the worker its event loop back
   (`emscripten_sleep` under ASYNCIFY, at most every 30 ms of wall time). The
@@ -66,15 +72,18 @@ player.html (ui/index.html)  --postMessage-->  worker.js  -->  csim-web.wasm
 ## Parity
 
 `make check` (`check-parity.sh`) runs each scenario with `build/test_runner`
-and with `node dist/csim-cli.js`. It diffs stdout and stderr separately,
-because their interleaving depends on host buffering. Before diffing it drops
-the wall-clock lines `tools/check-determinism.sh` drops. Verified identical,
-including every node's final cycle and instruction counts:
+and with both Node builds: `csim-cli.js`, and `csim-ui-node.js`, which is the
+page's own objects with ASYNCIFY. It diffs stdout and stderr separately,
+because their interleaving depends on host buffering, and compares exit codes.
+Before diffing it drops the wall-clock lines `tools/check-determinism.sh`
+drops (it reads that script's filter). CI runs it on every PR (`test.yml`)
+and before every deploy (`pages.yml`).
 
-- hello-world, timertest, and the two-node UDP pair (Sky);
-- all six site demos: the mixed MSP430 + CC2538 + nRF52840 network, 16 ×
-  CC2538, nRF54L15 TrustZone, nRF52840 TSCH and energest. Run them with
-  `./check-parity.sh test <config>`.
+The scenarios are every entry in `web/scenarios.json`, with its `check`
+arguments (a `-t` bound where the live page runs unbounded), plus timertest:
+a scenario cannot be offered live without being checked. All are identical,
+including every node's final cycle and instruction counts. Check one of your
+own with `./check-parity.sh test <config>`.
 
 Running in 1 ms slices gives the same results as running unbounded natively
 (checked on the UDP pair with `--speed 200`). That is why yielding to the
