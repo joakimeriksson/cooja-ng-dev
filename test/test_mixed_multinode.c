@@ -2516,6 +2516,10 @@ int run_mixed_multinode_test(int argc, char **argv) {
     /* A restart re-creates the configured nodes only; nodes added since
      * (shell `add`, JS addMote) are destroyed with the rest. */
     int base_node_count = node_count;
+    /* The JS engine is set up again below the label on a restart; its
+     * service is attached once (attach does not dedupe, and a second entry
+     * would feed every line to the script twice). */
+    bool js_svc_attached = false;
 
 sim_restart:
     for (int i = 0; i < node_count; i++) {
@@ -2677,9 +2681,10 @@ sim_restart:
                 use_js_engine = true;
                 /* M36: the JS line feed is a service on_event now. */
                 js_test_service_start(&js_test_svc, &js_engine);
-                sim_service_attach(&sim_rt,
-                                   sim_registry_find_service(&g_registry, "js-test"),
-                                   &js_test_svc);
+                if (!js_svc_attached)
+                    js_svc_attached = sim_service_attach(&sim_rt,
+                        sim_registry_find_service(&g_registry, "js-test"),
+                        &js_test_svc) >= 0;
                 /* Use timeout from JS TIMEOUT() call if set, else from config.
                  * Add margin so the sim loop runs past the timeout point,
                  * allowing js_test_check_timeout to fire the callback.
@@ -3415,9 +3420,13 @@ sim_restart:
 
         /* Test engine: check per-step timeout (M35: json_test service) */
         json_test_check_step_timeout(&json_test_svc, sim_ns, sim_ms);
-        if (json_test_finished(&json_test_svc) &&
-            verdict_ends_run(ui_service_active(&ui_svc),
-                             json_test_finished(&json_test_svc),
+        int json_verdict = json_test_finished(&json_test_svc);
+        /* Steps passed but a validator short of its count: the report
+         * will say failed, so the --ui note must too. */
+        if (json_verdict > 0 && !json_test_validators_met(&json_test_svc))
+            json_verdict = -1;
+        if (json_verdict != 0 &&
+            verdict_ends_run(ui_service_active(&ui_svc), json_verdict,
                              &ui_test_verdict_noted, sim_ns))
             break;
 

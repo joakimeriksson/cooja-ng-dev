@@ -52,12 +52,16 @@ one() {
 if [ $# -gt 0 ]; then one "$@"; exit $?; fi
 fail=0
 one multinode firmware/sky/timertest.sky -t 10000 || fail=1
-# Every scenario the site runs live, one per line: its args, then its "check" args.
+# Every scenario the site runs live, one per line: its args, then its "check"
+# args.  Read before the loop: from a process substitution a bad
+# scenarios.json would just mean no scenarios, and a pass.
+list=$(python3 -c '
+import json
+for sc in json.load(open("experiments/browser-wasm/web/scenarios.json")).values():
+    print(" ".join(sc["args"] + sc.get("check", [])))') && [ -n "$list" ] ||
+    { echo "error: could not read the scenarios from web/scenarios.json" >&2; exit 2; }
 while IFS= read -r line; do
     read -r -a args <<< "$line"
     one "${args[@]}" || fail=1
-done < <(python3 -c '
-import json
-for sc in json.load(open("experiments/browser-wasm/web/scenarios.json")).values():
-    print(" ".join(sc["args"] + sc.get("check", [])))')
+done <<< "$list"
 exit $fail

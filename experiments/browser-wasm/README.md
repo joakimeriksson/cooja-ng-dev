@@ -110,6 +110,10 @@ WebAssembly. ARM nodes run on the interpreter only (no JIT in a browser).
   native or Cooja-native motes, no TUN, serial socket, GDB, Renode or shell.
   Their code is linked in, but its host calls fail at runtime; the shipped
   scenarios never make them.
+- No JS-scripted tests (configs with `js_script` or `js_script_inline`):
+  the JS engine runs its script on a thread, and the build has no pthreads.
+  Such a config stops with "Failed to initialize JS test engine" (exit 2),
+  which is this limit, not a divergence. No shipped scenario uses one.
 - One simulation per worker. Restart works in place (the runner's own
   restart); loading another scenario reloads the page.
 - `csim-ui-node.js` (the web build under Node, with function names) is for

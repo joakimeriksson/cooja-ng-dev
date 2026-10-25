@@ -38,11 +38,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **`--ui`: a finished test ended the run**, about two seconds into the
   TSCH demo, while `-t` already did not. With the web UI on, a test verdict
   (JSON steps or a JS script) is now printed when it is decided and the run
-  continues until the UI ends it; the full report still comes at the end. A
-  restart from the UI or the shell re-arms the test instead of keeping the
-  previous run's verdict, and a `--wall-timeout` after the verdict keeps its
-  exit code (it exits 6 only when it cut the test short). Headless and
-  `--ui-record` runs are unchanged.
+  continues until the UI ends it; the full report still comes at the end.
+  Steps that pass with a validator still short of its count print as failed,
+  as the report will say. A restart from the UI or the shell re-arms the test
+  instead of keeping the previous run's verdict, and a `--wall-timeout` after
+  the verdict keeps its exit code (it exits 6 only when it cut the test
+  short). Headless and `--ui-record` runs are unchanged.
+- **A restart fed every console line to a JS test twice.** The JS test
+  service was attached again on each restart, so a script counting messages
+  passed early (at 10.7 s instead of 20.7 s in a three-line count). It is
+  attached once now.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.
