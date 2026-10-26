@@ -316,6 +316,26 @@
           <div class="go"><a href="player.html?replay=demos/energest.json">Play →</a><a class="live" href="player.html?wasm=energest">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/plugin-energest-builtin-v2.json">config ↗</a></div>
         </div>
       </article>
+      <article class="card" data-demo="zephyr">
+        <a class="shot" href="player.html?replay=demos/zephyr.json"><img src="assets/demo-zephyr.jpg" alt="Two motes; the Contiki-NG console lists echoes of 16 to 640 bytes with round-trip times, the Zephyr console logs each reply" loading="lazy"></a>
+        <div class="body">
+          <div class="meta"><span>2 × nRF52840 DK</span><span>Contiki-NG · Zephyr</span></div>
+          <h3>Contiki-NG talks to Zephyr</h3>
+          <p>Zephyr's stock echo_server, unmodified, and a Contiki-NG node that sends it datagrams of 16 to 640 bytes and checks every echo. Neighbor Discovery finds the server; from 128 bytes up each datagram crosses as 6LoWPAN fragments, reassembled by the other OS.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/zephyr.json">Play →</a><a class="live" href="player.html?wasm=zephyr">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-zephyr.json">config ↗</a></div>
+        </div>
+      </article>
+      <article class="card" data-demo="riot">
+        <a class="shot" href="player.html?replay=demos/riot.json"><img src="assets/demo-riot.jpg" alt="Two motes; the Contiki-NG root lists a route to the RIOT node and the messages RIOT sent, the RIOT console shows its shell commands and the replies" loading="lazy"></a>
+        <div class="body">
+          <div class="meta"><span>2 × nRF52840 DK</span><span>Contiki-NG · RIOT</span></div>
+          <h3>RIOT joins a Contiki-NG network</h3>
+          <p>A stock RIOT node, driven from its own shell, joins the RPL network a Contiki-NG node roots, takes its address from the root's prefix, then pings it (300-byte pings go as fragments) and trades UDP messages with it. Two RPL implementations, one DODAG.</p>
+          <p class="stats"></p>
+          <div class="go"><a href="player.html?replay=demos/riot.json">Play →</a><a class="live" href="player.html?wasm=riot">Run it live ▶</a><a class="src" href="https://github.com/mikroverk/cooja-ng/blob/main/configs/interop-contiki-riot.json">config ↗</a></div>
+        </div>
+      </article>
     </div>
     <p class="note">In the player: the scrubber seeks, the slider sets the speed (simulated seconds per second), Timeline shows each mote's radio activity, and the Packets tab decodes every frame. A hidden tab pauses playback until you come back.</p>
   </div>

@@ -1,0 +1,43 @@
+{
+  "title": "Contiki-NG + Zephyr: UDP echo over 6LoWPAN",
+  "description": "A Contiki-NG node (examples/interop/echo-zephyr) sends UDP datagrams of 16 to 640 bytes to Zephyr's stock echo_server sample and checks that the same bytes come back; from 128 bytes up they are 6LoWPAN-fragmented both ways. No routing protocol: the Contiki-NG node takes Zephyr's client address 2001:db8::2 and finds the server 2001:db8::1 with IPv6 Neighbor Discovery.",
+  "timeout_ms": 40000,
+  "radiomedium": {
+    "type": "udgm",
+    "tx_range": 50.0,
+    "interference_range": 100.0
+  },
+  "nodes": [
+    {
+      "firmware": "firmware/nrf52840-dk/echo-zephyr.nrf52840-dk",
+      "id": 1,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "firmware": "firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk",
+      "id": 2,
+      "x": 25,
+      "y": 0
+    }
+  ],
+  "test": {
+    "steps": [
+      {
+        "wait": "Waiting for UDP packets on port 4242",
+        "node": 2,
+        "timeout_ms": 5000
+      },
+      {
+        "wait": "echo 640 B: ok",
+        "node": 1,
+        "timeout_ms": 30000
+      },
+      {
+        "wait": "round 1: 7/7 sizes echoed by Zephyr",
+        "node": 1,
+        "timeout_ms": 1000
+      }
+    ]
+  }
+}

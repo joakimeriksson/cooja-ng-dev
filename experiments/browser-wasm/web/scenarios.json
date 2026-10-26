@@ -109,5 +109,29 @@
       "firmware/sky/udp-server.sky",
       "firmware/sky/udp-client.sky"
     ]
+  },
+  "zephyr": {
+    "title": "Contiki-NG and Zephyr: UDP echo over 6LoWPAN",
+    "args": [
+      "test",
+      "configs/interop-contiki-zephyr.json"
+    ],
+    "files": [
+      "configs/interop-contiki-zephyr.json",
+      "firmware/nrf52840-dk/echo-zephyr.nrf52840-dk",
+      "firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk"
+    ]
+  },
+  "riot": {
+    "title": "Contiki-NG and RIOT: one RPL network",
+    "args": [
+      "test",
+      "configs/interop-contiki-riot.json"
+    ],
+    "files": [
+      "configs/interop-contiki-riot.json",
+      "firmware/nrf52840-dk/riot-root.nrf52840-dk",
+      "firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk"
+    ]
   }
 }

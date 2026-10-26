@@ -114,5 +114,12 @@ The per-mote GDB stub is also available for interactive inspection.
   echo server's own confirmation is what's visible; verify with the
   `Received and replied` log, `Total RF bytes`, and 0 timeouts rather than a
   boot banner.
+- **No 802.15.4 ACKs from Zephyr yet.** `nrf_802154` expects the radio to
+  generate the ACK (Phase 3 of `docs/design/zephyr-802154-plan.md`), and the
+  model does not, so a sender that asks for an ACK retries every frame to a Zephyr
+  node (the frames still arrive).
+  `configs/interop-contiki-zephyr.json` (Contiki-NG to the stock echo_server)
+  works because Contiki-NG's datagrams to the server go out as link-layer
+  broadcast; see `examples/interop/echo-zephyr/echo-zephyr.c`.
 - OpenThread (Thread/mesh on top of 802.15.4) is a further step — see
   `docs/design/zephyr-802154-plan.md` (needs the QSPI settings backend).

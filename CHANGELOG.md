@@ -25,6 +25,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   identity words are read from an LP-CC1312R7. Contiki-NG support is
   contiki-ng/contiki-ng#3285, not merged yet
   (`firmware/cc1312r7-launchpad/PROVENANCE.md`).
+- **Two interop demos on the nRF52840 DK**, on the site and live in the
+  browser. `configs/interop-contiki-zephyr.json`: a Contiki-NG node sends
+  datagrams of 16 to 640 bytes to Zephyr's stock echo_server and checks each
+  echo, found by Neighbor Discovery and 6LoWPAN-fragmented both ways.
+  `configs/interop-contiki-riot.json`: a stock RIOT gnrc_networking node,
+  driven from its shell, joins a Contiki-NG RPL root's DODAG, takes its
+  address from the root's prefix, pings it and trades UDP with it. The
+  Contiki-NG sides are in `examples/interop/`; what each pairing needs (PAN
+  ID, RPL storing mode, link-local traffic because RIOT drops RFC 6553's RPL
+  Option) is in `docs/riot.md` and `docs/zephyr.md`.
 
 ### Changed
 - **Warnings are errors.** The build is warning-free on gcc 13–15 and
@@ -62,6 +72,8 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   that clears ENDRX before it reads the 1-byte buffer (RIOT): the next byte
   was written into the buffer at the ack. It now arrives one byte time
   (10 bits at 115200 baud) later, as on the wire.
+- **Web UI consoles showed terminal codes.** Colours and Zephyr's prompt
+  redraw (cursor left, erase) now render as the text a terminal would show.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.
