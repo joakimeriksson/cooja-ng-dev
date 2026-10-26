@@ -845,7 +845,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   }
 
   // ?wasm=SCENARIO: the simulator runs in this tab, compiled to WebAssembly
-  // in a Web Worker (experiments/browser-wasm).  The worker carries the same
+  // in a Web Worker (wasm/).  The worker carries the same
   // stream and commands as the WebSocket, so it stands in for one.
   const wasmScenario = new URLSearchParams(window.location.search).get('wasm');
   function showRunNotice(text, details, failed) {

@@ -1,14 +1,14 @@
 # Cooja-NG in the browser (WebAssembly)
 
-The simulator, compiled to WebAssembly with Emscripten, running real Contiki-NG
-firmware in a browser tab. It is not a model of Cooja-NG in JavaScript. It is
+The simulator, compiled to WebAssembly with Emscripten, running real Contiki-NG,
+Zephyr and RIOT firmware in a browser tab. It is not a model of Cooja-NG in JavaScript. It is
 the same C code as `build/test_runner`: the event kernel, the MSP430, ARM
 Cortex-M and RISC-V emulators, the radio models, the scenario runner and its
 web UI service. The firmware stays the original ELF (`.sky`, `.nrf52840-dk`,
 …), executed instruction by instruction inside the module.
 
-Experimental and opt-in: nothing here is reachable from the top-level
-`Makefile`, and the native build is unchanged.
+Opt-in: nothing here is reachable from the top-level `Makefile`, and the
+native build is unchanged.
 
 ## Build and run
 
@@ -19,15 +19,15 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 source ~/emsdk/emsdk_env.sh        # emsdk needs Python >= 3.10 (EMSDK_PYTHON=...)
 
 make                               # the native build: check-parity compares against it
-make -C experiments/browser-wasm   # dist/csim-cli.js and dist/web/
-make -C experiments/browser-wasm check   # native vs WebAssembly: must be identical
-make -C experiments/browser-wasm serve   # http://127.0.0.1:8765/  (the site + live demos; PORT=...)
+make -C wasm   # dist/csim-cli.js and dist/web/
+make -C wasm check   # native vs WebAssembly: must be identical
+make -C wasm serve   # http://127.0.0.1:8765/  (the site + live demos; PORT=...)
 ```
 
 Open `http://127.0.0.1:8765/player.html?wasm=grid100`, or use a card's
 **Run it live** link on the landing page. The scenarios are in
 `web/scenarios.json`: `hello`, `udp`, `mixed`, `grid16`, `grid100`, `tsch`,
-`trustzone`, `energest`. Each one gives the runner arguments and the files it
+`trustzone`, `energest`, `zephyr`, `riot`. Each one gives the runner arguments and the files it
 reads. Add `&arg=--log` to see the runner's console output in the browser
 console, and `&arg=<flag>` to pass any other runner flag.
 

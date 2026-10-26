@@ -3299,8 +3299,8 @@ the same patch.
   and `--ui-record` runs end on the verdict exactly as before.  Reason: a
   viewer (the native page or the browser build's live demos) must not see
   the network freeze because a test passed.
-- **The browser build (`experiments/browser-wasm`) is held to native
-  parity.**  `make -C experiments/browser-wasm check` runs every live
+- **The browser build (`wasm/`) is held to native
+  parity.**  `make -C wasm check` runs every live
   scenario (`web/scenarios.json`) on `build/test_runner` and on both WASM
   builds — the plain one and the page's own objects with ASYNCIFY — and
   requires identical output and exit codes; `test.yml` runs it on every

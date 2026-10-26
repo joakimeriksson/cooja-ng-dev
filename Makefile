@@ -261,7 +261,7 @@ ifeq ($(CONTIKI_DIR),)
 endif
 
 # Everything above defines what the simulator is built from; everything below
-# builds it.  Another build of the same sources (experiments/browser-wasm)
+# builds it.  Another build of the same sources (wasm/)
 # sets CSIM_SOURCES_ONLY and includes this file for the lists alone.
 ifndef CSIM_SOURCES_ONLY
 

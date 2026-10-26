@@ -1,9 +1,9 @@
 # Cooja-NG in the browser — the simulator compiled to WebAssembly.
 #
 #   source <emsdk>/emsdk_env.sh
-#   make -C experiments/browser-wasm          # dist/csim-cli.js + dist/web/
-#   make -C experiments/browser-wasm check    # native vs WASM parity
-#   make -C experiments/browser-wasm serve    # the site + live demos on :8765
+#   make -C wasm          # dist/csim-cli.js + dist/web/
+#   make -C wasm check    # native vs WASM parity
+#   make -C wasm serve    # the site + live demos on :8765
 #
 # See README.md.
 #
@@ -12,7 +12,7 @@
 # Makefile so the two builds cannot drift; only the flags differ:
 # interpreter only (no GNU Lightning), no host tuning, no LTO.
 
-ROOT := $(abspath ../..)
+ROOT := $(abspath ..)
 
 # The top-level Makefile, for its source lists and flags only: with
 # CSIM_SOURCES_ONLY it defines no rules, so none of its targets (or its
@@ -44,8 +44,8 @@ VENDOR_OBJECTS := $(patsubst %.c,$(WOUT)/%.o,$(VENDOR_SOURCES))
 # returned value is lost).  Nothing else differs from the CLI build.
 WEB_OBJECTS := $(filter-out $(WOUT)/src/ui/ws_server.o $(WOUT)/test/test_main.o,$(WASM_OBJECTS)) \
                $(WOUT)/web/test/test_main.o \
-               $(WOUT)/experiments/browser-wasm/src/web_main.o \
-               $(WOUT)/experiments/browser-wasm/src/ws_server_worker.o
+               $(WOUT)/wasm/src/web_main.o \
+               $(WOUT)/wasm/src/ws_server_worker.o
 
 # Include paths made absolute, so that the dependency files name headers
 # that exist from here (relative to the repository root they never do, and

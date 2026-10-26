@@ -8,6 +8,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **Cooja-NG in the browser** (`wasm/`): the whole runner compiled to
+  WebAssembly with Emscripten, running in a Web Worker behind the existing
+  web UI, on the original firmware ELFs. Each demo on the site gets a "Run it
+  live" link next to its recording. It is the same C code as the native
+  build, held to it by `make -C wasm check`: every live scenario gives output
+  identical to `build/test_runner`, down to each node's final cycle count,
+  checked on every PR and before every deploy. Interpreter only; no `.so`
+  plugins, TUN, serial socket, GDB, Renode, shell or JS-scripted tests
+  (`wasm/README.md`).
 - **TI CC1352R1 LaunchPad** (`cc1352r1-launchpad`): the CC13x2 SoC on a
   stand-in ROM built from driverlib, and a command-level RF core model in
   both radio modes — sub-GHz proprietary (Contiki's default) and 2.4 GHz

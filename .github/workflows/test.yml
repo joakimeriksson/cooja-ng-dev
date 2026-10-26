@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The simulator compiled to WebAssembly (experiments/browser-wasm), which the
+  # The simulator compiled to WebAssembly (wasm/), which the
   # Pages workflow publishes as the site's live demos.  Built here on every PR
   # so that what only emcc's clang warns about (-Werror) or a WASM build that
   # simulates differently from native fails the PR, not the next deploy.  The
@@ -28,7 +28,7 @@ jobs:
         run: |
           .github/scripts/install-emsdk.sh "$RUNNER_TEMP/emsdk"   # shared with pages.yml
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
-          make -C experiments/browser-wasm -j"$(nproc)" web check
+          make -C wasm -j"$(nproc)" web check
 
   test:
     name: ${{ matrix.label }}

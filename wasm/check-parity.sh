@@ -17,9 +17,9 @@
 #   ./check-parity.sh                 # the default scenarios
 #   ./check-parity.sh <runner args>   # one scenario of your own
 set -u
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 NATIVE=build/test_runner
-BUILDS="${PARITY_BUILDS:-experiments/browser-wasm/dist/csim-cli.js experiments/browser-wasm/dist/csim-ui-node.js}"
+BUILDS="${PARITY_BUILDS:-wasm/dist/csim-cli.js wasm/dist/csim-ui-node.js}"
 [ -x "$NATIVE" ] || { echo "error: $NATIVE not built (run make)" >&2; exit 2; }
 for b in $BUILDS; do
     [ -f "$b" ] || { echo "error: $b not built" >&2; exit 2; }
@@ -57,7 +57,7 @@ one multinode firmware/sky/timertest.sky -t 10000 || fail=1
 # scenarios.json would just mean no scenarios, and a pass.
 list=$(python3 -c '
 import json
-for sc in json.load(open("experiments/browser-wasm/web/scenarios.json")).values():
+for sc in json.load(open("wasm/web/scenarios.json")).values():
     print(" ".join(sc["args"] + sc.get("check", [])))') && [ -n "$list" ] ||
     { echo "error: could not read the scenarios from web/scenarios.json" >&2; exit 2; }
 while IFS= read -r line; do

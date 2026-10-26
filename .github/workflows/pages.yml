@@ -6,7 +6,7 @@ name: pages
 # build instead of being published.
 #
 # The same scenarios also run live in the visitor's browser (player.html?wasm=NAME): the
-# simulator compiled to WebAssembly (experiments/browser-wasm).  It is published only if its
+# simulator compiled to WebAssembly (wasm/).  It is published only if its
 # output is identical to the native build's on the parity scenarios.
 on:
   push:
@@ -33,10 +33,10 @@ jobs:
         run: |
           .github/scripts/install-emsdk.sh "$RUNNER_TEMP/emsdk"   # shared with test.yml
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
-          make -C experiments/browser-wasm -j"$(nproc)" web check
+          make -C wasm -j"$(nproc)" web check
       - name: Assemble the site
         run: |
-          cp -r experiments/browser-wasm/dist/web/. _site/
+          cp -r wasm/dist/web/. _site/
           cp -r site/. _site/
           cp ui/index.html _site/player.html
           v=${GITHUB_SHA::8}

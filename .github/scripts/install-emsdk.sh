@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install and activate the Emscripten SDK that experiments/browser-wasm is
+# Install and activate the Emscripten SDK that wasm/ is
 # built and checked with, into $1 (default: $RUNNER_TEMP/emsdk).  Used by both
 # test.yml (the WASM build and parity on every PR) and pages.yml (the build
 # that is published) so the two cannot drift.  Afterwards:
