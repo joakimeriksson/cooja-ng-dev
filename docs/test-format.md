@@ -139,10 +139,27 @@ nodes:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `firmware` | string | **required** | Path to firmware ELF file |
+| `name` | string | none | Display name in the web UI, shown with the node id ("Node 2 · Zephyr") |
+| `meta` | mapping | none | Facts about the node for the web UI's node card, shown as rows in the order given, see below |
 | `id` | int | auto (index+1) | Node ID, used for MAC address and test step filtering |
 | `x`, `y` | float | 0, 0 | Position in meters (for radio medium) |
 | `clock_deviation` | float | 1.0 | Clock speed factor (Cooja MspClock deviation) |
 | `peripherals` | list | board defaults | Off-SoC SPI chips on this node, see below |
+
+`meta` is free-form: any keys, each value a string or a number, for
+whatever a reader of the demo should know about the node — its OS, its
+role, where its source is.  The simulation never reads it.  Clicking the
+node in the web UI shows the entries in its card; a value that is an
+`http(s)://` URL becomes a link.  At most 8 entries, keys up to 32
+characters, string values up to 128, and 511 bytes in all as JSON; a config
+outside these limits is refused, not trimmed.
+
+```json
+{ "firmware": "firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk",
+  "name": "Zephyr",
+  "meta": { "OS": "Zephyr", "Role": "UDP echo server (stock sample)",
+            "Source": "samples/net/sockets/echo_server" } }
+```
 
 `peripherals` names the SPI chips hanging off the node's SPI masters.
 Leave it out to get the board's own set (nRF54L15-DK: the on-board

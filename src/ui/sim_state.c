@@ -49,6 +49,16 @@ char *sim_state_to_json(const sim_node_info_t *nodes, int node_count,
         cJSON_AddNumberToObject(jnode, "y", nodes[i].y);
         cJSON_AddNumberToObject(jnode, "cycles", (double)nodes[i].cycles);
         cJSON_AddNumberToObject(jnode, "freq", nodes[i].freq_hz);
+        if (nodes[i].name && nodes[i].name[0])
+            cJSON_AddStringToObject(jnode, "name", nodes[i].name);
+        if (nodes[i].board && nodes[i].board[0])
+            cJSON_AddStringToObject(jnode, "board", nodes[i].board);
+        if (nodes[i].firmware && nodes[i].firmware[0])
+            cJSON_AddStringToObject(jnode, "firmware", nodes[i].firmware);
+        if (nodes[i].meta && nodes[i].meta[0]) {
+            cJSON *jmeta = cJSON_Parse(nodes[i].meta);
+            if (jmeta) cJSON_AddItemToObject(jnode, "meta", jmeta);
+        }
 
         if (nodes[i].last_tx_ns > 0)
             cJSON_AddNumberToObject(jnode, "last_tx_ms",

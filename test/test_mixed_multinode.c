@@ -1428,6 +1428,19 @@ static const sim_mote_env_t mixed_mote_env = {
  * run (reboots and timed "add" actions go through init_node too). */
 static const sim_normalized_config_t *node_cfg_src = NULL;
 
+/* The UI's node card: the config's name and meta for the node (configured
+ * nodes only), its board and its firmware file. */
+static void ui_label_node(int i, const char **name, const char **board,
+                          const char **firmware, const char **meta) {
+    if (node_cfg_src && i < node_cfg_src->node_count) {
+        *name = node_cfg_src->nodes[i].name;
+        *meta = node_cfg_src->nodes[i].meta;
+    }
+    if (nodes[i].board) *board = nodes[i].board->label;
+    const char *slash = strrchr(nodes[i].firmware_path, '/');
+    *firmware = slash ? slash + 1 : nodes[i].firmware_path;
+}
+
 static int init_node(int idx, const char *firmware_path,
                      const char *secure_firmware_path, int node_id) {
     mixed_node_t *node = &nodes[idx];
@@ -2482,6 +2495,7 @@ int run_mixed_multinode_test(int argc, char **argv) {
             return SHELL_EXIT_INVALID;
         }
         ui_svc.rt = &sim_rt;   /* plugin UI panels source */
+        ui_svc.label = ui_label_node;
     }
 
     /* --ui-record: the web UI's stream to a file for the browser's replay
@@ -2511,6 +2525,7 @@ int run_mixed_multinode_test(int argc, char **argv) {
                                 &node_count, ui_describe_node, &sim_ctl);
         free(run_json);
         ui_svc.rt = &sim_rt;   /* plugin UI panels source */
+        ui_svc.label = ui_label_node;
     }
 
     /* A restart re-creates the configured nodes only; nodes added since

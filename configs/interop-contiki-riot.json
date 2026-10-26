@@ -10,12 +10,16 @@
   "nodes": [
     {
       "firmware": "firmware/nrf52840-dk/riot-root.nrf52840-dk",
+      "name": "Contiki-NG root",
+      "meta": {"OS": "Contiki-NG", "Role": "RPL root, storing mode", "Source": "examples/interop/riot-root"},
       "id": 1,
       "x": 0,
       "y": 0
     },
     {
       "firmware": "firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk",
+      "name": "RIOT",
+      "meta": {"OS": "RIOT", "Role": "joins the DODAG, driven from its shell", "Source": "examples/networking/gnrc/networking"},
       "id": 2,
       "x": 25,
       "y": 0

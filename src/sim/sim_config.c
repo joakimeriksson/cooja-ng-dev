@@ -28,6 +28,65 @@ static int parse_cs_pin(const char *txt, int *port, int *pin) {
     return 0;
 }
 
+/* Optional display name: shown with the node id in the web UI. */
+static void parse_node_name(cJSON *node_item, sim_node_config_t *n) {
+    cJSON *name = cJSON_GetObjectItemCaseSensitive(node_item, "name");
+    if (cJSON_IsString(name) && name->valuestring)
+        snprintf(n->name, sizeof(n->name), "%s", name->valuestring);
+}
+
+/* Optional "meta": up to NODE_META_MAX entries of short strings or numbers,
+ * kept as compact JSON for the web UI.  Anything else is an error, not
+ * dropped: a config that loads shows what it says. */
+#define NODE_META_MAX       8
+#define NODE_META_MAX_KEY   32
+#define NODE_META_MAX_VALUE 128
+static int parse_node_meta(cJSON *node_item, sim_node_config_t *n, int idx) {
+    cJSON *meta = cJSON_GetObjectItemCaseSensitive(node_item, "meta");
+    if (!meta) return 0;
+    if (!cJSON_IsObject(meta)) {
+        fprintf(stderr, "sim_config: node %d: 'meta' must be a mapping\n", idx);
+        return -1;
+    }
+    int count = 0;
+    cJSON *e;
+    cJSON_ArrayForEach(e, meta) {
+        if (++count > NODE_META_MAX) {
+            fprintf(stderr, "sim_config: node %d: 'meta' has more than %d entries\n",
+                    idx, NODE_META_MAX);
+            return -1;
+        }
+        size_t klen = strlen(e->string);
+        if (klen == 0 || klen > NODE_META_MAX_KEY) {
+            fprintf(stderr, "sim_config: node %d: 'meta' key '%s' must be 1 to %d characters\n",
+                    idx, e->string, NODE_META_MAX_KEY);
+            return -1;
+        }
+        if (cJSON_IsString(e) && strlen(e->valuestring) > NODE_META_MAX_VALUE) {
+            fprintf(stderr, "sim_config: node %d: 'meta.%s' is longer than %d characters\n",
+                    idx, e->string, NODE_META_MAX_VALUE);
+            return -1;
+        }
+        if (!cJSON_IsString(e) && !cJSON_IsNumber(e)) {
+            fprintf(stderr, "sim_config: node %d: 'meta.%s' must be a string or a number\n",
+                    idx, e->string);
+            return -1;
+        }
+    }
+    char *json = cJSON_PrintUnformatted(meta);
+    if (!json) return -1;
+    size_t len = strlen(json);
+    if (len >= sizeof(n->meta)) {
+        fprintf(stderr, "sim_config: node %d: 'meta' is %zu bytes as JSON (at most %zu)\n",
+                idx, len, sizeof(n->meta) - 1);
+        free(json);
+        return -1;
+    }
+    memcpy(n->meta, json, len + 1);
+    free(json);
+    return 0;
+}
+
 static int parse_node_peripherals(cJSON *node_item, sim_node_config_t *n, int idx) {
     cJSON *list = cJSON_GetObjectItemCaseSensitive(node_item, "peripherals");
     if (!list) return 0;
@@ -230,6 +289,10 @@ static int parse_v1(cJSON *root, sim_normalized_config_t *cfg) {
             snprintf(cfg->nodes[count].secure_firmware,
                      sizeof(cfg->nodes[count].secure_firmware),
                      "%s", sfw->valuestring);
+
+        parse_node_name(node_item, &cfg->nodes[count]);
+        if (parse_node_meta(node_item, &cfg->nodes[count], count) != 0)
+            return -1;  /* caller owns cJSON_Delete(root) */
 
         cJSON *id = cJSON_GetObjectItemCaseSensitive(node_item, "id");
         if (cJSON_IsNumber(id)) {
@@ -641,6 +704,9 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
         snprintf(n->type_name, sizeof(n->type_name), "%s", type->valuestring);
         snprintf(n->firmware, sizeof(n->firmware), "%s", mt->firmware);
         snprintf(n->secure_firmware, sizeof(n->secure_firmware), "%s", mt->secure_firmware);
+        parse_node_name(node_item, n);
+        if (parse_node_meta(node_item, n, count) != 0)
+            return -1;
 
         cJSON *id = cJSON_GetObjectItemCaseSensitive(node_item, "id");
         n->id = cJSON_IsNumber(id) ? id->valueint : 0;  /* auto-assign */

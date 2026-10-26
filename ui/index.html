@@ -28,6 +28,18 @@ header h1 { font-size: 14px; color: var(--accent); font-weight: 600; }
 #run-notice.failed { border-color: #f85149; }
 #run-notice pre { margin: 8px 0 0; max-height: 40vh; overflow: auto; font-size: 11px; color: var(--muted); white-space: pre-wrap; }
 #run-notice button { margin-top: 8px; font-family: inherit; font-size: 12px; cursor: pointer; }
+/* Node info card: opened by clicking a node on the canvas. */
+#node-info { position: absolute; z-index: 4; width: 320px; background: var(--header-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+#node-info[hidden] { display: none; }
+#node-info h4 { margin: 0 0 6px; font-size: 12px; color: var(--accent); font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#node-info h4 button { background: none; border: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+#node-info table { border-collapse: collapse; width: 100%; margin-bottom: 6px; }
+#node-info td { padding: 1px 0; vertical-align: top; overflow-wrap: break-word; word-break: break-word; }
+#node-info td:first-child { color: var(--muted); padding-right: 10px; white-space: nowrap; width: 1%; }
+#node-info a { color: var(--accent); text-decoration: none; }
+.node-card.flash { animation: card-flash 1.2s ease-out; }
+@keyframes card-flash { from { background: var(--btn-bg); } to { background: transparent; } }
+.node-name { font-size: 12px; color: var(--text); }
 .zoom-hint { font-size: 10px; color: var(--dim); margin-left: 8px; }
 .main { display: flex; flex: 1; overflow: hidden; }
 .left-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; }
@@ -127,6 +139,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   <div class="left-panel">
     <div id="canvas-wrap"><canvas id="topo"></canvas>
       <div id="run-notice" hidden></div>
+      <div id="node-info" hidden></div>
       <!-- Plugin UI panels: filled generically from {"type":"panels"} frames. -->
       <div id="plugin-panels"></div>
     </div>
@@ -283,24 +296,34 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     if (state) drawCanvas(state);
   }, { passive: false });
 
-  // Pan with mouse drag / node drag
+  // Index of the node under canvas point (mx, my), or -1.
+  function nodeAt(mx, my) {
+    if (!state || !state.nodes) return -1;
+    const nodeRadius = Math.max(12, Math.min(22, 18 * camZoom));
+    const hitR = (nodeRadius + 4) / lastScale;
+    const wx = screenToWorldX(mx), wy = screenToWorldY(my);
+    for (let i = 0; i < state.nodes.length; i++) {
+      const dx = wx - state.nodes[i].x, dy = wy - state.nodes[i].y;
+      if (dx*dx + dy*dy <= hitR * hitR) return i;
+    }
+    return -1;
+  }
+
+  // Pan with mouse drag / node drag; a click on a node (no drag) opens its
+  // info card, a click on empty canvas closes it.  A node starts moving only
+  // once the pointer has, so a click never nudges it.
+  const CLICK_SLOP_PX = 4;
+  let downX = 0, downY = 0, downNodeIdx = -1, canvasDown = false, nodeMoved = false;
   canvas.addEventListener('mousedown', (e) => {
-    if (replay) return;   // a replay is read-only: no moving nodes
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    if (state && state.nodes) {
-      const nodeRadius = Math.max(12, Math.min(22, 18 * camZoom));
-      const hitR = nodeRadius + 4;
-      const wx = screenToWorldX(mx), wy = screenToWorldY(my);
-      for (let i = 0; i < state.nodes.length; i++) {
-        const dx = wx - state.nodes[i].x, dy = wy - state.nodes[i].y;
-        if (dx*dx + dy*dy <= (hitR / lastScale) * (hitR / lastScale)) {
-          dragNodeIdx = i;
-          canvas.style.cursor = 'grabbing';
-          return;
-        }
-      }
+    const hit = nodeAt(e.clientX - rect.left, e.clientY - rect.top);
+    canvasDown = true; nodeMoved = false;
+    downX = e.clientX; downY = e.clientY; downNodeIdx = hit;
+    if (replay) return;   // a replay is read-only: no moving nodes
+    if (hit >= 0) {
+      dragNodeIdx = hit;
+      canvas.style.cursor = 'grabbing';
+      return;
     }
     dragging = true;
     dragStartX = e.clientX;
@@ -310,6 +333,8 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   });
   window.addEventListener('mousemove', (e) => {
     if (dragNodeIdx >= 0) {
+      if (!nodeMoved && Math.hypot(e.clientX - downX, e.clientY - downY) < CLICK_SLOP_PX) return;
+      nodeMoved = true;
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
@@ -321,16 +346,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     if (!dragging) {
       if (state && state.nodes) {
         const rect = canvas.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const nodeRadius = Math.max(12, Math.min(22, 18 * camZoom));
-        const hitR = nodeRadius + 4;
-        const wx = screenToWorldX(mx), wy = screenToWorldY(my);
-        let onNode = false;
-        for (const n of state.nodes) {
-          const dx = wx - n.x, dy = wy - n.y;
-          if (dx*dx + dy*dy <= (hitR / lastScale) * (hitR / lastScale)) { onNode = true; break; }
-        }
+        const onNode = nodeAt(e.clientX - rect.left, e.clientY - rect.top) >= 0;
         canvas.style.cursor = onNode ? 'pointer' : 'grab';
       }
       return;
@@ -339,13 +355,21 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     camY = camStartY + (e.clientY - dragStartY);
     if (state) drawCanvas(state);
   });
-  window.addEventListener('mouseup', () => {
-    if (dragNodeIdx >= 0 && state && ws && ws.readyState === 1) {
+  window.addEventListener('mouseup', (e) => {
+    const click = canvasDown &&
+                  Math.hypot(e.clientX - downX, e.clientY - downY) < CLICK_SLOP_PX;
+    if (dragNodeIdx >= 0 && nodeMoved && state && ws && ws.readyState === 1) {
       const n = state.nodes[dragNodeIdx];
       ws.send(JSON.stringify({cmd: 'move', node: n.id, x: n.x, y: n.y}));
     }
+    if (click && state) {
+      if (downNodeIdx >= 0 && state.nodes[downNodeIdx]) showNodeInfo(state.nodes[downNodeIdx].id);
+      else hideNodeInfo();
+    }
     dragNodeIdx = -1;
     dragging = false;
+    canvasDown = false;
+    nodeMoved = false;
     canvas.style.cursor = 'grab';
   });
 
@@ -1131,6 +1155,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
       html += '<div class="node-card" id="card-' + id + '">';
       html += '<div class="node-header">';
       html += '<span class="node-id">Node ' + id + '</span>';
+      if (node.name) html += '<span class="node-name">' + esc(node.name) + '</span>';
       html += '<span class="' + esc(badgeClass(node.type)) + '">' + esc(node.type) + '</span>';
       html += '<span class="badge-radio badge-radio-off" id="radio-' + id + '">OFF</span>';
       html += '<div class="led-row" id="leds-' + id + '">';
@@ -1743,10 +1768,10 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
       const labelY = n.leds ? cy + nodeRadius + 20 : cy + nodeRadius + 14;
       ctx.fillText('Node ' + n.id, cx, labelY);
 
-      // Type label
-      ctx.fillStyle = t.nodeType;
-      ctx.font = '9px SF Mono, Menlo, monospace';
-      ctx.fillText(n.type, cx, labelY + 12);
+      // Second line: the node's name from the config, else its CPU type
+      ctx.fillStyle = n.name ? t.nodeLabel : t.nodeType;
+      ctx.font = (n.name ? '10px' : '9px') + ' SF Mono, Menlo, monospace';
+      ctx.fillText(n.name || n.type, cx, labelY + 12);
     }
 
     // Zoom indicator
@@ -1762,6 +1787,88 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
     lastH = H;
 
     document.getElementById('active-links').textContent = arrowCount;
+    updateNodeInfo(s, tx, ty, nodeRadius, W, H);
+  }
+
+  // ---- Node info card: click a node on the canvas --------------------------
+  // Built once per opened node (a button rebuilt under the pointer misses
+  // clicks), then its values are refreshed on every redraw.
+  const nodeInfo = document.getElementById('node-info');
+  let infoNodeId = null;
+  const INFO_ROWS = [['board', 'Board'], ['firmware', 'Firmware'], ['cpu', 'CPU'],
+                     ['pos', 'Position'], ['radio', 'Radio'], ['lasttx', 'Last TX'],
+                     ['range', 'In range']];
+  function nodeTitle(n) { return 'Node ' + n.id + (n.name ? ' \u00b7 ' + n.name : ''); }
+  function showNodeInfo(id) {
+    infoNodeId = id;
+    nodeInfo.replaceChildren();
+    const h = document.createElement('h4');
+    const title = document.createElement('span'); title.id = 'ni-title';
+    const close = document.createElement('button');
+    close.textContent = '\u00d7'; close.title = 'Close (Esc)'; close.onclick = hideNodeInfo;
+    h.append(title, close);
+    const table = document.createElement('table');
+    // The config's "meta" first, as written (static: filled once here).
+    const node = state && state.nodes.find(n => n.id === id);
+    const meta = (node && node.meta && typeof node.meta === 'object') ? node.meta : {};
+    for (const [k, v] of Object.entries(meta)) {
+      const tr = table.insertRow();
+      tr.insertCell().textContent = k;
+      const td = tr.insertCell();
+      const text = String(v);
+      if (/^https?:\/\/\S+$/.test(text)) {
+        const a = document.createElement('a');
+        a.href = text; a.textContent = text; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        td.append(a);
+      } else td.textContent = text;
+    }
+    for (const [k, label] of INFO_ROWS) {
+      const tr = table.insertRow();
+      tr.insertCell().textContent = label;
+      tr.insertCell().id = 'ni-' + k;
+    }
+    const con = document.createElement('a');
+    con.textContent = 'Console \u203a'; con.href = '#';
+    con.onclick = (e) => {
+      e.preventDefault();
+      document.querySelector('.sidebar-tabs button[data-tab="nodes-tab"]').click();
+      const card = document.getElementById('card-' + id);
+      if (card) {
+        card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+        card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+      }
+    };
+    nodeInfo.append(h, table, con);
+    nodeInfo.hidden = false;
+    if (state) drawCanvas(state);
+  }
+  function hideNodeInfo() { infoNodeId = null; nodeInfo.hidden = true; }
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && infoNodeId !== null) hideNodeInfo(); });
+  function updateNodeInfo(s, tx, ty, nodeRadius, W, H) {
+    if (infoNodeId === null) return;
+    const i = s.nodes.findIndex(n => n.id === infoNodeId);
+    if (i < 0) { hideNodeInfo(); return; }
+    const n = s.nodes[i];
+    const set = (k, v) => { const el = document.getElementById('ni-' + k); if (el && el.textContent !== v) el.textContent = v; };
+    set('title', nodeTitle(n));
+    set('board', n.board || n.type);
+    set('firmware', n.firmware || '\u2014');
+    set('cpu', fmtFreq(n.freq));   // cycles are in the full state only, so not live
+    set('pos', '(' + n.x.toFixed(1) + ', ' + n.y.toFixed(1) + ') m');
+    set('radio', radioStateLabel(n.radio));
+    set('lasttx', n.last_tx_ms > 0 ? fmtTime(n.last_tx_ms) : 'never');
+    const nbs = ((s.radio && s.radio.neighbors) ? s.radio.neighbors[i] || [] : [])
+      .filter(j => j < s.nodes.length).map(j => nodeTitle(s.nodes[j]));
+    set('range', nbs.length === 0 ? 'none'
+        : nbs.slice(0, 6).join(', ') + (nbs.length > 6 ? ' +' + (nbs.length - 6) + ' more' : ''));
+    // Above the node (below when there is no room), kept inside the canvas.
+    const w = nodeInfo.offsetWidth, h = nodeInfo.offsetHeight;
+    let x = tx(n.x) - w / 2, y = ty(n.y) - nodeRadius - 12 - h;
+    if (y < 8) y = ty(n.y) + nodeRadius + 40;
+    x = Math.max(8, Math.min(x, W - w - 8));
+    y = Math.max(8, Math.min(y, H - h - 8));
+    nodeInfo.style.left = Math.round(x) + 'px';
+    nodeInfo.style.top = Math.round(y) + 'px';
   }
 
   window.addEventListener('resize', () => { if (state) { drawCanvas(state); drawTimeline(); } });

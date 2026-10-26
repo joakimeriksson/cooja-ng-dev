@@ -26,7 +26,7 @@ mote_types:
     firmware: firmware/cooja/udp-client.cooja
 
 nodes:
-  - { type: server, id: 1, x: 0, y: 0 }
+  - { type: server, name: "Border router", meta: { OS: Contiki-NG, Hops: 0, Docs: "https://docs.contiki-ng.org" }, id: 1, x: 0, y: 0 }
   - { type: client, id: 2, x: 30.5, y: -12.25, clock_deviation: 0.9999 }
   - type: client
     id: 3

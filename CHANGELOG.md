@@ -35,6 +35,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   Contiki-NG sides are in `examples/interop/`; what each pairing needs (PAN
   ID, RPL storing mode, link-local traffic because RIOT drops RFC 6553's RPL
   Option) is in `docs/riot.md` and `docs/zephyr.md`.
+- **Web UI: node names, node metadata and a node card.** A config node may
+  carry a `name`, shown with its id on the canvas and in the sidebar
+  ("Node 2 · Zephyr"), and a free-form `meta` mapping (strings and numbers:
+  OS, role, source, ...). Clicking a node opens a card with its `meta`
+  entries, board, firmware file, clock, position, radio state, last
+  transmission and the nodes in range, with a link to its console; it works
+  in recordings too. The full state carries `name`, `meta`, `board` and
+  `firmware` per node. A click no longer sends a move: a node is dragged
+  only once the pointer has moved.
 
 ### Changed
 - **Warnings are errors.** The build is warning-free on gcc 13–15 and

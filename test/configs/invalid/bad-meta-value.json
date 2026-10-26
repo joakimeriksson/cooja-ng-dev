@@ -1,0 +1,11 @@
+{
+    "title": "meta: a value that is neither a string nor a number",
+    "timeout_ms": 1000,
+    "nodes": [
+        {
+            "firmware": "firmware/sky/hello-world.sky",
+            "id": 1,
+            "meta": { "OS": "Contiki-NG", "Radio": { "channel": 26 } }
+        }
+    ]
+}
