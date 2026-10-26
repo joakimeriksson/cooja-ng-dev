@@ -48,6 +48,20 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   service was attached again on each restart, so a script counting messages
   passed early (at 10.7 s instead of 20.7 s in a three-line count). It is
   attached once now.
+- **A timed config action could apply seconds late.** The loop applied it
+  at the first event after its time, and an idle tickless node (RIOT with no
+  timer armed) has none for seconds. The loop now stops on each action's
+  time; the one baseline workload with a timed `send` (shell54) moves from
+  2007 ms to 2000 ms.
+- **Console input to an idle ARM node ran at the wrong time.** The node was
+  not woken (RIOT then sat on the input until a radio frame came), and when
+  it ran it took the UART interrupt at its last tick's cycle and caught up in
+  one go, two seconds of pings stamped with one instant. It is brought up to
+  the present first, as a radio byte is, and woken.
+- **nRF52840 UARTE input lost the first byte of every line** for a driver
+  that clears ENDRX before it reads the 1-byte buffer (RIOT): the next byte
+  was written into the buffer at the ack. It now arrives one byte time
+  (10 bits at 115200 baud) later, as on the wire.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.
