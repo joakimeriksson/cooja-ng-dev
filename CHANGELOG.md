@@ -74,6 +74,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   (10 bits at 115200 baud) later, as on the wire.
 - **Web UI consoles showed terminal codes.** Colours and Zephyr's prompt
   redraw (cursor left, erase) now render as the text a terminal would show.
+- **Web UI Pause button moved while the run went on.** The header stats in
+  front of it grew with their numbers and pushed it up to 100 px within
+  seconds, so clicks missed it; Pause and Play were different widths too.
+  The stats and the button now have fixed widths.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.
