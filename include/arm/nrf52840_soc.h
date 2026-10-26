@@ -65,6 +65,7 @@ typedef struct nrf_uart_state {
     int      rx_armed;        /* STARTRX active, awaiting a byte */
     uint8_t  rx_ring[512];    /* injected console input awaiting delivery */
     int      rx_head, rx_tail;
+    void    *rx_event;        /* the next byte, one byte time after an ENDRX ack */
 } nrf_uart_state_t;
 
 /* RTC0 at 0x4000B000.

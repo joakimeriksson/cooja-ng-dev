@@ -3180,6 +3180,17 @@ sim_restart:
              * auto-pause horizon. */
             max_ns = sim_control_slice_cap(&sim_ctl, max_ns);
             if (next_event < max_ns) max_ns = next_event;
+            /* Land on the next timed action as the quantum path above does:
+             * one ns short of it, so the pump reaches it, then on it.  Node
+             * ticks are not always ms-dense: a tickless OS idle with no
+             * timer armed (RIOT) has no event for seconds, and the action
+             * was applied at whatever event came next. */
+            if (config_loaded && config.has_test &&
+                action_idx < config.test.action_count) {
+                int64_t at = config.test.actions[action_idx].at_ms * MS_TO_NS;
+                if (at > sim_ns && at < max_ns)
+                    max_ns = (at - 1 > sim_ns) ? at - 1 : at;
+            }
             if (next_event <= sim_ns) {
                 /* Events are still due at the current instant — a pause or a
                  * `step` budget stopped the pump mid-slice.  Finish them
