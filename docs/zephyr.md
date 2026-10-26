@@ -13,6 +13,27 @@ Hello World! nrf52840dk/nrf52840
 > narrower — the cases documented here work end-to-end, but coverage is limited
 > to the `nrf52840dk` samples below and the known gaps under *Limitations*.
 
+## Quick start
+
+No Zephyr toolchain needed: the images are bundled in `firmware/nrf52840-dk/`
+(stock samples; `firmware/nrf52840-dk/PROVENANCE.md` says how they were built).
+
+```sh
+# One node: the hello_world banner
+./build/test_runner nrf52840-dk-multinode \
+    firmware/nrf52840-dk/zephyr-hello-world.nrf52840-dk -n 1 -t 2000
+
+# Zephyr's echo_server answering a Contiki-NG node over 802.15.4
+# (passes when all seven datagram sizes come back)
+./build/test_runner test configs/interop-contiki-zephyr.json
+
+# The same in the browser at http://localhost:8080/ (click a node for its
+# card; Ctrl-C to stop)
+./build/test_runner test configs/interop-contiki-zephyr.json --ui 8080
+```
+
+More samples are below; to run your own build, see *How it was built*.
+
 ## Run the bundled examples
 
 ```sh

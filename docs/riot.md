@@ -18,6 +18,29 @@ dodag [2001:db8::1 | R: 512 | OP: Router | PIO: on | ...]
 > narrower — the cases documented here work end-to-end, but coverage is limited
 > to `gnrc_networking` on `nrf52840dk` and the known gaps under *Limitations*.
 
+## Quick start
+
+No RIOT checkout needed: a stock `gnrc_networking` image is bundled as
+`firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk`
+(`firmware/nrf52840-dk/PROVENANCE.md` says how it was built).
+
+```sh
+# One node boots to its shell
+./build/test_runner nrf52840-dk-multinode \
+    firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk -n 1 -t 3000
+
+# RIOT joins a Contiki-NG RPL network, driven by timed shell commands
+# (passes when it has pinged the root and traded UDP with it)
+./build/test_runner test configs/interop-contiki-riot.json
+
+# The same in the browser at http://localhost:8080/ (click a node for its
+# card; Ctrl-C to stop)
+./build/test_runner test configs/interop-contiki-riot.json --ui 8080
+```
+
+To drive the shell your own way, copy that config: each of its `actions`
+types a command into a node's shell at a set time (`docs/test-format.md`).
+
 ## Build a firmware
 
 No Zephyr-style SDK is needed — RIOT builds with `make` and the system
