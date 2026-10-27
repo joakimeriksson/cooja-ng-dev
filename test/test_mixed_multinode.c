@@ -3329,13 +3329,13 @@ sim_restart:
             }
             /* Script actions are applied below at the loop's current time,
              * BEFORE the pump runs the interval that ends there.  The normal
-             * path is only exact because a SIM_EV_TEST_ACTION pin keeps its
-             * horizons ms-dense, so the pump has already reached T-epsilon
-             * when the action at T applies.  A master's quantum ignores the
-             * queue: with a 10 s quantum a `remove` at 5 s would be applied
-             * before the node had run at all.  So sub-step the quantum at an
-             * upcoming action in two moves -- stop one ns short of it, so the
-             * pump reaches it, then land on it, so the action applies. */
+             * path below lands on an action's time, and its slice already
+             * ends at the next event, so nothing is due between the two.  A
+             * master's quantum ignores the queue: with a 10 s quantum a
+             * `remove` at 5 s would be applied before the node had run at
+             * all.  So sub-step the quantum at an upcoming action in two
+             * moves -- stop one ns short of it, so the pump reaches it, then
+             * land on it, so the action applies. */
             int64_t sub = clock_quantum_end;
             if (config_loaded && config.has_test &&
                 action_idx < config.test.action_count) {
@@ -3361,6 +3361,19 @@ sim_restart:
              * auto-pause horizon. */
             max_ns = sim_control_slice_cap(&sim_ctl, max_ns);
             if (next_event < max_ns) max_ns = next_event;
+            /* Land on the next timed action.  Config actions are not pinned
+             * in the event queue, and node ticks are not always ms-dense: a
+             * tickless OS idle with no timer armed (RIOT) has no event for
+             * seconds, and the action was applied at whatever event came
+             * next.  max_ns is already capped at the next event, so nothing
+             * is due before the action: no need for the quantum path's
+             * stop one ns short. */
+            if (config_loaded && config.has_test &&
+                action_idx < config.test.action_count) {
+                int64_t at = config.test.actions[action_idx].at_ms * MS_TO_NS;
+                if (at > sim_ns && at < max_ns)
+                    max_ns = at;
+            }
             if (next_event <= sim_ns) {
                 /* Events are still due at the current instant — a pause or a
                  * `step` budget stopped the pump mid-slice.  Finish them
@@ -3385,7 +3398,8 @@ sim_restart:
                 /* The bodies live in sim_control (shared with the JS
                  * executor, the UI and the shell); the log lines stay here
                  * so the output is unchanged.  No WAKE flag: the JSON path
-                 * never woke the node after a send or reboot. */
+                 * never woke the node after a reboot, and a send wakes its
+                 * node itself (the mote's serial input schedules it). */
                 if (act->type == TEST_ACTION_MOVE) {
                     if (sim_control_move(&sim_ctl, act->node, act->x, act->y) == 0 &&
                         verbose)

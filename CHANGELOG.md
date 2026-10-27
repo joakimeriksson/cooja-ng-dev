@@ -29,6 +29,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   system include (`-isystem`), so its function-pointer cast no longer warns
   in every file that includes `js_node.h`. `make debug -jN` no longer races
   `clean` against the compile.
+- **A PR that moves a simulation on purpose says which workloads.** A
+  `baseline-moves: shell54` line in its description lets the
+  `byte-identity vs main` job pass when exactly those workloads differ;
+  any other difference, or a named workload that does not move, still
+  fails it. `tools/check-baseline.sh` takes the list as `MOVED`.
 
 ### Added
 - **`cngsim`, the command for people** (`docs/quick-start.md`).  `cngsim run
@@ -101,6 +106,20 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **A UI Restart of a run with checks** carried the first run's verdict
   into the second, which then ended the moment it started.  The checks
   start over with the simulation.
+- **A timed config action could apply seconds late.** The loop applied it
+  at the first event after its time, and an idle tickless node (RIOT with no
+  timer armed) has none for seconds. The loop now stops on each action's
+  time; the one baseline workload with a timed `send` (shell54) moves from
+  2007 ms to 2000 ms.
+- **Console input to an idle ARM node ran at the wrong time.** The node was
+  not woken (RIOT then sat on the input until a radio frame came), and when
+  it ran it took the UART interrupt at its last tick's cycle and caught up in
+  one go, two seconds of pings stamped with one instant. It is brought up to
+  the present first, as a radio byte is, and woken.
+- **nRF52840 UARTE input lost the first byte of every line** for a driver
+  that clears ENDRX before it reads the 1-byte buffer (RIOT): the next byte
+  was written into the buffer at the ack. It now arrives one byte time
+  (10 bits at 115200 baud) later, as on the wire.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.

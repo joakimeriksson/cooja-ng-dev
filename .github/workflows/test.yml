@@ -467,6 +467,9 @@ jobs:
           ./build/test_runner test configs/test-shell-nrf54l15-dk.yaml > shell54.txt 2>&1
           tail -5 shell54.txt
           grep -aq "TEST PASSED" shell54.txt
+          # The `help` is a timed action at 2000 ms: the shell answers within
+          # a millisecond of it, not at the next tick after it (2007 ms).
+          grep -aqE "^ +2\.00[01] \[Node 1/ARM\] Available commands" shell54.txt
 
       - name: TrustZone-M split-image boot (nRF54L15 XIAO)
         run: |

@@ -26,6 +26,7 @@
 #include "gdb_stub.h"       /* arm_mote_execute cpu->gdb_stub poll (M38) */
 #include "sim_state.h"      /* SIM_RADIO_* for arm_elf_mote_rf_sim_state (M61) */
 
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -710,19 +711,38 @@ static int64_t arm_mote_sched_hint_ns(const sim_mote_t *m, int64_t base_ns) {
  * the legacy UART RX register; Nordic boards take the UARTE EasyDMA RX ring. */
 static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     arm_platform_t *plat = &MOTE_IMPL(m)->plat.arm;
+    mixed_node_t *node = MOTE_IMPL(m);
+    int64_t now_ns = sim_runtime_now_ns(node->env->sim);
+    /* Bring the core up to now first, as a radio byte does: a core idle
+     * since its last tick would otherwise take the UART interrupt at that
+     * older cycle and then run the gap in one go, its transmissions all
+     * stamped with the one global instant.
+     * Only called between pump passes (config actions, the shell, the UI,
+     * the serial bridge), never while this node runs: unlike the radio
+     * path, which the bus guards, it steps the core and leaves no node
+     * executing. */
+    assert(node->env->radio_bus->executing_node != node->slot);
+    sim_radio_bus_set_executing(node->env->radio_bus, node->slot);
+    arm_mote_rx_byte_sync(m, now_ns);
+    sim_radio_bus_set_executing(node->env->radio_bus, -1);
     cc2538_soc_t     *cc   = arm_platform_cc2538(plat);
     nrf52840_soc_t   *nrf  = arm_platform_nrf52840(plat);
     nrf54l15_soc_t   *nrfl = arm_platform_nrf54l15(plat);
     cc13x2_soc_t     *cc13 = arm_platform_cc13x2(plat);
     if (cc13)
-        return cc13x2_uart_feed_rx(cc13, buf, len);
-    if (cc)
+        len = cc13x2_uart_feed_rx(cc13, buf, len);
+    else if (cc)
         for (int i = 0; i < len; i++)
             cc2538_uart_receive_byte(&cc->uart0, buf[i]);
     else if (nrf)
         nrf_uart_feed_rx(&nrf->uart0, buf, len);
     else if (nrfl)
         nrf54l_uarte_feed_rx(nrfl, buf, len);
+    /* The input raised the UART interrupt; run the core now (as the MSP430
+     * path does).  A tickless OS asleep in WFI with no event queued (RIOT
+     * with no timer armed) otherwise sleeps on until a radio frame happens
+     * to wake it, and handles the input only then. */
+    sim_schedule_mote_wakeup_if_earlier(node->env->sim, node->slot, now_ns);
     return len;
 }
 
