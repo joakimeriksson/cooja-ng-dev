@@ -22,6 +22,14 @@ tools/build-device-firmware.sh --local --contiki-dir <clone> --target nrf52840 -
     --make-args "CONTIKI=<clone>"
 ```
 
+The RIOT config's shell actions name the root by its link-local address,
+`fe80::f6ce:3601:f1f4:1`. Contiki-NG builds it from the nRF52840's FICR device
+ID, which the simulator seeds from the node id (`src/motes/arm_elf_mote.c`).
+Give the root another id, or change that seeding, and the address changes: the
+ping and UDP actions then fail, and the config's `wait` for the parent line
+times out. Run the config with `-v` to read the new one: the root prints
+`Tentative link-local IPv6 address: ...` at boot.
+
 What each pairing needs, and why, is in the comment at the top of each source
 file, in `docs/riot.md` (PAN ID, RPL storing mode, link-local traffic) and in
 `docs/zephyr.md` (no 802.15.4 ACKs from the Zephyr radio model yet).

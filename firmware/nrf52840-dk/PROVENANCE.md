@@ -72,7 +72,9 @@ The Contiki-NG side of the two interop demos (`configs/interop-contiki-zephyr.js
   nullrouting, so standard Neighbor Discovery; riot-root: RPL Classic in storing
   mode).
 - **Toolchain**: host (Arm GNU Toolchain 15.2.rel1)
-- **Built**: 2026-10-26 by Joakim Eriksson
+- **Built**: 2026-10-26 by Joakim Eriksson; echo-zephyr rebuilt 2026-10-27 from
+  the same clone after its datagram header was shortened (`fill()`), so the
+  16 B datagram carries pattern bytes too.
 - **Build command**: `tools/build-device-firmware.sh --local --contiki-dir <clone> --target nrf52840 --board dk --example examples/interop/<name> --output firmware/nrf52840-dk/<name>.nrf52840-dk --make-args "CONTIKI=<clone>"`
 
 ## riot-gnrc-networking.nrf52840-dk

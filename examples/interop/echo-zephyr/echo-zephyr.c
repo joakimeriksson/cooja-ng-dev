@@ -45,10 +45,13 @@ static unsigned round_ok, round_no = 1, idx;
 PROCESS(echo_zephyr_process, "echo-zephyr");
 AUTOSTART_PROCESSES(&echo_zephyr_process);
 
+/* A short sequence-number header, then a letter pattern.  The header stays
+ * well under the smallest size, so every datagram, 16 B included, carries
+ * pattern bytes for the echo check to compare. */
 static void
 fill(uint16_t len, unsigned seq)
 {
-  int n = snprintf((char *)msg, sizeof(msg), "Contiki-NG to Zephyr #%u: ", seq);
+  int n = snprintf((char *)msg, sizeof(msg), "#%u ", seq);
   for(uint16_t i = n; i < len; i++) {
     msg[i] = 'a' + (i % 26);
   }
