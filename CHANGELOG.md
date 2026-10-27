@@ -62,6 +62,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   system include (`-isystem`), so its function-pointer cast no longer warns
   in every file that includes `js_node.h`. `make debug -jN` no longer races
   `clean` against the compile.
+- **A PR that moves a simulation on purpose says which workloads.** A
+  `baseline-moves: shell54` line in its description lets the
+  `byte-identity vs main` job pass when exactly those workloads differ;
+  any other difference, or a named workload that does not move, still
+  fails it. `tools/check-baseline.sh` takes the list as `MOVED`.
 
 ### Fixed
 - **`--ui`: a finished test ended the run**, about two seconds into the
