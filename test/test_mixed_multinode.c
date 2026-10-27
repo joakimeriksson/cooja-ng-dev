@@ -3215,7 +3215,8 @@ sim_restart:
                 /* The bodies live in sim_control (shared with the JS
                  * executor, the UI and the shell); the log lines stay here
                  * so the output is unchanged.  No WAKE flag: the JSON path
-                 * never woke the node after a send or reboot. */
+                 * never woke the node after a reboot, and a send wakes its
+                 * node itself (the mote's serial input schedules it). */
                 if (act->type == TEST_ACTION_MOVE) {
                     if (sim_control_move(&sim_ctl, act->node, act->x, act->y) == 0 &&
                         verbose)

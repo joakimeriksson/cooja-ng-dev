@@ -230,11 +230,16 @@ static void uarte_deliver_rx(nrf_uart_state_t *uart) {
         arm_nvic_set_pending((arm_nvic_t *)soc->plat->cpu.nvic, uart->irq_num);
 }
 
-/* The next byte arrives one byte time (10 bits at 115200 baud) after the
- * firmware acks the last one, as on the wire.  Delivered at the ack itself it
- * overwrote the 1-byte DMA buffer before a driver that clears ENDRX first and
- * reads the buffer second (RIOT) had read it: the first byte of every line
- * was lost. */
+/* One byte time on the console: 10 bits at 115200 baud. */
+#define NRF_UARTE_CHAR_NS   86800LL
+
+/* The next byte arrives one byte time after the firmware acks the last one
+ * (ENDRX), not on a wire clock of its own: the delay runs from the ack.
+ * Delivered at the ack itself it overwrote the 1-byte DMA buffer before a
+ * driver that clears ENDRX first and reads the buffer second (RIOT) had read
+ * it: the first byte of every line was lost.  Input that arrives while no
+ * delay is pending (the firmware waiting with RX armed) is still delivered
+ * at once, by nrf_uart_feed_rx. */
 static void uarte_rx_event_cb(void *user_data, cpu_event_t *event) {
     (void)event;
     uarte_deliver_rx((nrf_uart_state_t *)user_data);
@@ -246,7 +251,7 @@ static void uarte_schedule_rx(nrf_uart_state_t *uart) {
     arm_cpu_t *cpu = &soc->plat->cpu;
     arm_schedule_event(cpu, (arm_event_t *)uart->rx_event,
                        (int64_t)cpu->cycles +
-                       (int64_t)cpu->cpu_freq_hz * 10 / 115200);
+                       (int64_t)cpu_ns_to_cycles(NRF_UARTE_CHAR_NS, cpu->cpu_freq_hz));
 }
 
 /* Enqueue host console input; deliver immediately if the firmware is waiting. */
