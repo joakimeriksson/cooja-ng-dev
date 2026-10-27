@@ -5,8 +5,9 @@
  * (refactor plan §7.1: static registry first, dlopen plugins only after
  * the API is stable).  Rows preserve the runner's historical extension
  * behavior exactly, including the ".nrf52840" → nrf52840-dk alias
- * (firmware built with the default BOARD=dk) and the Tmote Sky default
- * for unknown extensions.
+ * (firmware built with the default BOARD=dk).  An unknown or missing
+ * extension has no board: it used to run as a Tmote Sky, which turned a
+ * typo or a removed board into a confusing failure inside the emulator.
  */
 #include "sim_board.h"
 #include "sim_registry.h"
@@ -21,12 +22,6 @@ static const sim_board_desc_t boards[] = {
       "Tmote Sky", "MSP430F1611", "CC2420 2.4 GHz", "TARGET=sky" },
     { ".z1",           "z1",              SIM_BOARD_KIND_MSP430, "MSP430/Z1",
       "Zolertia Z1", "MSP430F2617", "CC2420 2.4 GHz", "TARGET=z1" },
-    { ".esb",          "esb",             SIM_BOARD_KIND_MSP430, "MSP430/ESB",
-      "ETH ESB", "MSP430F149", "-", "TARGET=esb" },
-    { ".wismote",      "wismote",         SIM_BOARD_KIND_MSP430, "MSP430/WisMote",
-      "WisMote", "MSP430F5437", "-", "TARGET=wismote" },
-    { ".exp5438",      "exp5438",         SIM_BOARD_KIND_MSP430, "MSP430/exp5438",
-      "MSP-EXP430F5438", "MSP430F5437", "-", "TARGET=exp5438" },
     { ".msp430fr5969", "fr5969",          SIM_BOARD_KIND_MSP430, "MSP430/FR5969",
       "MSP-EXP430FR5969", "MSP430FR5969", "-", "-" },
     /* ARM family.  (Labels are accurate per board now — the old runner
@@ -65,18 +60,34 @@ static const sim_board_desc_t boards[] = {
 
 #define BOARD_COUNT ((int)(sizeof(boards) / sizeof(boards[0])))
 
-/* The board a firmware path's extension names, or NULL.  An unknown or
- * missing extension used to fall back to the Tmote Sky, so an ARM image
- * named .elf booted silently as an MSP430 and did nothing; now it is the
- * caller's error to report (sim_board_resolve says what to do). */
-const sim_board_desc_t *sim_board_for_path(const char *path) {
-    if (!path) return NULL;
-    /* Key on the basename's extension, not the last dot in the whole path —
-     * a dotted directory (e.g. build.out/firmware) otherwise resolved to a
-     * bogus "extension". */
+/* Boards that have been removed, so their extension says so instead of
+ * "unknown".  None had a radio model or a Contiki-NG port. */
+static const struct { const char *extension, *board; } removed_boards[] = {
+    { ".esb",     "ETH ESB"     },
+    { ".wismote", "WisMote"     },
+    { ".exp5438", "MSP-EXP5438" },
+};
+
+/* The extension of the path's basename, or NULL.  Keyed on the basename,
+ * not the last dot in the whole path: a dotted directory (e.g.
+ * build.out/firmware) is not an extension. */
+static const char *path_extension(const char *path) {
     const char *base = strrchr(path, '/');
     base = base ? base + 1 : path;
-    const char *dot = strrchr(base, '.');
+    return strrchr(base, '.');
+}
+
+/* The removed board an extension names, or NULL. */
+static const char *removed_board(const char *dot) {
+    for (size_t i = 0; dot && i < sizeof(removed_boards) / sizeof(removed_boards[0]); i++)
+        if (strcmp(dot, removed_boards[i].extension) == 0)
+            return removed_boards[i].board;
+    return NULL;
+}
+
+const sim_board_desc_t *sim_board_for_path(const char *path) {
+    if (!path) return NULL;
+    const char *dot = path_extension(path);
     if (!dot) return NULL;
     for (int i = 0; i < BOARD_COUNT; i++) {
         if (strcmp(dot, boards[i].extension) == 0)
@@ -98,7 +109,7 @@ const sim_board_desc_t *sim_board_resolve(const char *path, const char *board,
         /* A generic extension (".nrf52840", a SoC rather than a board)
          * names a default board; `board` may pick another board with that
          * SoC name, e.g. nrf52840-dongle.  Anything else contradicts it. */
-        const char *ext = path ? strrchr(path, '.') : NULL;
+        const char *ext = path ? path_extension(path) : NULL;
         size_t el = ext ? strlen(ext + 1) : 0;
         int variant = by_ext && by_ext->name && named->name && el > 0 &&
                       strcmp(ext, by_ext->extension) == 0 &&
@@ -114,14 +125,21 @@ const sim_board_desc_t *sim_board_resolve(const char *path, const char *board,
         return named;
     }
     if (!by_ext) {
-        const char *base = path ? strrchr(path, '/') : NULL;
-        base = base ? base + 1 : (path ? path : "");
-        const char *dot = strrchr(base, '.');
-        snprintf(err, errlen,
-                 "%s: no board for the extension '%s'; name the board with "
-                 "'board: <name>' on its mote type, or --board <name> for an "
-                 "image on the command line (cngsim boards lists them)",
-                 path ? path : "(none)", dot ? dot : "(none)");
+        const char *dot = path ? path_extension(path) : NULL;
+        if (removed_board(dot)) {
+            sim_board_path_error(path, err, errlen);
+            return NULL;
+        }
+        static const char hint[] =
+            "; name the board with 'board: <name>' on its mote type, or "
+            "--board <name> for an image on the command line (cngsim boards "
+            "lists them)";
+        if (dot)
+            snprintf(err, errlen, "firmware '%s': unknown extension '%s'%s",
+                     path, dot, hint);
+        else
+            snprintf(err, errlen, "firmware '%s': no extension%s",
+                     path ? path : "(none)", hint);
         return NULL;
     }
     return by_ext;
@@ -129,6 +147,29 @@ const sim_board_desc_t *sim_board_resolve(const char *path, const char *board,
 
 const sim_board_desc_t *sim_board_at(int i) {
     return (i >= 0 && i < BOARD_COUNT) ? &boards[i] : NULL;
+}
+
+void sim_board_path_error(const char *path, char *out, size_t outsz) {
+    if (!out || outsz == 0) return;
+    if (!path) path = "(none)";
+    const char *dot = path_extension(path);
+    const char *gone = removed_board(dot);
+    if (gone) {
+        snprintf(out, outsz,
+                 "firmware '%s': the %s board (%s) was removed after "
+                 "Cooja-NG 0.3.0; it had no radio model and no "
+                 "Contiki-NG port", path, gone, dot);
+        return;
+    }
+    int n = dot ? snprintf(out, outsz, "firmware '%s': unknown extension '%s'", path, dot)
+                : snprintf(out, outsz, "firmware '%s': no extension", path);
+    if (n < 0 || (size_t)n >= outsz) return;
+    n += snprintf(out + n, outsz - (size_t)n,
+                  " (the extension selects the board; known:");
+    for (int i = 0; i < BOARD_COUNT && n > 0 && (size_t)n < outsz; i++)
+        n += snprintf(out + n, outsz - (size_t)n, " %s", boards[i].extension);
+    if (n > 0 && (size_t)n < outsz)
+        snprintf(out + n, outsz - (size_t)n, ")");
 }
 
 const sim_board_desc_t *sim_board_find(const char *name) {

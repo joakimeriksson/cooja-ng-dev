@@ -47,9 +47,15 @@ typedef struct sim_board_desc {
     const char *build;         /* Contiki-NG make arguments, or "-"      */
 } sim_board_desc_t;
 
-/* Board for a firmware path, by extension, or NULL for an unknown or
- * missing extension (there is no default board). */
+/* Board for a firmware path, by the extension of its basename, or NULL
+ * when the extension is missing or unknown (there is no default board;
+ * sim_board_path_error() says why). */
 const sim_board_desc_t *sim_board_for_path(const char *path);
+
+/* The error for a path sim_board_for_path() rejects, naming the file: a
+ * removed board's extension says so; otherwise it lists the known
+ * extensions.  Always NUL-terminates `out` (truncating if needed). */
+void sim_board_path_error(const char *path, char *out, size_t outsz);
 
 /* The board a node runs: the named `board` (a mote type's "board:" key)
  * when given, else the path's extension.  NULL with a message in `err`

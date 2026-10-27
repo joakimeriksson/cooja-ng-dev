@@ -8,10 +8,13 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Changed — check these before upgrading
-- **An unknown firmware extension is an error**, in `cngsim` and
-  `test_runner` alike.  It used to boot as a Tmote Sky, so an ARM image
-  named `.elf` ran silently as an MSP430 and did nothing.  Name the board
-  with `board:` on the mote type instead (below).
+- **An unknown or missing firmware extension is an error**, in `cngsim`
+  and `test_runner` alike: exit 2 before anything starts, naming the file.
+  It used to boot as a Tmote Sky, so an ARM image named `.elf` ran
+  silently as an MSP430 and did nothing.  Name the board with `board:` on
+  the mote type instead (below).  A node added at run time (shell `add`,
+  JS `addMote`, a timed config action) is refused the same way, and a
+  removed board's extension says that its board was removed.
 - **`test_runner` with no arguments, or an unknown mode, exits 2** with its
   usage on stderr.  An unknown mode used to run nothing and exit 0.
   `--help` prints the usage, now listing every mode and option.
@@ -83,6 +86,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   identity words are read from an LP-CC1312R7. Contiki-NG support is
   contiki-ng/contiki-ng#3285, not merged yet
   (`firmware/cc1312r7-launchpad/PROVENANCE.md`).
+
+### Removed
+- **ESB, WisMote, MSP-EXP5438 and CC430** (`esb`, `wismote`, `exp5438`,
+  `cc430`) and the MSP430F149 and CC430F5137 MCU configs, which only those
+  boards used. Each board was the CPU with LEDs and a console: no radio
+  was modelled (TR1001, CC2520, the CC430's RF1A), Contiki-NG has no port
+  for any of them, and nothing tested them. A `.esb`, `.wismote` or
+  `.exp5438` firmware file is now refused with a message saying its board
+  was removed. The MSP430F5437 config stays as the MSP430X core of the
+  CPU tests; no board uses it.
 
 ### Fixed
 - **A UI Restart of a run with checks** carried the first run's verdict
