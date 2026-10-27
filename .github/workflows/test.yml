@@ -15,8 +15,10 @@ jobs:
   # Pages workflow publishes as the site's live demos.  Built here on every PR
   # so that what only emcc's clang warns about (-Werror) or a WASM build that
   # simulates differently from native fails the PR, not the next deploy.  The
-  # native reference is built without Lightning: the parity scenarios run
-  # multi-node, where the JIT is off anyway.
+  # native reference is built without Lightning (the WASM build has no JIT).
+  # That is not what makes parity hold: ARM multi-node runs use the JIT when
+  # Lightning is present, and the ARM JIT is cycle-identical with the
+  # interpreter (checked below in the test job).
   wasm:
     name: wasm / emscripten
     runs-on: ubuntu-latest
@@ -461,6 +463,20 @@ jobs:
           ./build/test_runner test configs/test-tsch-nrf52840-dk.json > tsch.txt 2>&1
           tail -5 tsch.txt
           grep -aq "TEST PASSED" tsch.txt
+
+      # Contiki-NG against stock Zephyr and RIOT images (the site's interop
+      # demos).  RIOT is driven over its UARTE shell, so this is what holds
+      # the console-input timing for an idle ARM node and the UARTE's first
+      # byte of each line; Zephyr's echo server covers 6LoWPAN fragments
+      # both ways.  Both simulate ~20 s in well under a second.
+      - name: Interop with Zephyr and RIOT (nRF52840-DK)
+        run: |
+          ./build/test_runner test configs/interop-contiki-zephyr.json > interop-zephyr.txt 2>&1
+          tail -3 interop-zephyr.txt
+          grep -aq "TEST PASSED" interop-zephyr.txt
+          ./build/test_runner test configs/interop-contiki-riot.json > interop-riot.txt 2>&1
+          tail -3 interop-riot.txt
+          grep -aq "TEST PASSED" interop-riot.txt
 
       # The same contract on TSCH, whose drift compensation divides through
       # __aeabi_uldivmod often enough for the JIT to reach it.  The

@@ -66,6 +66,11 @@ player.html (ui/index.html)  --postMessage-->  worker.js  -->  csim-web.wasm
   (`emscripten_sleep` under ASYNCIFY, at most every 30 ms of wall time). The
   runner's pacing `usleep()` yields the same way. Commands are applied between
   loop passes, exactly where the native WebSocket poll applies them.
+  The build uses `-sASYNCIFY_IGNORE_INDIRECT`, which only works while every
+  path to a yield is a chain of direct calls from the runner loop. Calling
+  `ui_service_poll` or a pacing `usleep()` through a function pointer (say, a
+  service vtable) would break the page with no build error: keep them direct,
+  or drop the flag.
 - `ui/index.html` gains one mode: with `?wasm=NAME` it starts the worker in
   place of opening a WebSocket. The live and `?replay=` modes are unchanged.
 

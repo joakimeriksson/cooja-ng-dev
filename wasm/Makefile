@@ -119,6 +119,9 @@ $(DIST)/web/worker.js: web/worker.js
 # The scenarios the page offers, and the firmware and configs they read,
 # served as static files under files/ at their repository paths.
 SCENARIO_FILES := $(shell python3 -c "import json;print(' '.join(sorted({f for v in json.load(open('web/scenarios.json')).values() for f in v['files']})))")
+ifeq ($(strip $(SCENARIO_FILES)),)
+$(error no scenario files: web/scenarios.json is missing, malformed or lists none)
+endif
 
 $(DIST)/web/scenarios.json: web/scenarios.json $(addprefix $(ROOT)/,$(SCENARIO_FILES))
 	@mkdir -p $(dir $@)

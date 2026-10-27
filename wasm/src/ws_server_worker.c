@@ -18,6 +18,14 @@
  *
  * Yielding never changes the simulation: commands are applied between loop
  * passes, which is where the native WebSocket poll applies them too.
+ *
+ * The build links with -sASYNCIFY_IGNORE_INDIRECT: only direct calls are
+ * instrumented to unwind.  That holds because every path to a yield is a
+ * chain of direct calls from the runner loop (ui_service_poll and its
+ * pacing usleep() in test_mixed_multinode.c, the shell's usleep()).  Reach
+ * either through a function pointer, such as a service vtable, and the
+ * unwind crosses an uninstrumented frame: no build error, a broken page.
+ * Keep the calls direct, or drop the flag (a larger, slower build).
  */
 #include "ws_server.h"
 

@@ -13,6 +13,7 @@
 #
 # The scenarios: every live one in web/scenarios.json, with its "check" args
 # (a bound on the run where the live page runs unbounded), plus timertest.
+# Then each scenario's "files" list must hold every file the page will read.
 #
 #   ./check-parity.sh                 # the default scenarios
 #   ./check-parity.sh <runner args>   # one scenario of your own
@@ -64,4 +65,26 @@ while IFS= read -r line; do
     read -r -a args <<< "$line"
     one "${args[@]}" || fail=1
 done <<< "$list"
+
+# The page reads only the files a scenario lists, but both Node builds read
+# the repository, so parity alone passes with a firmware missing from the
+# list.  Every file a scenario's args name, and every firmware its config
+# names (read back through the config writer, so YAML and JSON alike), must
+# be listed.
+python3 - "$NATIVE" "$OUT/conv.yaml" <<'PY' || fail=1
+import json, os, re, subprocess, sys
+native, conv = sys.argv[1:]
+bad = 0
+for name, sc in json.load(open("wasm/web/scenarios.json")).items():
+    need = [a for a in sc["args"][1:] if os.path.isfile(a)]
+    if sc["args"][0] == "test":
+        if subprocess.run([native, "config-convert", sc["args"][1], conv],
+                          stdout=subprocess.DEVNULL).returncode != 0:
+            print("FILES %s: cannot read %s" % (name, sc["args"][1])); bad = 1; continue
+        need += re.findall(r"firmware: ([^,} ]+)", open(conv).read())
+    for f in dict.fromkeys(need):
+        if f not in sc["files"]:
+            print("FILES %s: %s is not in its files list" % (name, f)); bad = 1
+sys.exit(bad)
+PY
 exit $fail
