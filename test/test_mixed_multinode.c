@@ -1731,7 +1731,8 @@ static int g_save_timeout_ms = 0;
 /* Shell/script runs have no fixed duration: save the time actually run. */
 static int g_save_elapsed = 0;
 static int64_t g_sim_start_ns = 0;
-static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns) {
+static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns,
+                            int for_page) {
     static sim_normalized_config_t live;
     const sim_normalized_config_t *config = g_live_config;
     int config_loaded = node_cfg_src != NULL;
@@ -1771,14 +1772,25 @@ static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns) {
             memcpy(n->peripherals, config->nodes[i].peripherals, sizeof(n->peripherals));
         }
     }
-    char header[512];
+    /* The config's own relative paths stay relative: to the file written,
+     * or for the page's Save (whose file is temporary) to the config. */
+    char rel_dir[PATH_MAX];
+    snprintf(rel_dir, sizeof(rel_dir), "%s", for_page && g_config_path ? g_config_path : path);
+    char *sl = strrchr(rel_dir, '/');
+    if (sl) { if (sl == rel_dir) sl[1] = '\0'; else *sl = '\0'; }
+    else snprintf(rel_dir, sizeof(rel_dir), ".");
+    char rel_abs[PATH_MAX];                  /* for the header: a full path */
+    if (!realpath(rel_dir, rel_abs)) snprintf(rel_abs, sizeof(rel_abs), "%s", rel_dir);
+    char header[PATH_MAX + 512];
     snprintf(header, sizeof(header),
              "saved by cooja-ng %s at simulated time %.3f s\nfrom: %s\n"
-             "positions and node list are the live state at save time",
+             "positions and node list are the live state at save time%s%s",
              CSIM_VERSION, (double)sim_ns / 1e9,
-             g_config_path ? g_config_path : "(firmware arguments)");
+             g_config_path ? g_config_path : "(firmware arguments)",
+             for_page && live.rel_path_count ? "\nrelative file paths are relative to: " : "",
+             for_page && live.rel_path_count ? rel_abs : "");
     FILE *sf = fopen(path, "w");
-    int save_rc = sf ? sim_config_write_yaml(&live, sf, header) : -1;
+    int save_rc = sf ? sim_config_write_yaml(&live, sf, header, rel_dir) : -1;
     if (sf) fclose(sf);
     if (save_rc == 0) {
         /* The saved file must load back, or the save is worthless. */
@@ -1789,7 +1801,8 @@ static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns) {
             save_rc = -1;
         } else {
             sim_config_free(&check);
-            printf("Saved config: %s (%d nodes)\n", path, live.node_count);
+            if (!for_page)      /* the page's file is temporary: nothing to report */
+                printf("Saved config: %s (%d nodes)\n", path, live.node_count);
         }
     } else {
         fprintf(stderr, "--save-config: cannot write %s\n", path);
@@ -1804,12 +1817,12 @@ static void ctl_stats(void *u, sim_control_stats_t *o) {
     o->frames_collided = radio_bus.stats.frame_collided;
     o->rx_dropped      = radio_bus.stats.rx_dropped;
 }
-static int ctl_save_config(void *u, const char *path) {
+static int ctl_save_config(void *u, const char *path, int for_page) {
     (void)u;
     int64_t now = sim_runtime_now_ns(&sim_rt);
     int ms = g_save_elapsed ? (int)((now - g_sim_start_ns) / MS_TO_NS) : g_save_timeout_ms;
     if (ms <= 0) ms = g_save_timeout_ms;   /* saved before time advanced */
-    return save_live_config(path, ms, now);
+    return save_live_config(path, ms, now, for_page);
 }
 /* sim_control is initialized once per process, by whichever client comes
  * first (the shell, before the restart label; otherwise the UI block after
@@ -3741,7 +3754,7 @@ sim_restart:
     /* Snapshot of what ran, not of what was loaded (save_live_config). */
     if (save_config_path &&
         save_live_config(save_config_path,
-                         simulated_ms > 0 ? simulated_ms : sim_ms, sim_ns) != 0)
+                         simulated_ms > 0 ? simulated_ms : sim_ms, sim_ns, 0) != 0)
         test_exit_code = 1;
     pcap_service_close(&pcap_svc);
     extern void msp430_timer_dump_ccr_counts(void);

@@ -13,10 +13,13 @@ are in the refactor plan's Decisions Log.
   `cngsim` runs the simulation with its stdout and stderr through a filter
   thread, so the runner's prints, and `test_runner`'s output, are
   untouched.  The format coupling is guarded by `tools/check-cngsim.sh`.
-- **`--save-config` paths are unchanged (§4.1).**  It still writes paths as
-  the config gave them; rewriting them relative to the output would change
-  what existing scripts compare.  Config-relative lookup makes the common
-  case (saving next to the original) work.
+- **Saved paths (§4.1), as planned with one addition.**  The loader keeps
+  the paths it resolved against the config's directory as absolute paths
+  (so every opener stays as it was) and remembers which they were; the
+  writer names exactly those relative to the output file's directory.
+  Absolute, `~/` and current-directory paths are written as given.  The
+  browser's Save writes relative to the config instead, since its file is
+  temporary and the user stores the text, and says so in its header.
 - **Not done:** the radio panel in the UI (§6.3 extras; the shell's `radio`
   covers it), and the nRF52840 console timestamps that run backwards (an
   engine timing change, left for its own PR with a baseline review).

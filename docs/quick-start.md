@@ -135,7 +135,8 @@ test:
 
 - Paths are relative to the YAML file. `cngsim new` names the firmware
   that comes with cooja-ng by its absolute path, so the file still runs
-  after you move it.
+  after you move it. Saving a setup (`--save-config`, or Save in the
+  browser) keeps your own paths relative.
 - One node entry can place many nodes: `count` plus a `layout`, starting
   at `x`, `y`:
   - `grid` takes `columns` and `spacing`;
@@ -154,7 +155,9 @@ test:
   `cngsim run` takes.
 
 The [examples](../examples/) are commented starting points too:
-`cngsim examples` prints where they are.
+`cngsim examples` prints where they are. A copy runs from anywhere: the
+`../firmware/...` it names is found among the bundled firmware, with a
+note, until you point it at your own.
 
 ## 5. Use your own Contiki-NG firmware
 

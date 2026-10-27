@@ -55,7 +55,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `--board NAME` does the same for images given on the command line.
 - **Firmware paths are relative to the config file** (falling back to the
   current directory, as before), so a setup and its firmware can live
-  anywhere.
+  anywhere.  `--save-config` writes those paths relative to the file it
+  saves, and the browser's Save relative to the config; other paths are
+  written as the config gave them.  `cngsim` looks a path up last among
+  its bundled examples, so a copied example still finds its firmware.
 - **The web UI page is built into the binary**: `--ui` works from any
   directory and from an installed binary.  A `ui/index.html` in the
   current directory still wins, and `CSIM_UI_PAGE` names another.

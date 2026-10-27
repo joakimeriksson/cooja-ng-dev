@@ -57,6 +57,10 @@ for f in "$ROOT"/examples/*.yaml; do
         *) bad "$name: exit $rc: $out" ;;
     esac
 done
+cp "$ROOT/examples/hello-sky.yaml" "$WORK/copied.yaml"
+out=$("$CNGSIM" run "$WORK/copied.yaml" -q 2>&1)
+case "$out" in *"bundled firmware"*PASSED*) ok "a copied example finds the bundled firmware" ;;
+    *) bad "a copied example finds the bundled firmware: $out" ;; esac
 "$CNGSIM" run shell-nrf54l15 --script "$ROOT/test/scripts/shell-nrf54l15-cmd.cnsh" >/dev/null 2>&1 \
     && ok "shell-nrf54l15 with a script" || bad "shell-nrf54l15 with a script"
 
@@ -90,6 +94,21 @@ mkdir -p "$WORK/elsewhere"
 mv "$WORK/new/big-circle.yaml" "$WORK/elsewhere/"
 (cd / && "$CNGSIM" run "$WORK/elsewhere/big-circle.yaml" -q >/dev/null 2>&1) \
     && ok "a setup from new runs after it is moved" || bad "a setup from new runs after it is moved"
+# A saved setup keeps the user's own paths relative: to the file it writes,
+# however the config was named (./x.yaml used to save absolute paths).
+mkdir -p "$WORK/own/fw" "$WORK/own2"
+cp "$ROOT/firmware/sky/hello-world.sky" "$WORK/own/fw/"
+printf 'version: 2\ntimeout_ms: 1000\nmote_types:\n  - { name: a, firmware: fw/hello-world.sky }\nnodes:\n  - { type: a, id: 1 }\n' \
+    > "$WORK/own/x.yaml"
+(cd "$WORK/own" && "$CNGSIM" run ./x.yaml --save-config out.yaml -q >/dev/null 2>&1 \
+    && "$CNGSIM" run x.yaml --save-config ../own2/out.yaml -q >/dev/null 2>&1)
+if grep -q 'firmware: fw/hello-world.sky' "$WORK/own/out.yaml" 2>/dev/null &&
+   grep -q 'firmware: ../own/fw/hello-world.sky' "$WORK/own2/out.yaml" 2>/dev/null &&
+   (cd / && "$CNGSIM" run "$WORK/own2/out.yaml" -q >/dev/null 2>&1); then
+    ok "--save-config writes the setup's own paths relative to the saved file"
+else
+    bad "--save-config writes the setup's own paths relative to the saved file"
+fi
 # Enter at every prompt takes the bracketed defaults (the default used to be
 # wiped by the answer it shared a buffer with).
 python3 - "$CNGSIM" "$WORK/tty" <<'PY' && ok "new on a terminal: Enter takes the defaults" \

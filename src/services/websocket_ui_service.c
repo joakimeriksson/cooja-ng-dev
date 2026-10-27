@@ -170,7 +170,7 @@ static void save_to_browser(websocket_ui_service_t *svc, const char *token) {
     if (tfd >= 0) close(tfd);
     if (tfd < 0) {
         cJSON_AddStringToObject(o, "error", "no temporary file for the setup");
-    } else if (svc->ctl->ops.save_config(svc->ctl->ops.user, path) == 0) {
+    } else if (svc->ctl->ops.save_config(svc->ctl->ops.user, path, 1) == 0) {
         FILE *f = fopen(path, "rb");
         char *buf = NULL;
         long len = 0;

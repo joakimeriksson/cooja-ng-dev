@@ -228,6 +228,13 @@ current directory; `~/` is the home directory.  So a config and its
 firmware can live together anywhere, and every older config that names
 paths from the repo root still works from there.
 
+`--save-config`, `save-config` and `config-convert` write a path the
+config named relative to itself relative to the file they write (through
+`../` where needed; absolute only if the two share nothing below `/`).
+The browser's Save, whose text you store yourself, writes them relative
+to the config, and its header says so.  Absolute paths, `~/` paths and
+paths found only from the current directory are written as given.
+
 ## Test Section
 
 The `test` section defines automated pass/fail criteria. A simulation with a `test` section exits with code 0 on pass, 1 on failure.

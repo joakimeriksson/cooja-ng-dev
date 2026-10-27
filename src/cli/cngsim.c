@@ -673,6 +673,10 @@ static int cmd_run(int argc, char **argv) {
                     "from the current directory; the setup works only when run from "
                     "here (name it relative to the setup file)\n",
                     cfg.cwd_fallback, cfg_path);
+        if (cfg.bundled_fallback[0])
+            fprintf(stderr, "cngsim: note: %s is not next to %s, so the bundled "
+                    "firmware was used (as for the examples)\n",
+                    cfg.bundled_fallback, cfg_path);
         PUSH(cfg_path);
         snprintf(F.title, sizeof(F.title), "%s", cfg.title);
         F.nodes = cfg.node_count;
@@ -906,6 +910,9 @@ static int cmd_check(int argc, char **argv) {
         fprintf(stderr, "%s: note: %s is not next to the setup, so it was taken from "
                 "the current directory; the setup works only when run from here\n",
                 argv[0], cfg.cwd_fallback);
+    if (cfg.bundled_fallback[0])
+        fprintf(stderr, "%s: note: %s is not next to the setup, so the bundled "
+                "firmware is used (as for the examples)\n", argv[0], cfg.bundled_fallback);
     if (cfg.has_js_script && cfg.js_script_path[0] && access(cfg.js_script_path, R_OK) != 0) {
         fprintf(stderr, "%s: cannot read js_script %s\n", argv[0], cfg.js_script_path);
         bad++;
@@ -1417,9 +1424,13 @@ static int cmd_convert(int argc, char **argv) {
         fail("convert: cannot write %s: %s", out, strerror(errno));
         return EXIT_INVALID;
     }
+    char outdir[PATH_MAX];
+    snprintf(outdir, sizeof(outdir), "%s", out);
+    char *sl = strrchr(outdir, '/');
+    if (sl) *sl = '\0'; else snprintf(outdir, sizeof(outdir), ".");
     char hdr[PATH_MAX + 64];
     snprintf(hdr, sizeof(hdr), "converted from %s by cngsim %s", in, CSIM_VERSION);
-    rc = sim_config_write_yaml(&cfg, f, hdr);
+    rc = sim_config_write_yaml(&cfg, f, hdr, outdir);
     if (fclose(f) != 0) rc = -1;
     if (rc != 0) {
         sim_config_free(&cfg);
@@ -1427,10 +1438,6 @@ static int cmd_convert(int argc, char **argv) {
     }
     /* The firmware a .csc names is built from Contiki-NG sources, often not
      * yet: say which images run needs first, rather than "run it". */
-    char outdir[PATH_MAX];
-    snprintf(outdir, sizeof(outdir), "%s", out);
-    char *sl = strrchr(outdir, '/');
-    if (sl) *sl = '\0'; else snprintf(outdir, sizeof(outdir), ".");
     int missing = 0;
     for (int i = 0; i < cfg.node_count; i++) {
         const char *fw = cfg.nodes[i].firmware;
@@ -1550,6 +1557,14 @@ int main(int argc, char **argv) {
      * the FILE keeps its mode across the dup2. */
     setvbuf(stdout, NULL, _IOLBF, 0);
     snprintf(g_argv0, sizeof(g_argv0), "%s", argv[0]);
+    /* A copied example names its firmware as ../firmware/..., relative to
+     * examples/: let that still find the bundled images, as a last resort. */
+    const char *data = data_dir();
+    if (data) {
+        char ex[PATH_MAX + 16];
+        snprintf(ex, sizeof(ex), "%s/examples", data);
+        sim_config_set_last_lookup_dir(ex);
+    }
     if (argc < 2) {
         help(stderr);
         return EXIT_INVALID;

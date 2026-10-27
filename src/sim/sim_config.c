@@ -79,9 +79,27 @@ static int  parse_test(cJSON *test, sim_normalized_config_t *cfg);
  * directory becomes that file's absolute path.  Otherwise the path is left as
  * written and opened relative to the current directory, as it always was —
  * every config in the repo names repo-root paths and is run from there, so
- * those load exactly as before. */
-static void resolve_one(char *p, size_t sz, const char *dir, char *fallback,
-                        size_t fallback_sz) {
+ * those load exactly as before.  A config in the current directory keeps its
+ * paths as written (they name the same files).  Last, cngsim's bundled
+ * examples directory (sim_config_set_last_lookup_dir). */
+static char g_last_lookup_dir[512];
+
+void sim_config_set_last_lookup_dir(const char *dir) {
+    snprintf(g_last_lookup_dir, sizeof(g_last_lookup_dir), "%s", dir ? dir : "");
+}
+
+/* Remembered, so the writer can name it relative again. */
+static void note_rel_path(sim_normalized_config_t *cfg, const char *p) {
+    for (int i = 0; i < cfg->rel_path_count; i++)
+        if (strcmp(cfg->rel_paths[i], p) == 0) return;
+    if (cfg->rel_path_count < SIM_CONFIG_MAX_REL_PATHS && strlen(p) < sizeof(cfg->rel_paths[0]))
+        snprintf(cfg->rel_paths[cfg->rel_path_count++], sizeof(cfg->rel_paths[0]), "%s", p);
+}
+
+/* `dir_is_cwd`: the config is in the current directory, so a relative path
+ * means the same file either way and is kept exactly as written. */
+static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
+                        const char *dir, int dir_is_cwd) {
     if (!p[0]) return;
     char buf[1024];
     if (p[0] == '~' && p[1] == '/') {
@@ -91,13 +109,31 @@ static void resolve_one(char *p, size_t sz, const char *dir, char *fallback,
         if (strlen(buf) < sz) snprintf(p, sz, "%s", buf);
         return;
     }
-    if (p[0] == '/' || !dir[0]) return;
-    snprintf(buf, sizeof(buf), "%s/%s", dir, p);
+    if (p[0] == '/') return;
     char real[PATH_MAX];
-    if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz)
-        snprintf(p, sz, "%s", real);
-    else if (!fallback[0] && access(p, F_OK) == 0)
-        snprintf(fallback, fallback_sz, "%s", p);   /* found from the cwd only */
+    if (dir_is_cwd) {
+        if (access(p, F_OK) == 0) { note_rel_path(cfg, p); return; }
+    } else {
+        snprintf(buf, sizeof(buf), "%s/%s", dir, p);
+        if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz) {
+            snprintf(p, sz, "%s", real);
+            note_rel_path(cfg, real);
+            return;
+        }
+        if (access(p, F_OK) == 0) {
+            if (!cfg->cwd_fallback[0])               /* found from the cwd only */
+                snprintf(cfg->cwd_fallback, sizeof(cfg->cwd_fallback), "%s", p);
+            return;
+        }
+    }
+    if (g_last_lookup_dir[0]) {
+        snprintf(buf, sizeof(buf), "%s/%s", g_last_lookup_dir, p);
+        if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz) {
+            if (!cfg->bundled_fallback[0])
+                snprintf(cfg->bundled_fallback, sizeof(cfg->bundled_fallback), "%s", p);
+            snprintf(p, sz, "%s", real);
+        }
+    }
 }
 
 static void resolve_paths(sim_normalized_config_t *cfg, const char *config_path) {
@@ -106,8 +142,11 @@ static void resolve_paths(sim_normalized_config_t *cfg, const char *config_path)
     if (slash && (size_t)(slash - config_path) < sizeof(dir))
         snprintf(dir, sizeof(dir), "%.*s", (int)(slash - config_path), config_path);
     if (slash == config_path) snprintf(dir, sizeof(dir), "/");
-#define RESOLVE(field) resolve_one((field), sizeof(field), dir, cfg->cwd_fallback, \
-                                   sizeof(cfg->cwd_fallback))
+    char real_dir[PATH_MAX], real_cwd[PATH_MAX];
+    int dir_is_cwd = !dir[0] ||
+                     (realpath(dir, real_dir) && realpath(".", real_cwd) &&
+                      strcmp(real_dir, real_cwd) == 0);
+#define RESOLVE(field) resolve_one(cfg, (field), sizeof(field), dir, dir_is_cwd)
     for (int i = 0; i < cfg->node_count; i++) {
         RESOLVE(cfg->nodes[i].firmware);
         RESOLVE(cfg->nodes[i].secure_firmware);
