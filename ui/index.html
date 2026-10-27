@@ -10,14 +10,9 @@ body { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; background: var(-
 header { background: var(--header-bg); border-bottom: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
 header h1 { font-size: 14px; color: var(--accent); font-weight: 600; }
 .stat { font-size: 12px; color: var(--muted); }
-/* The live stats get fixed widths (label + widest value + unit) so the
- * controls after them stay put while the numbers grow; a button that moves
- * under the pointer misses clicks. */
-.stat:has(#sim-time)     { min-width: 14ch; }
-.stat:has(#rf-bytes)     { min-width: 12ch; }
-.stat:has(#uart-bytes)   { min-width: 14ch; }
-.stat:has(#rx-frames)    { min-width: 17ch; }
-.stat:has(#active-links) { min-width: 11ch; }
+/* The live stats get fixed widths (a min-width on each span: label + widest
+ * value + unit) so the controls after them stay put while the numbers grow;
+ * a button that moves under the pointer misses clicks. */
 #speed-val { display: inline-block; min-width: 3ch; text-align: right; }
 .stat b { color: var(--text); }
 #conn-status { width: 8px; height: 8px; border-radius: 50%; background: #f85149; flex-shrink: 0; }
@@ -110,11 +105,11 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 <body>
 <header>
   <h1>Cooja-NG Simulator</h1>
-  <span class="stat">Time: <b id="sim-time">0 ms</b></span>
-  <span class="stat">RF: <b id="rf-bytes">0</b> B</span>
-  <span class="stat">UART: <b id="uart-bytes">0</b> B</span>
-  <span class="stat">TX Frames: <b id="rx-frames">0</b></span>
-  <span class="stat">Links: <b id="active-links" style="color:var(--accent)">0</b></span>
+  <span class="stat" style="min-width:14ch">Time: <b id="sim-time">0 ms</b></span>
+  <span class="stat" style="min-width:12ch">RF: <b id="rf-bytes">0</b> B</span>
+  <span class="stat" style="min-width:14ch">UART: <b id="uart-bytes">0</b> B</span>
+  <span class="stat" style="min-width:17ch">TX Frames: <b id="rx-frames">0</b></span>
+  <span class="stat" style="min-width:11ch">Links: <b id="active-links" style="color:var(--accent)">0</b></span>
   <button id="pause-btn" style="background:var(--btn-bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:6px 16px; font-family:inherit; font-size:12px; cursor:pointer; width:72px; flex-shrink:0; position:relative; z-index:1;" title="Pause/Play (Space)">Pause</button>
   <span class="stat" style="display:flex; align-items:center; gap:6px; flex-shrink:0;">Speed: <b id="speed-val">10</b>x
     <input type="range" id="speed-slider" min="1" max="100" value="10"
@@ -1324,6 +1319,10 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
   // Console lines carry the firmware's terminal codes: colours, and Zephyr's
   // shell redraws its prompt with "cursor left 8, erase to end".  Apply the
   // cursor-left (the erase then has nothing after it) and drop the rest.
+  // Deliberately not handled, as no bundled firmware needs it: other CSI
+  // cursor moves are dropped, not applied; an OSC sequence (ESC ] ... BEL,
+  // e.g. a window title) loses only its ESC and shows its payload; and a
+  // bare \r does not redraw the line, it stays in the text.
   function termText(s) {
     if (s.indexOf('\x1b') < 0) return s;
     const re = /\x1b\[([0-9;]*)([A-Za-z])/g;
