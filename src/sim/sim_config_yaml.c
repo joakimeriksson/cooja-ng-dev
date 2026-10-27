@@ -597,8 +597,8 @@ static void put_meta(FILE *f, const char *json) {
     cJSON_ArrayForEach(e, meta) {
         fputs(sep, f); put_str(f, e->string); fputs(": ", f);
         if (cJSON_IsString(e)) put_str(f, e->valuestring);
-        else if (e->valuedouble == (double)(long long)e->valuedouble &&
-                 e->valuedouble > -1e15 && e->valuedouble < 1e15)
+        else if (e->valuedouble > -1e15 && e->valuedouble < 1e15 &&
+                 e->valuedouble == (double)(long long)e->valuedouble)
             fprintf(f, "%lld", (long long)e->valuedouble);
         else put_num(f, e->valuedouble);
         sep = ", ";
