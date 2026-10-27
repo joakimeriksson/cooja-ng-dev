@@ -1174,8 +1174,13 @@ static int cmd_new(int argc, char **argv) {
         fail("new: unknown template '%s' (rpl-udp, nullnet, hello)", tname);
         return EXIT_INVALID;
     }
-    if (n < 1 || n > MAX_SIM_NODES || (tp->roles[1] && n < 2)) {
-        fail("new: %d nodes: give %s1 to %d", n, tp->roles[1] ? "2 (a server and a client) " : "", MAX_SIM_NODES);
+    /* A radio template needs a second node: its check waits for a line
+     * that only traffic from another node prints. */
+    int min_n = tp->expect_radio ? 2 : 1;
+    if (n < min_n || n > MAX_SIM_NODES) {
+        fail("new: %d nodes: give %d%s to %d", n, min_n,
+             tp->roles[1] ? " (a server and a client)" : min_n > 1 ? " (one to send, one to receive)" : "",
+             MAX_SIM_NODES);
         return EXIT_INVALID;
     }
     /* The bundled udp-server is stock Contiki-NG: its routing table holds
@@ -1254,10 +1259,15 @@ static int cmd_new(int argc, char **argv) {
     sp.range = spacing * 1.5;
     /* circle: evenly spaced round the server, but never farther from it
      * than the radio reaches (from 11 nodes up spacing*clients/2pi would
-     * be); without a server the ring itself carries the traffic. */
-    sp.radius = spacing * sp.clients / (2.0 * M_PI);
-    if (sp.radius < spacing) sp.radius = spacing;
-    if (tp->roles[1] && sp.radius > 0.95 * sp.range) sp.radius = 0.95 * sp.range;
+     * be).  Without a server the ring itself carries the traffic, so its
+     * neighbours are exactly `spacing` apart: the chord 2r sin(pi/n). */
+    if (tp->roles[1]) {
+        sp.radius = spacing * sp.clients / (2.0 * M_PI);
+        if (sp.radius < spacing) sp.radius = spacing;
+        if (sp.radius > 0.95 * sp.range) sp.radius = 0.95 * sp.range;
+    } else {
+        sp.radius = sp.clients > 1 ? spacing / (2.0 * sin(M_PI / sp.clients)) : spacing;
+    }
     sp.side = round(spacing * sqrt((double)sp.clients) * 10) / 10;
 
     /* Built in a temporary file next to the output and renamed into place
@@ -1289,9 +1299,12 @@ static int cmd_new(int argc, char **argv) {
         if (hops >= 0 || strcmp(layout, "random") != 0) break;
         sp.side = round(sp.side * 0.9 * 10) / 10;
     }
-    if (hops < 0)
-        fprintf(stderr, "cngsim: warning: in this layout not every node has a radio "
-                "path to node 1; try a smaller --spacing or another layout\n");
+    if (hops < 0) {
+        unlink(tmp);
+        fail("new: in this layout not every node has a radio path to node 1, so "
+             "its check would fail; try a smaller --spacing or another layout");
+        return EXIT_INVALID;
+    }
     /* RPL needs time per hop before the farthest client is answered:
      * measured on the bundled Sky images, a line of 7 hops passes at 119 s
      * and one of 15 at 250 s.  Unless asked for a duration, give it

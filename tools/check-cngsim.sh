@@ -61,10 +61,12 @@ done
     && ok "shell-nrf54l15 with a script" || bad "shell-nrf54l15 with a script"
 
 echo "== cngsim new -> check -> run"
+# A ring of 2 or 3 without a server used to put neighbours out of range.
 for spec in "rpl-udp sky 5 grid" "rpl-udp nrf52840-dk 3 line" "nullnet sky 4 circle" \
-            "hello cc2538dk 2 random"; do
+            "nullnet sky 2 circle" "nullnet sky 3 circle" "hello cc2538dk 2 random" \
+            "hello sky 1 grid"; do
     set -- $spec
-    f="$WORK/new/$1-$2-$4.yaml"
+    f="$WORK/new/$1-$2-$3-$4.yaml"
     mkdir -p "$WORK/new"
     if ! "$CNGSIM" new "$1" --board "$2" -n "$3" --layout "$4" -o "$f" >/dev/null 2>&1; then
         bad "new $spec"; continue
@@ -136,9 +138,10 @@ printf 'version: 2\nmote_types:\n  - { name: a, board: nrf52840-dongle, firmware
     && ok "board: nrf52840-dongle on a .nrf52840 image" || bad "board: nrf52840-dongle on a .nrf52840 image"
 expect2 "a duration without a unit" "$CNGSIM" run hello-sky -t 10
 expect2 "rpl-udp with more nodes than the server answers" "$CNGSIM" new rpl-udp -n 17 -o "$WORK/x.yaml"
-sed 's/node: 17 }/node: 77 }/' "$ROOT/examples/grid-sky.yaml" > "$ROOT/examples/.check-n77.yaml"
-expect2 "check: a step names a node the setup does not have" "$CNGSIM" check "$ROOT/examples/.check-n77.yaml"
-rm -f "$ROOT/examples/.check-n77.yaml"
+expect2 "nullnet with one node (nothing to receive from)" "$CNGSIM" new nullnet -n 1 -o "$WORK/x.yaml"
+sed -e 's/node: 2 }/node: 77 }/' -e "s#\.\./firmware/#$ROOT/firmware/#g" \
+    "$ROOT/examples/grid-sky.yaml" > "$WORK/n77.yaml"
+expect2 "check: a step names a node the setup does not have" "$CNGSIM" check "$WORK/n77.yaml"
 printf '{ "nodes": [ { "firmware": "%s" }, { "firmware": "%s/missing.sky" } ],\n  "mote_types": [ { "firmware": "%s" } ] }\n' \
     "$ROOT/firmware/sky/hello-world.sky" "$WORK" "$ROOT/firmware/sky/hello-world.sky" > "$WORK/v1.json"
 expect2 "check: a v1 setup with mote_types and a missing image" "$CNGSIM" check "$WORK/v1.json"

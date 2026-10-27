@@ -1,6 +1,8 @@
-# Seventeen Tmote Skys: a 4 x 4 grid of clients with the RPL root in the
-# middle.  Each node only hears its grid neighbours, so the corners reach
-# the root over three hops.  Watch the routes (the arrows in the browser)
+# Sixteen Tmote Skys: 15 clients on a 4 x 4 grid (its last corner left
+# empty) with the RPL root in the middle.  Each node only hears its grid
+# neighbours, so the corners reach the root over three hops.  15 clients,
+# not 16: the bundled udp-server's routing table holds 16 routes, one of
+# them its own, so a 16th client would never be answered.  Watch the routes (the arrows in the browser)
 # settle towards node 1.
 #   cngsim run grid-sky --ui
 
@@ -23,8 +25,8 @@ nodes:
   - { type: server, id: 1, x: 75, y: 75 }
   # Layouts place many nodes at once: grid (columns, spacing), line (spacing),
   # circle (radius) or random (width, height), starting at x, y.
-  - { type: client, id: 2, count: 16, layout: grid, columns: 4, spacing: 50, x: 0, y: 0 }
+  - { type: client, id: 2, count: 15, layout: grid, columns: 4, spacing: 50, x: 0, y: 0 }
 
 test:
   steps:
-    - { wait: "Received response", node: 17 }  # the far corner, three hops out
+    - { wait: "Received response", node: 2 }   # a corner, three hops out
