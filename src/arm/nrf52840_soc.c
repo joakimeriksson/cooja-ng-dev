@@ -237,9 +237,12 @@ static void uarte_deliver_rx(nrf_uart_state_t *uart) {
  * (ENDRX), not on a wire clock of its own: the delay runs from the ack.
  * Delivered at the ack itself it overwrote the 1-byte DMA buffer before a
  * driver that clears ENDRX first and reads the buffer second (RIOT) had read
- * it: the first byte of every line was lost.  Input that arrives while no
- * delay is pending (the firmware waiting with RX armed) is still delivered
- * at once, by nrf_uart_feed_rx. */
+ * it: the first byte of every line was lost.  Two paths still deliver at
+ * once, with no byte time: input that arrives while no delay is pending
+ * (the firmware waiting with RX armed, nrf_uart_feed_rx), and TASKS_STARTRX,
+ * so a driver without the ENDRX_STARTRX short that restarts RX itself after
+ * each ack gets the next byte when it does.  No byte is lost either way,
+ * but the byte timing depends on the driver. */
 static void uarte_rx_event_cb(void *user_data, cpu_event_t *event) {
     (void)event;
     uarte_deliver_rx((nrf_uart_state_t *)user_data);
