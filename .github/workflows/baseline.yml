@@ -5,10 +5,17 @@ name: baseline
 # binaries from this tree and diffs everything but the wall-clock lines:
 # identical output means every mote ran at the same nanosecond.  A red job
 # here is not a broken test but a changed simulation — sometimes intended (a
-# peripheral model fixed), in which case the PR should say so.  It runs only
-# when engine sources change; docs and configs alone cannot move a run.
+# peripheral model fixed).  Such a PR names the workloads it moves on a line
+# of its description, e.g.
+#
+#   baseline-moves: shell54
+#
+# and the job then passes when exactly those differ (see MOVED in the
+# script).  It runs only when engine sources change; docs and configs alone
+# cannot move a run.  Editing the description reruns it.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     paths:
       - 'src/**'
       - 'include/**'
@@ -21,6 +28,10 @@ on:
     inputs:
       ref:
         description: 'reference revision (default: the merge-base with main)'
+        required: false
+        default: ''
+      moves:
+        description: 'workloads expected to move, e.g. "shell54"'
         required: false
         default: ''
 
@@ -59,9 +70,17 @@ jobs:
       - name: Build both revisions and diff nine workloads
         env:
           TMPDIR: ${{ runner.temp }}/baseline
+          PR_BODY: ${{ github.event.pull_request.body }}
+          MOVES_INPUT: ${{ github.event.inputs.moves }}
+          REF_INPUT: ${{ github.event.inputs.ref }}
         run: |
           mkdir -p "$TMPDIR"
-          tools/check-baseline.sh ${{ github.event.inputs.ref }}
+          # The description's "baseline-moves:" line; the script refuses a
+          # name that is not a workload.
+          MOVED=${MOVES_INPUT:-$(printf '%s\n' "$PR_BODY" | tr -d '\r' |
+                  sed -n 's/^baseline-moves:[[:space:]]*//p' | head -1)}
+          echo "baseline-moves: ${MOVED:-(none)}"
+          MOVED=$MOVED tools/check-baseline.sh $REF_INPUT
 
       # The script keeps its logs (KEEP=1) when a workload differs.
       - name: Keep the logs of a moved simulation

@@ -230,6 +230,33 @@ static void uarte_deliver_rx(nrf_uart_state_t *uart) {
         arm_nvic_set_pending((arm_nvic_t *)soc->plat->cpu.nvic, uart->irq_num);
 }
 
+/* One byte time on the console: 10 bits at 115200 baud. */
+#define NRF_UARTE_CHAR_NS   86800LL
+
+/* The next byte arrives one byte time after the firmware acks the last one
+ * (ENDRX), not on a wire clock of its own: the delay runs from the ack.
+ * Delivered at the ack itself it overwrote the 1-byte DMA buffer before a
+ * driver that clears ENDRX first and reads the buffer second (RIOT) had read
+ * it: the first byte of every line was lost.  Two paths still deliver at
+ * once, with no byte time: input that arrives while no delay is pending
+ * (the firmware waiting with RX armed, nrf_uart_feed_rx), and TASKS_STARTRX,
+ * so a driver without the ENDRX_STARTRX short that restarts RX itself after
+ * each ack gets the next byte when it does.  No byte is lost either way,
+ * but the byte timing depends on the driver. */
+static void uarte_rx_event_cb(void *user_data, cpu_event_t *event) {
+    (void)event;
+    uarte_deliver_rx((nrf_uart_state_t *)user_data);
+}
+
+static void uarte_schedule_rx(nrf_uart_state_t *uart) {
+    nrf52840_soc_t *soc = (nrf52840_soc_t *)uart->soc;
+    if (!uart->rx_event || uart->rx_head == uart->rx_tail) return;
+    arm_cpu_t *cpu = &soc->plat->cpu;
+    arm_schedule_event(cpu, (arm_event_t *)uart->rx_event,
+                       (int64_t)cpu->cycles +
+                       (int64_t)cpu_ns_to_cycles(NRF_UARTE_CHAR_NS, cpu->cpu_freq_hz));
+}
+
 /* Enqueue host console input; deliver immediately if the firmware is waiting. */
 void nrf_uart_feed_rx(nrf_uart_state_t *uart, const uint8_t *buf, int len) {
     for (int i = 0; i < len; i++) {
@@ -340,7 +367,7 @@ static void nrf_uart_write(void *user_data, uint32_t addr, uint32_t value) {
         case NRF_UARTE_TASKS_STOPRX:   if (value == 1) uart->rx_armed = 0; break;
         case NRF_UARTE_EVENTS_ENDRX:
             uart->endrx = value & 1;
-            if (!uart->endrx) uarte_deliver_rx(uart);   /* firmware acked → next byte */
+            if (!uart->endrx) uarte_schedule_rx(uart);  /* firmware acked → next byte */
             break;
         case NRF_UARTE_EVENTS_RXDRDY:    uart->rxdrdy    = value & 1; break;
         case NRF_UARTE_EVENTS_RXSTARTED: uart->rxstarted = value & 1; break;
@@ -2146,6 +2173,10 @@ static void nrf52840_soc_init(arm_platform_t *plat) {
                     nrf_clock_read, nrf_clock_write, &soc->clock);
     soc->uart0.soc     = soc;
     soc->uart0.irq_num = NRF_UARTE_IRQ;
+    cpu_event_t *uxe = (cpu_event_t *)calloc(1, sizeof(*uxe));
+    uxe->callback  = uarte_rx_event_cb;
+    uxe->user_data = &soc->uart0;
+    soc->uart0.rx_event = uxe;
     arm_register_io(&plat->cpu, NRF_UART0_BASE, NRF_UART0_SIZE,
                     nrf_uart_read, nrf_uart_write, &soc->uart0);
 
@@ -2290,6 +2321,10 @@ static void nrf52840_soc_destroy(arm_platform_t *plat) {
                     arm_cancel_event(&plat->cpu, (arm_event_t *)rtcs[r]->compare_event[i]);
                     free(rtcs[r]->compare_event[i]);
                 }
+        }
+        if (soc->uart0.rx_event) {
+            arm_cancel_event(&plat->cpu, (arm_event_t *)soc->uart0.rx_event);
+            free(soc->uart0.rx_event);
         }
         free(soc);
     }

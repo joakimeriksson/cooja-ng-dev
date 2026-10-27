@@ -23,6 +23,7 @@
 #   tools/check-baseline.sh HEAD~3
 #   KEEP=1 tools/check-baseline.sh          # keep the logs for inspection
 #   TIMING=1 tools/check-baseline.sh        # run the workloads one at a time
+#   MOVED="shell54" tools/check-baseline.sh # a change that moves shell54 on purpose
 #
 # Each line also carries both binaries' wall time and the change.  The
 # workloads run concurrently by default, so those numbers are contended and
@@ -32,8 +33,16 @@
 # workload's worth of time per workload.
 # The simulation output is compared the same way either way.
 #
-# Exit code 0 = identical, 1 = a workload differs, or did not complete under
-# this tree's binary (non-zero exit, timeout, no Wall-clock line).
+# MOVED names the workloads a change is meant to move (a fixed peripheral
+# model, an action that now lands on time).  Each must differ: its diff is
+# printed as usual, but it does not fail the check.  A named workload that
+# comes out identical fails it, so the list cannot go stale, and so does a
+# name that is not a workload.  Every workload not named must still match.
+#
+# Exit code 0 = identical apart from the MOVED workloads, 1 = a workload
+# differs that is not in MOVED, one in MOVED does not, or a workload did not
+# complete under this tree's binary (non-zero exit, timeout, no Wall-clock
+# line).
 #
 set -u
 
@@ -77,6 +86,16 @@ WORKLOADS=(
     "mn|multinode -t 20000"
     "armmn|arm-multinode firmware/cc2538dk/udp-server.cc2538dk firmware/cc2538dk/udp-client.cc2538dk -t 60000"
 )
+
+# The workloads this change moves on purpose, one name per word (commas are
+# accepted too).
+MOVED_LIST=" $(echo "${MOVED:-}" | tr ',' ' ') "
+for m in $MOVED_LIST; do
+    found=
+    for w in "${WORKLOADS[@]}"; do [ "${w%%|*}" = "$m" ] && found=1; done
+    [ -n "$found" ] || { echo "MOVED names '$m', which is not a workload" >&2; exit 1; }
+done
+moved() { case $MOVED_LIST in *" $1 "*) return 0 ;; esac; return 1; }
 
 # Wall-clock lines legitimately differ between two builds of the same code,
 # and the MSP430 PC-trace diagnostics ("PC trace:" / "FW cc2420_transmit=")
@@ -176,8 +195,17 @@ for w in "${WORKLOADS[@]}"; do
     diff <(grep -vE "$FILTER" "$ae") <(grep -vE "$FILTER" "$be") >"$WORK/$name.err.diff"
     n=$(wc -l <"$WORK/$name.out.diff" | tr -d ' ')
     ne=$(wc -l <"$WORK/$name.err.diff" | tr -d ' ')
-    if [ "$n" -eq 0 ] && [ "$ne" -eq 0 ]; then
+    if [ "$n" -eq 0 ] && [ "$ne" -eq 0 ] && moved "$name"; then
+        printf "  SAME  %-9s (in MOVED, but identical)  %s\n" "$name" "$(timing "$a" "$b")"
+        rc=1
+    elif [ "$n" -eq 0 ] && [ "$ne" -eq 0 ]; then
         printf "  ok    %-9s %s\n" "$name" "$(timing "$a" "$b")"
+    elif moved "$name"; then
+        printf "  moved %-9s (stdout %d lines, stderr %d lines; in MOVED)  %s\n" \
+               "$name" "$n" "$ne" "$(timing "$a" "$b")"
+        head -20 "$WORK/$name.out.diff"
+        [ "$ne" -eq 0 ] || head -20 "$WORK/$name.err.diff"
+        KEEP=1
     else
         printf "  DIFF  %-9s (stdout %d lines, stderr %d lines)  %s\n" \
                "$name" "$n" "$ne" "$(timing "$a" "$b")"
@@ -189,9 +217,11 @@ for w in "${WORKLOADS[@]}"; do
 done
 
 [ -n "${TIMING:-}" ] || echo "  (wall times from concurrent runs: indicative only; TIMING=1 serialises them)"
-if [ $rc -eq 0 ]; then
+if [ $rc -eq 0 ] && [ -n "${MOVED_LIST// /}" ]; then
+    echo "check-baseline: OK (identical to $REF_SHA except the MOVED workloads:${MOVED_LIST% })"
+elif [ $rc -eq 0 ]; then
     echo "check-baseline: OK (identical to $REF_SHA)"
 else
-    echo "check-baseline: FAILED — the simulation moved or a workload did not complete" >&2
+    echo "check-baseline: FAILED — the simulation moved, a MOVED workload did not, or a workload did not complete" >&2
 fi
 exit $rc
