@@ -673,6 +673,12 @@ int ws_server_bind_addr_valid(const char *bind_addr) {
     return inet_pton(AF_INET, bind_or_default(bind_addr), &a) == 1;
 }
 
+int ws_server_bind_is_loopback(const char *bind_addr) {
+    struct in_addr a;
+    return inet_pton(AF_INET, bind_or_default(bind_addr), &a) == 1 &&
+           (ntohl(a.s_addr) >> 24) == 127;
+}
+
 void ws_server_url(const char *bind_addr, int port, char *out, size_t outsz) {
     bind_addr = bind_or_default(bind_addr);
     /* localhost reaches 127.0.0.1 and a wildcard bind; any other address
@@ -692,7 +698,7 @@ ws_server_t *ws_server_init(const char *bind_addr, int port) {
 
     ws_server_t *srv = calloc(1, sizeof(ws_server_t));
     if (!srv) return NULL;
-    srv->loopback_only = (ntohl(bind_in.s_addr) >> 24) == 127;
+    srv->loopback_only = ws_server_bind_is_loopback(bind_addr);
 
     /* Ignore SIGPIPE globally — broken WebSocket connections must not kill the process */
     signal(SIGPIPE, SIG_IGN);

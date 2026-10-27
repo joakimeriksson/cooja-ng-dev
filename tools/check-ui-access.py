@@ -594,6 +594,7 @@ def main():
     # network is look-only by default.  Save is the probe: it answers with
     # the setup as YAML only when editing is allowed.
     for label, extra, want in (('loopback', (), True),
+                               ('--ui-bind localhost', ('--ui-bind', 'localhost'), True),
                                ('--ui-bind 0.0.0.0', ('--ui-bind', '0.0.0.0'), False),
                                ('--ui-bind 0.0.0.0 --ui-edit',
                                 ('--ui-bind', '0.0.0.0', '--ui-edit'), True)):

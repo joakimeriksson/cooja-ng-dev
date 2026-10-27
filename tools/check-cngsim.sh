@@ -28,7 +28,8 @@ console() { grep -E '^ +[0-9]+\.[0-9]{3} \[Node ' || true; }
 
 echo "== one simulation path (console lines and exit code, cngsim vs test_runner)"
 for cfg in "$ROOT"/examples/*.yaml configs/test-rpl-udp-sky.json configs/chain-4node-sky.yaml \
-           configs/test-mixed-platform-rpl.yaml configs/test-rpl-udp-cc1352r1-launchpad.yaml; do
+           configs/test-mixed-platform-rpl.yaml configs/test-rpl-udp-cc1352r1-launchpad.yaml \
+           configs/cross-level-demo.json; do
     case "$cfg" in *shell-*) continue ;; esac
     name=$(basename "$cfg")
     (cd "$ROOT" && "$RUNNER" test "$cfg" 2>/dev/null) > "$WORK/a.out"; ra=$?
@@ -175,6 +176,17 @@ if [ "$rc" = 130 ] && grep -q '^INTERRUPTED' "$WORK/int.out"; then
     ok "exit 130: $(tail -1 "$WORK/int.out")"
 else
     bad "Ctrl-C: exit $rc, '$(tail -1 "$WORK/int.out")'"
+fi
+# -v shows the simulator's own output unfiltered; it still says INTERRUPTED.
+"$CNGSIM" run rpl-udp-sky -v --duration 3000s --speed 1 > "$WORK/intv.out" 2>&1 &
+pid=$!
+sleep 3
+kill -INT "$pid"
+wait "$pid"; rc=$?
+if [ "$rc" = 130 ] && grep -q '^INTERRUPTED' "$WORK/intv.out"; then
+    ok "-v: exit 130: $(grep '^INTERRUPTED' "$WORK/intv.out")"
+else
+    bad "-v Ctrl-C: exit $rc, '$(tail -1 "$WORK/intv.out")'"
 fi
 
 echo

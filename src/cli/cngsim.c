@@ -267,13 +267,27 @@ static void out_line(int fd, const char *s) {
     }
 }
 
+/* Formatted, whole: a console line can be as long as the filter's line
+ * buffer, and a cut one would differ from what test_runner prints. */
 static void out_fmt(int fd, const char *fmt, ...) {
     char buf[2048];
-    va_list ap;
+    va_list ap, ap2;
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_copy(ap2, ap);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    out_line(fd, buf);
+    if (n >= (int)sizeof(buf)) {
+        char *big = malloc((size_t)n + 1);
+        if (big) {
+            vsnprintf(big, (size_t)n + 1, fmt, ap2);
+            out_line(fd, big);
+            free(big);
+            va_end(ap2);
+            return;
+        }
+    }
+    va_end(ap2);
+    if (n >= 0) out_line(fd, buf);
 }
 
 static void open_browser(const char *url) {
@@ -352,6 +366,10 @@ static void stdout_line(int out, char *line) {
         } else if (strncmp(t, "--- Simulation running ---", 26) == 0) {
             F.running = 1;
             header(out);
+        } else if (is_console_line(line)) {
+            /* A node can print while it is set up (a JS mote's init()). */
+            header(out);
+            if (!F.quiet) out_fmt(out, "%s\n", line);
         } else if (F.trace & TRACE_BOOT) {
             out_fmt(out, "%s\n", line);
         } else if (strstr(t, "rror") || strstr(t, "annot ") || strstr(t, "ailed") ||
@@ -744,7 +762,13 @@ static int cmd_run(int argc, char **argv) {
     if (verbose || passthrough) {
         if (verbose && !passthrough) F.trace = TRACE_ALL;
         int vrc = run_mixed_multinode_test(rargc, rargv);
-        return csim_cli_stop && !csim_cli_run_complete ? EXIT_INTERRUPTED : vrc;
+        if (!(csim_cli_stop && !csim_cli_run_complete)) return vrc;
+        /* Unfiltered, the runner's own summary is the verdict, but an
+         * interruption still says so, as the filtered run's last line does. */
+        double sim_s = (double)csim_cli_simulated_ns / 1e9;
+        printf(sim_s < 1.0 ? "INTERRUPTED · %.3f s simulated\n"
+                           : "INTERRUPTED · %.1f s simulated\n", sim_s);
+        return EXIT_INTERRUPTED;
     }
 
     /* The simulation's stdout and stderr go through the filter threads. */

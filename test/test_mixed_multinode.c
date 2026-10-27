@@ -1494,6 +1494,10 @@ static const sim_board_desc_t *board_for_firmware(const char *firmware_path,
     return sim_board_resolve(firmware_path, board, err, errlen);
 }
 
+/* 0 on success; INIT_NODE_NO_BOARD if the image names no board, before
+ * anything about the slot changed; another negative value if boot failed
+ * after the slot was registered. */
+#define INIT_NODE_NO_BOARD (-2)
 static int init_node(int idx, const char *firmware_path,
                      const char *secure_firmware_path, int node_id) {
     char board_err[512];
@@ -1501,7 +1505,7 @@ static int init_node(int idx, const char *firmware_path,
         board_for_firmware(firmware_path, board_err, sizeof(board_err));
     if (!board) {
         fprintf(stderr, "%s\n", board_err);
-        return -1;
+        return INIT_NODE_NO_BOARD;
     }
     mixed_node_t *node = &nodes[idx];
     memset(node, 0, sizeof(*node));
@@ -1683,8 +1687,9 @@ static int ctl_add(void *u, const char *fw, const char *sfw, int node_id) {
     (void)u;
     int nc = ctl_node_count(NULL);
     if (nc >= MAX_NODES) return -1;
-    nodes[nc].id = node_id;
-    if (init_node(nc, fw, sfw, node_id) != 0) {
+    int rc = init_node(nc, fw, sfw, node_id);
+    if (rc == INIT_NODE_NO_BOARD) return -1;     /* the slot was not touched */
+    if (rc != 0) {
         /* init_node registered the slot before boot failed (boot already
          * freed its platform): unregister it so nothing reaches a dead
          * mote, and drop anything it scheduled. */
@@ -1906,8 +1911,8 @@ static void ui_apply_setup(void) {
             n++;
         }
     }
-    bool loopback = !g_ui_bind || strncmp(g_ui_bind, "127.", 4) == 0;
-    ui_service_set_setup(&ui_svc, loopback || g_ui_edit, n, names, fw, sfw);
+    ui_service_set_setup(&ui_svc, ws_server_bind_is_loopback(g_ui_bind) || g_ui_edit,
+                         n, names, fw, sfw);
 }
 
 static bool cli_hold_after_verdict(int64_t sim_ns, int result) {

@@ -189,6 +189,11 @@ static void save_to_browser(websocket_ui_service_t *svc, const char *token) {
         cJSON_AddStringToObject(o, "error", "the setup could not be saved");
     }
     if (tfd >= 0) unlink(path);
+    /* Every connected page gets the text, this host's file paths included:
+     * ws_server has no per-client send, so the token only lets the other
+     * pages ignore it.  On a loopback UI they are all this user's; on a
+     * shared one, editing (and so Save) needs --ui-edit, and the README
+     * says where the text goes. */
     char *txt = cJSON_PrintUnformatted(o);
     if (txt) {
         ws_server_broadcast(svc->server, txt, (int)strlen(txt));
