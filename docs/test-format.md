@@ -239,10 +239,16 @@ mote_types:
 
 A `board:` that contradicts a known extension is an error too.
 
+`kind`, `cpu` and `soc` on a mote type (`kind: emulated-elf, cpu: msp430,
+soc: msp430f1611`, as many bundled configs carry) are labels for people:
+they are checked for type, kept on save, and select nothing.  `board:` or the
+extension decides what runs, so a `soc:` that disagrees with it is not an
+error.
+
 #### File paths
 
 A relative `firmware`, `secure_firmware` or `js_script` path is looked up
-next to the config file first, then (as before 0.3.1) relative to the
+next to the config file first, then (as before 0.4.0) relative to the
 current directory; `~/` is the home directory.  So a config and its
 firmware can live together anywhere, and every older config that names
 paths from the repo root still works from there.

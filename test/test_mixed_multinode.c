@@ -427,7 +427,7 @@ static void update_radio_state(int idx) {
 }
 
 /* Track LED state changes (M16: ui_leds op; platform mapping lives in
- * the adapters — Tmote Sky P5.4-6, CC2538DK PC0-2).  NULL op = no
+ * the adapters — Tmote Sky P5.4-6, the ARM boards' configured pins).  NULL op = no
  * observable LEDs for this mote kind. */
 static void update_led_state(int idx) {
     const sim_mote_t *m = &mote_store[idx];

@@ -798,7 +798,8 @@ static void msp_mote_destroy(sim_mote_t *m) {
 static void msp_mote_reset_time(sim_mote_t *m, int64_t now_ns) {
     msp430_cpu_t *cpu = &MOTE_IMPL(m)->plat.msp.cpu;
     cpu->sim_time_ns = now_ns;
-    cpu->cycles = (uint64_t)now_ns * cpu->cpu_freq_hz / 1000000000ULL;
+    /* Split: the product overflows past about 38 min at 8 MHz. */
+    cpu->cycles = (uint64_t)msp430_ns_to_cycles(now_ns, cpu->cpu_freq_hz);
 }
 
 static int msp_mote_ui_radio_state(const sim_mote_t *m) {
