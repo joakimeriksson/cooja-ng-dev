@@ -718,10 +718,11 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
      * older cycle and then run the gap in one go, its transmissions all
      * stamped with the one global instant.
      * Only called between pump passes (config actions, the shell, the UI,
-     * the serial bridge), never while this node runs: unlike the radio
+     * the serial bridge, Renode), while no node runs: unlike the radio
      * path, which the bus guards, it steps the core and leaves no node
-     * executing. */
-    assert(node->env->radio_bus->executing_node != node->slot);
+     * executing, so a call while another node ran would clear that node's
+     * guard. */
+    assert(node->env->radio_bus->executing_node == -1);
     sim_radio_bus_set_executing(node->env->radio_bus, node->slot);
     arm_mote_rx_byte_sync(m, now_ns);
     sim_radio_bus_set_executing(node->env->radio_bus, -1);

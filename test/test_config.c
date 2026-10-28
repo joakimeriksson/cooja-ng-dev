@@ -18,6 +18,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static char *slurp(const char *path) {
@@ -117,6 +119,31 @@ static int compare(const sim_normalized_config_t *a, const sim_normalized_config
     return bad;
 }
 
+/* Make ./csim-roundtrip-deep-<pid>/d/d/.../d, deep enough that "../" per
+ * level outweighs the absolute path of the current directory.  Returns the
+ * number of d levels, or -1. */
+static int make_deep_dir(char *out, size_t sz) {
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) return -1;
+    int levels = (int)strlen(cwd) / 3 + 4;
+    int n = snprintf(out, sz, "csim-roundtrip-deep-%d", (int)getpid());
+    if (mkdir(out, 0700) != 0) return -1;
+    for (int i = 0; i < levels; i++) {
+        if ((size_t)n + 3 >= sz) return -1;
+        n += snprintf(out + n, sz - (size_t)n, "/d");
+        if (mkdir(out, 0700) != 0) return -1;
+    }
+    return levels;
+}
+
+static void remove_deep_dir(char *path, int levels) {
+    for (int i = 0; i <= levels; i++) {
+        rmdir(path);
+        char *sl = strrchr(path, '/');
+        if (sl) *sl = '\0';
+    }
+}
+
 int run_config_roundtrip(int argc, char **argv);
 int run_config_roundtrip(int argc, char **argv) {
     if (argc < 1) {
@@ -125,9 +152,17 @@ int run_config_roundtrip(int argc, char **argv) {
     }
     const char *tmpdir = getenv("TMPDIR");
     if (!tmpdir || !*tmpdir) tmpdir = "/tmp";
-    char p1[1024], p2[1024];
+    char p1[1024], p2[1024], p3[2048];
     snprintf(p1, sizeof(p1), "%s/csim-roundtrip-%d-a.yaml", tmpdir, (int)getpid());
     snprintf(p2, sizeof(p2), "%s/csim-roundtrip-%d-b.yaml", tmpdir, (int)getpid());
+    /* A third copy goes deep below the current directory, so its relative
+     * paths ("../" per level) come out longer than the absolute paths they
+     * resolve to.  A loader that resolves in place and leaves the old tail
+     * behind fails here, wherever $TMPDIR is. */
+    char deep[1536];
+    int deep_levels = make_deep_dir(deep, sizeof(deep));
+    if (deep_levels < 0) { fprintf(stderr, "cannot create a deep directory below .\n"); return 1; }
+    snprintf(p3, sizeof(p3), "%s/csim-roundtrip-%d-c.yaml", deep, (int)getpid());
 
     int failed = 0, passed = 0;
     printf("=== Config round-trip: load -> YAML -> load ===\n");
@@ -148,11 +183,20 @@ int run_config_roundtrip(int argc, char **argv) {
             if (sim_config_load(&c, p2) != 0) { bad++; printf("    mismatch: second YAML does not load\n"); }
             else { bad += compare(&b, &c); sim_config_free(&c); }
         }
+        memset(&c, 0, sizeof(c));
+        if (write_to(&a, p3, NULL) != 0)       { bad++; printf("    mismatch: deep write\n"); }
+        else if (sim_config_load(&c, p3) != 0) { bad++; printf("    mismatch: YAML written %d levels deep does not load (see %s)\n", deep_levels, p3); }
+        else {
+            int d = compare(&a, &c);
+            if (d) printf("    (the copy written %d levels deep, %s)\n", deep_levels, p3);
+            bad += d;
+            sim_config_free(&c);
+        }
         sim_config_free(&a); sim_config_free(&b);
         if (bad) { printf("  FAIL %s (%d)\n", path, bad); failed++; }
         else     { printf("  PASS %s\n", path); passed++; }
     }
-    if (!failed) { unlink(p1); unlink(p2); }
+    if (!failed) { unlink(p1); unlink(p2); unlink(p3); remove_deep_dir(deep, deep_levels); }
     printf("\n--- Results: %d passed, %d failed ---\n", passed, failed);
     return failed;
 }

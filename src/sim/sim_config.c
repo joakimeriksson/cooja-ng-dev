@@ -19,6 +19,7 @@
 
 static int parse_v1(cJSON *root, sim_normalized_config_t *cfg);
 static int parse_v2(cJSON *root, sim_normalized_config_t *cfg);
+static int v1_image_count(const sim_normalized_config_t *cfg);
 /* "peripherals": [ { "chip": "mx25r6435f", "spim": 0, "cs": "P2.05" }, ... ]
  * cs is written the way the firmware prints it (P<port>.<pin>). */
 static int parse_cs_pin(const char *txt, int *port, int *pin) {
@@ -348,7 +349,45 @@ int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
         }
     }
     resolve_paths(cfg, json_path);
+    /* Each distinct image becomes a mote type when the config is saved,
+     * which is always as v2, so a v1 config is held to the same limit:
+     * otherwise it loads and runs, and the file Save writes is refused.
+     * Counted after resolving, on the paths the writer sees. */
+    if (cfg->version < 2) {
+        int images = v1_image_count(cfg);
+        if (images > SIM_MAX_MOTE_TYPES) {
+            fprintf(stderr, "%s: %d distinct firmware images, but a config can "
+                    "have at most %d mote types\n", json_path, images,
+                    SIM_MAX_MOTE_TYPES);
+            return -1;
+        }
+    }
     return 0;
+}
+
+static int same_image(const char *fw, const char *sfw,
+                       const char *fw2, const char *sfw2) {
+    return strcmp(fw, fw2) == 0 && strcmp(sfw, sfw2) == 0;
+}
+
+/* The number of mote types a v1 config becomes when written as v2, counted
+ * as the YAML writer's build_types() does: every listed mote type, then
+ * each node image pair not seen yet. */
+static int v1_image_count(const sim_normalized_config_t *cfg) {
+    int n = cfg->mote_type_count;
+    for (int i = 0; i < cfg->node_count; i++) {
+        const sim_node_config_t *a = &cfg->nodes[i];
+        int seen = 0;
+        for (int t = 0; t < cfg->mote_type_count && !seen; t++)
+            seen = same_image(a->firmware, a->secure_firmware,
+                              cfg->mote_type_firmware[t],
+                              cfg->mote_type_secure_firmware[t]);
+        for (int k = 0; k < i && !seen; k++)
+            seen = same_image(a->firmware, a->secure_firmware,
+                              cfg->nodes[k].firmware, cfg->nodes[k].secure_firmware);
+        if (!seen) n++;
+    }
+    return n;
 }
 
 /* v1 (legacy) JSON → normalized config.  Verbatim move of the original

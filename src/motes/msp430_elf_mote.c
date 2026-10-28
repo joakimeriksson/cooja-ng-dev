@@ -749,6 +749,11 @@ static int msp_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     msp430_usart_t *console = (plat->config->console_usart == 0)
         ? &plat->usart0 : &plat->usart1;
     bool has_dma = (console->dma_trigger != NULL);
+    /* Only called between pump passes, while no node runs: it steps the
+     * core and leaves no node executing, as the ARM path does.  Checked
+     * before the early return, so input that arrives before RX is on is
+     * held to it too. */
+    assert(bus->executing_node == -1);
     if (!has_dma) {
         if (!console->ie_ptr ||
             !(*console->ie_ptr & console->ie_rx_mask))
@@ -757,9 +762,6 @@ static int msp_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     int baud_cycles = (int)((int64_t)plat->cpu.cpu_freq_hz * 69 / 1000000);
     if (baud_cycles < 200) baud_cycles = 200;
     int consumed = 0;
-    /* Only called between pump passes, never while this node runs: it
-     * steps the core and leaves no node executing (as the ARM path). */
-    assert(bus->executing_node != idx);
     sim_radio_bus_set_executing(bus, idx);
     while (consumed < len) {
         if (!has_dma) {

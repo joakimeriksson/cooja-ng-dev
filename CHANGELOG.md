@@ -19,7 +19,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   usage on stderr.  An unknown mode used to run nothing and exit 0.
   `--help` prints the usage, now listing every mode and option.
 - **More than 16 mote types, or more nodes than the limit, is a load
-  error.**  Mote types beyond 8 used to be dropped without a word.
+  error.**  Mote types beyond 8 used to be dropped without a word.  A v1
+  config is held to it too, counting each distinct firmware image as a
+  type: one with 17 images loaded, and the file Save wrote from it did not.
 - **Two nodes with the same id is a load error**, including an explicit id
   equal to the one an unnumbered node is given.  They used to share an
   address and a console label.
