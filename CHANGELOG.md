@@ -13,14 +13,15 @@ Cooja-NG for people who did not build it. `cngsim` takes a download to a
 running simulation in three commands, with commented examples, layouts that
 place many nodes at once, and a web UI that edits the running network and
 saves it as YAML. The same C code runs in the browser on the original
-firmware ELFs, held to the native build byte for byte, behind every demo on
-the site. Two TI SimpleLink LaunchPads join (CC1352R1 and CC1312R7, checked
+firmware ELFs, held to the native build byte for byte, behind the site's
+live demos. Two TI SimpleLink LaunchPads join (CC1352R1 and CC1312R7, checked
 against hardware), Contiki-NG talks to Zephyr and to RIOT in two interop
 demos, and four boards without a radio model leave. Configs are checked
-harder: an image whose board cannot be told, a duplicate id or too many mote
-types is a load error now rather than a quiet surprise, so read *Changed*
-before upgrading. The plugin ABI (version 3) and the files Contiki-NG's CI
-uses are unchanged.
+harder: an image whose board cannot be told, a duplicate id, too many mote
+types or a plugin that is not there is an error now rather than a quiet
+surprise, so read *Changed* before upgrading. The plugin API (version 3) and
+the files Contiki-NG's CI uses are unchanged; plugins that read
+`radio_medium_t` fields directly must be rebuilt (*Changed*).
 
 Contributors to this release: @nfi (warnings as errors, and reviews of the
 CC13x2 boards, `cngsim`, the browser build, the engine timing fixes and the
@@ -37,10 +38,38 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - **`test_runner` with no arguments, or an unknown mode, exits 2** with its
   usage on stderr.  An unknown mode used to run nothing and exit 0.
   `--help` prints the usage, now listing every mode and option.
-- **More than 16 mote types, or more nodes than the limit, is a load
+- **More than 16 mote types, or more nodes than the limit (128), is a load
   error.**  Mote types beyond 8 used to be dropped without a word.  A v1
   config is held to it too, counting each distinct firmware image as a
   type: one with 17 images loaded, and the file Save wrote from it did not.
+  On the command line `-n` over 128, or more than 128 firmware images, is
+  refused the same way; it used to run 128 nodes under a banner naming more.
+- **A plugin that cannot be loaded, or a medium no plugin provides, is an
+  error** (exit 2, before the run starts), from `--plugin`, a config's
+  `plugins` list or its `medium`.  A misspelt built-in name (`energist`)
+  used to print one line and run without it, and an unknown medium ran on
+  the default UDGM.  `cngsim check` reports an unknown built-in name and an
+  unreadable plugin path too.
+- **With `--ui`, a test verdict no longer ends the run.**  It is printed when
+  it is decided and the run continues until the UI ends it (or
+  `--wall-timeout`); the full report still comes at the end.  A script that
+  relied on `--ui` exiting at the verdict now runs until it is stopped.
+  Headless and `--ui-record` runs are unchanged (*Fixed* has the details).
+- **Firmware paths are looked up next to the config first** (*Added*): a
+  name that exists both there and in the current directory now gives the
+  file next to the config.
+- **libcsim: changed signatures and layouts.**  `sim_board_for_path`
+  returns NULL for an unknown extension instead of the Sky board;
+  `sim_config_write_yaml` takes the directory to write paths relative to,
+  and the `sim_control` ops' `save_config` a `for_page` flag;
+  `msp430_config_find`, `msp430f149_config` and `cc430f5137_config` are
+  gone with their boards.  `sim_normalized_config_t` (16 mote types, node
+  `name`, `meta` and relative paths), `arm_cpu_t` (96 IO windows,
+  `io_width`) and `radio_medium_t` (the frame tracker's `tail`) changed
+  layout, so code built against them, including a medium plugin that reads
+  `radio_medium_t` fields rather than calling its accessors, must be
+  rebuilt.  The plugin headers (`csim_plugin.h`, `sim_service.h`,
+  `sim_observer.h`) are unchanged and `CSIM_PLUGIN_API_VERSION` stays 3.
 - **Two nodes with the same id is a load error**, including an explicit id
   equal to the one an unnumbered node is given.  They used to share an
   address and a console label.
@@ -48,8 +77,7 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
   compiler that reports something new. The vendored QuickJS header is a
   system include (`-isystem`), so its function-pointer cast no longer warns
-  in every file that includes `js_node.h`. `make debug -jN` no longer races
-  `clean` against the compile.
+  in every file that includes `js_node.h`.
 - **A PR that moves a simulation on purpose says which workloads.** A
   `baseline-moves: shell54` line in its description lets the
   `byte-identity vs main` job pass when exactly those workloads differ;
@@ -65,8 +93,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   - nRF52840 UARTE input keeps the first byte of a line, which arrives one
     byte time after the ENDRX acknowledgement;
   - an ARM core in WFI with no event queued sleeps to the slice horizon;
-  - radio-bus frames over 160 bytes reach a busy receiver whole, and a
-    frame whose length cannot be read no longer holds up the queue;
+  - radio-bus frames too long for the old 160-byte queue entry (a CC1200
+    frame over about 150 bytes) reach a busy receiver whole, and a frame
+    whose length cannot be read no longer holds up the queue;
   - the 802.15.4g frame tracker takes each frame's own channel and counts
     the CC1200's trailing CRC bytes with it.
 
@@ -87,8 +116,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   `new rpl-udp` takes up to 16 nodes.
 - **Edit a running simulation in the web UI**: add nodes of the setup's
   mote types, remove and reboot nodes, send a line to a node's console,
-  and save the setup as YAML.  On by default on a loopback UI; a UI on
-  `--ui-bind` is look-only unless `--ui-edit` is given.  The browser never
+  and save the setup as YAML.  On by default on a loopback UI; a UI bound
+  to another address with `--ui-bind` is look-only unless `--ui-edit` is
+  given.  The browser never
   names a file.
 - **Layouts**: a node entry with `count` and `layout` (`grid`, `line`,
   `circle`, `random`) places many nodes, as Cooja's Add-motes dialog does.
@@ -107,12 +137,13 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   current directory still wins, and `CSIM_UI_PAGE` names another.
 - **Twelve commented example simulations** (`examples/`), runnable by name.
 - **`make install`** (`PREFIX`, `DESTDIR`), and release tarballs that carry
-  `cngsim`, the examples, their firmware and the guides beside the
-  `build/test_runner` and `tools/` the Contiki-NG suite uses.
+  `cngsim`, the examples, their firmware, the guides and the setups the
+  guides run, beside the `build/test_runner` and `tools/` the Contiki-NG
+  suite uses.
 - **Cooja-NG in the browser** (`wasm/`): the whole runner compiled to
   WebAssembly with Emscripten, running in a Web Worker behind the existing
-  web UI, on the original firmware ELFs. Each demo on the site gets a "Run it
-  live" link next to its recording. It is the same C code as the native
+  web UI, on the original firmware ELFs. The site's demos get a "Run it live"
+  link next to their recording (all but the 16-node CC2538 grid, below). It is the same C code as the native
   build, held to it by `make -C wasm check`: every live scenario gives output
   identical to `build/test_runner`, down to each node's final cycle count,
   checked on every PR and before every deploy. Interpreter only; no `.so`
@@ -168,11 +199,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 
 ### Fixed
 - **`--ui`: a finished test ended the run**, about two seconds into the
-  TSCH demo, while `-t` already did not. With the web UI on, a test verdict
-  (JSON steps or a JS script) is now printed when it is decided and the run
-  continues until the UI ends it; the full report still comes at the end.
-  Steps that pass with a validator still short of its count print as failed,
-  as the report will say. A restart from the UI or the shell re-arms the test
+  TSCH demo, while `-t` already did not (*Changed*). Steps that pass with
+  a validator still short of its count print as failed, as the report will
+  say. A restart from the UI or the shell re-arms the test
   instead of keeping the previous run's verdict, and a `--wall-timeout` after
   the verdict keeps its exit code (it exits 6 only when it cut the test
   short). Headless and `--ui-record` runs are unchanged.
@@ -208,10 +237,11 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   preamble, so a hopping sub-GHz sender's frames were filtered on the wrong
   channel. It now also counts the CC1200's two trailing CRC bytes as part
   of the frame, so they share its channel snapshot and loss decision.
-- **Radio bus: a queued frame longer than 160 bytes was truncated.** The
-  deferred-RX queue now holds 256-byte frames, the longest the bus carries
-  (sub-GHz PHR lengths up to 200, `RADIO_BUS_SUBGHZ_MAX_LEN`); a CC1200
-  frame over ~150 bytes reached a busy receiver cut short.
+- **Radio bus: a queued frame too long for its 160-byte entry was
+  truncated.** The entry held the preamble, SFD and length header too, so a
+  CC1200 frame over about 150 bytes reached a busy receiver cut short. The
+  deferred-RX queue now holds 256 bytes, the longest the bus carries
+  (sub-GHz PHR lengths up to 200, `RADIO_BUS_SUBGHZ_MAX_LEN`).
 - **Radio bus: a frame whose length could not be read was parked at the
   head of the receiver's queue for good**, holding back every frame behind
   it. It is handed to the chip, whose own sync search ignores it.
@@ -222,9 +252,13 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   128 MHz (nRF54L15) and 144 s at 64 MHz: an nRF54L15 rebooted at 80 s from
   the shell or the UI sat at −8.2 × 10⁹ cycles and printed nothing more.
   MSP430 nodes had the same product, past about 38 minutes.
-- **Web UI LEDs of the OpenMote and the Firefly stayed off.** Every CC2538
-  board was read from the CC2538DK's pins (PC0–2); each board's own pins
-  (PC4/6/7, PD5/4/3) are read now. The simulation itself was not affected.
+- **Web UI LEDs of the Zolertia Firefly stayed off.** Every CC2538 board was
+  read from the CC2538DK's pins (PC0–2); the Firefly's own (PD5/4/3) are read
+  now. The simulation itself was not affected.
+- **`make debug -jN` raced `clean` against the compile.**
+- **CI: the determinism, config-equivalence and browser-parity checks
+  passed when both sides failed the same way** (a missing firmware twice).
+  Each now requires the runs to exit 0.
 - **Web UI: the topology stopped drawing in a panel under 80 px.** The
   40 px margin made the scale negative and `arc()` threw `IndexSizeError`
   on every update (seen on the site's live demos). The margin now shrinks
@@ -241,6 +275,13 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   saving that session writes a file the loader refuses.
 - `kind`, `cpu` and `soc` on a mote type are labels and select nothing
   (`docs/test-format.md`).
+- The bundled XIAO nRF54L15 `udp-server`/`udp-client` images boot but never
+  form a network (as in 0.3.0), so `cngsim new rpl-udp` does not offer the
+  XIAO; its TrustZone RPL-UDP setup (`configs/test-tz-rpl-udp-nrf54l15-xiao.yaml`)
+  works.
+- The 16-node CC2538 grid stalls at about 0.6 s simulated when run live in
+  a browser, while the WebAssembly build runs it under Node.js with output
+  identical to native; the site shows its recording only.
 - From 0.3.0, still standing: the kernel/radio review's open findings (F2,
   F3, F6, F18), Renode as an RPL client of a csim root, no FreeBSD binary,
   MSP430 CS HFXT returning the DCO frequency, the energest ARM CPU current,

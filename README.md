@@ -31,7 +31,7 @@ firmware/*.cooja       ──►│  Native Cooja motes (dlopen)                
 
 **Multi-ISA:** MSP430, ARM Cortex-M3/M4F/M33, and **RISC-V** — the latter via the nRF54L15's FLPR (an RV32EMC coprocessor) running unmodified Contiki-NG, dual-core alongside the M33 over shared SRAM. (RV32EMC is `rv32emc_zicsr_zifencei` — base integer + M (mul/div/rem) + C (compressed) + CSR + fence.i, in the coprocessor role; not yet a standalone RISC-V networking node.)
 
-Designed for: headless CI for the Contiki-NG test suite, network research with hundreds of mixed-architecture nodes, and single-firmware debugging with deterministic seeds.  Roughly an order of magnitude faster than Cooja + MSPSim, no JVM dependency, builds with `make` on Linux and macOS and `gmake` on FreeBSD.  Not a full Cooja replacement — no GTK GUI, no Java plugin ecosystem, no closed-source motes.
+Designed for: headless CI for the Contiki-NG test suite, network research with up to 128 mixed-architecture nodes, and single-firmware debugging with deterministic seeds.  Roughly an order of magnitude faster than Cooja + MSPSim, no JVM dependency, builds with `make` on Linux and macOS and `gmake` on FreeBSD.  Not a full Cooja replacement — no GTK GUI, no Java plugin ecosystem, no closed-source motes.
 
 ## Quick start
 
@@ -186,7 +186,7 @@ sudo setcap cap_net_admin+eip ../contiki-ng/tools/serial-io/tunslip6
 ./tools/run-cooja-tests.sh --with-tun -v 2>&1 | tee cooja-tests-tun.log
 
 # One test, one seed, log beside the .csc (--logdir mirrors the tests/ layout)
-./tools/run-cooja-tests.sh 07-simulation-base/01-cooja-hello-world \
+./tools/run-cooja-tests.sh 07-simulation-base/01-hello-world-sky \
     --seed 3 --logdir ../contiki-ng/tests
 
 # Rebuild test firmware (only if Contiki sources changed)

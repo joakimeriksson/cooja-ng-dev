@@ -36,7 +36,7 @@ export CONTIKI_DIR=/path/to/contiki-ng
 tools/run-cooja-tests.sh                                  # all non-TUN tests (85 in 5.2)
 tools/run-cooja-tests.sh --with-tun                       # all 93, incl. border-router (needs TUN: sudo or setcap on tunslip6)
 tools/run-cooja-tests.sh 14-rpl-lite                      # one category
-tools/run-cooja-tests.sh 07-simulation-base/01-cooja-hello-world   # one test
+tools/run-cooja-tests.sh 07-simulation-base/01-hello-world-sky   # one test
 tools/run-cooja-tests.sh 14-rpl-lite -v                   # show each test's output
 ```
 

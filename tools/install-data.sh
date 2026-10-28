@@ -6,6 +6,8 @@
 #                    tracks: no local .cooja builds, no Zephyr scratch)
 #   DEST/tools/      the Contiki-NG suite runner and the .csc converter
 #   DEST/docs/       the user guides, CHANGELOG.md and LICENSE
+#   DEST/configs/, DEST/test/scripts/
+#                    the setups and shell scripts those guides run
 #
 # DEST is cngsim's data directory: <prefix>/share/cooja-ng for `make
 # install`, the package root for a release tarball.  Run from anywhere.
@@ -52,5 +54,17 @@ for doc in $(cd "$DEST/docs" && find . -name '*.md' ! -name CHANGELOG.md); do
             dangling=1
         fi
     done
+done
+
+# The setups and shell scripts the installed guides run (`test_runner test
+# configs/...`), so their commands work from the package root as they do
+# from a checkout.  A name that is no file is a placeholder for the
+# reader's own (configs/my-test.json).
+for f in $(cd "$DEST/docs" && find . -name '*.md' ! -name CHANGELOG.md -exec cat {} + |
+           grep -oE '[A-Za-z0-9_./-]*(configs|test/scripts)/[A-Za-z0-9._-]+\.(json|yaml|cnsh)' |
+           grep -E '^(configs|test/scripts)/' | sort -u); do
+    [ -f "$f" ] || continue
+    mkdir -p "$DEST/$(dirname "$f")"
+    cp "$f" "$DEST/$f"
 done
 [ "$dangling" -eq 0 ]
