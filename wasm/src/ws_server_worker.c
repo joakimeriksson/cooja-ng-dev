@@ -101,6 +101,10 @@ ws_server_t *ws_server_init(const char *bind_addr, int port) {
 
 int ws_server_bind_addr_valid(const char *bind_addr) { (void)bind_addr; return 1; }
 
+/* The only peer is the page that started this worker, in the same tab: as
+ * local as loopback, so the UI may edit (it is the viewer's own copy). */
+int ws_server_bind_is_loopback(const char *bind_addr) { (void)bind_addr; return 1; }
+
 void ws_server_url(const char *bind_addr, int port, char *out, size_t outsz) {
     (void)bind_addr; (void)port;
     if (outsz) { strncpy(out, "worker:", outsz - 1); out[outsz - 1] = '\0'; }

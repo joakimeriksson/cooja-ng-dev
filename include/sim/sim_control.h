@@ -100,8 +100,11 @@ typedef struct sim_control_ops {
                                      const char **secure_firmware);
     /* sim_mote_ops_t.get_interface pass-through (SIM_MOTE_IFACE_*). */
     void *(*get_interface)(void *u, int idx, int iface);
-    /* Write the LIVE configuration (the --save-config writer).  0 on ok. */
-    int   (*save_config)(void *u, const char *path);
+    /* Write the LIVE configuration (the --save-config writer).  0 on ok.
+     * The paths the config named relative to itself are written relative
+     * to `path`'s directory, or with `for_page` to the config's own: the
+     * page's Save passes the text on, so `path` is only a temporary file. */
+    int   (*save_config)(void *u, const char *path, int for_page);
     /* Simulation-wide counters (NULL = unavailable). */
     void  (*stats)(void *u, sim_control_stats_t *out);
     /* Start (path) or stop (NULL) the 802.15.4 PCAP capture.  0 on success. */

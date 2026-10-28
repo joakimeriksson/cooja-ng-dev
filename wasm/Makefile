@@ -36,12 +36,14 @@ WASM_SOURCES := $(SOURCES) $(ARM_SOURCES) $(CHIPS_SOURCES) $(RISCV_SOURCES) \
                 $(TEST_SOURCES)
 VENDOR_SOURCES := $(QUICKJS_SOURCES) $(YAML_SOURCES) $(LINENOISE_SOURCES)
 
-WASM_OBJECTS := $(patsubst %.c,$(WOUT)/%.o,$(WASM_SOURCES))
+WASM_OBJECTS := $(patsubst %.c,$(WOUT)/%.o,$(WASM_SOURCES)) \
+                $(WOUT)/wasm/src/ui_page_none.o
 VENDOR_OBJECTS := $(patsubst %.c,$(WOUT)/%.o,$(VENDOR_SOURCES))
 # The browser build swaps the WebSocket server for the worker's message port
 # (src/ws_server_worker.c implements the same ws_server.h), and gives the
 # runner a main that hands its exit code on (src/web_main.c: under ASYNCIFY a
-# returned value is lost).  Nothing else differs from the CLI build.
+# returned value is lost).  Nothing else differs from the CLI build, and
+# both carry an empty built-in page (src/ui_page_none.c): the site serves it.
 WEB_OBJECTS := $(filter-out $(WOUT)/src/ui/ws_server.o $(WOUT)/test/test_main.o,$(WASM_OBJECTS)) \
                $(WOUT)/web/test/test_main.o \
                $(WOUT)/wasm/src/web_main.o \

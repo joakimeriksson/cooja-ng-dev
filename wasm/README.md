@@ -36,7 +36,7 @@ console, and `&arg=<flag>` to pass any other runner flag.
 | | `dist/csim-cli.js` | `dist/web/csim-web.js` | `dist/csim-ui-node.js` |
 |---|---|---|---|
 | Runs in | Node | a Web Worker | Node |
-| Objects | the native build's | + `ws_server_worker.c`, `web_main.c` | the same as the page |
+| Objects | the native build's, with `ui_page_none.c` | + `ws_server_worker.c`, `web_main.c` | the same as the page |
 | ASYNCIFY | no | yes | yes |
 | Files | the repository's, directly (`NODERAWFS`) | fetched into MEMFS from `files/` | the repository's, directly |
 | Purpose | parity with native | the live page | parity of what the page runs; profiling |
@@ -59,7 +59,10 @@ player.html (ui/index.html)  --postMessage-->  worker.js  -->  csim-web.wasm
   `csim_runner_main`) is resumed from the event loop after its first yield,
   so the value it returns would be lost; `web_main` exits with it, and
   `worker.js` reports it to the page (`{exit, tail}`), which shows why the
-  run stopped. These two files are the only C code that differs from the
+  run stopped.
+- `src/ui_page_none.c` gives both builds an empty built-in page, where the
+  native build embeds `ui/index.html` for `--ui` to serve: the site ships
+  the page. These three files are the only C code that differs from the
   native build.
 - The runner's main loop already polls the UI service on every pass, so that
   poll is where the simulation hands the worker its event loop back

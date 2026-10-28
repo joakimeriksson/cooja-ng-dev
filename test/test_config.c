@@ -33,7 +33,12 @@ static int write_to(const sim_normalized_config_t *cfg, const char *path,
                     const char *header) {
     FILE *f = fopen(path, "w");
     if (!f) { fprintf(stderr, "cannot write %s\n", path); return -1; }
-    int rc = sim_config_write_yaml(cfg, f, header);
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *sl = strrchr(dir, '/');
+    if (sl) { if (sl == dir) sl[1] = '\0'; else *sl = '\0'; }
+    else snprintf(dir, sizeof(dir), ".");
+    int rc = sim_config_write_yaml(cfg, f, header, dir);
     fclose(f);
     return rc;
 }
@@ -63,6 +68,9 @@ static void blank_lifted(sim_normalized_config_t *c) {
     memset(c->mote_type_secure_firmware, 0, sizeof(c->mote_type_secure_firmware));
     c->mote_type_count = 0;
     c->js_script_inline = NULL;
+    /* which paths were config-relative depends on where each copy lives */
+    memset(c->rel_paths, 0, sizeof(c->rel_paths));
+    c->rel_path_count = 0;
 }
 
 #define CHECK(cond, what) do { if (!(cond)) { printf("    mismatch: %s\n", what); bad++; } } while (0)

@@ -36,6 +36,7 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -357,6 +358,9 @@ static const field_t node_v1_fields[] = {
 static const field_t node_v2_fields[] = {
     {"type", 's', 0}, {"name", 's', 0}, {"meta", 'o', 0},
     {"id", 'n', 0}, {"x", 'n', 0}, {"y", 'n', 0},
+    /* one entry, several nodes: expanded at load (sim_config.c expand_layout) */
+    {"count", 'n', 0}, {"layout", 's', 0}, {"columns", 'n', 0},
+    {"spacing", 'n', 0}, {"radius", 'n', 0}, {"width", 'n', 0}, {"height", 'n', 0},
     {"clock_deviation", 'n', 0}, {"peripherals", 'a', &peripheral_schema},
     {"build", 'o', &build_schema}, {"_mote_type_desc", 's', 0}, {0, 0, 0}
 };
@@ -585,6 +589,36 @@ static void put_num(FILE *f, double d) {
     if (!strpbrk(buf, ".eE")) fputs(".0", f);
 }
 
+/* A file path: one the config named relative to its own directory is
+ * named relative to `base` (the realpath of the directory written for),
+ * through their common ancestor; if that is only "/", it stays absolute. */
+static void put_path(FILE *f, const sim_normalized_config_t *cfg, const char *base,
+                     const char *path) {
+    int rel = 0;
+    for (int i = 0; base && i < cfg->rel_path_count; i++)
+        if (strcmp(cfg->rel_paths[i], path) == 0) rel = 1;
+    char abs[PATH_MAX];               /* kept as written: relative to the cwd */
+    if (rel && path[0] != '/' && realpath(path, abs)) path = abs;
+    if (!rel || path[0] != '/') { put_str(f, path); return; }
+    /* Longest common prefix that ends at a component boundary of both. */
+    size_t common = 0;
+    for (size_t k = 1;; k++) {
+        int end_b = base[k] == '\0' || base[k] == '/';
+        int end_p = path[k] == '/';
+        if (end_b && end_p) common = k;
+        if (base[k] == '\0' || path[k] == '\0' || base[k] != path[k]) break;
+    }
+    if (common == 0) { put_str(f, path); return; }
+    char out[1024] = "";
+    size_t len = 0;
+    for (const char *s = base + common; *s; s++)       /* one ../ per component left */
+        if (*s == '/' && s[1] && s[1] != '/')
+            len += (size_t)snprintf(out + len, sizeof(out) - len, "../");
+    if (len < sizeof(out))
+        snprintf(out + len, sizeof(out) - len, "%s", path + common + 1);
+    put_str(f, out);
+}
+
 /* A node's "meta" (compact JSON of strings and numbers, checked at load)
  * as a flow mapping.  Integers stay integers: put_num marks every number
  * a float, which is right for the typed fields but would turn 2 into 2.0. */
@@ -722,7 +756,9 @@ static int build_types(const sim_normalized_config_t *cfg, wtype_t *types, int m
 }
 
 int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
-                          const char *header) {
+                          const char *header, const char *rel_dir) {
+    char base_buf[PATH_MAX];
+    const char *base = rel_dir && realpath(rel_dir, base_buf) ? base_buf : NULL;
     if (header && *header) { put_comment_lines(f, header); fputc('\n', f); }
 
     fprintf(f, "version: 2\n");
@@ -764,9 +800,9 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
             if (t->src->soc[0])   { fputs(", soc: ", f);   put_str(f, t->src->soc); }
             if (t->src->board[0]) { fputs(", board: ", f); put_str(f, t->src->board); }
         }
-        fputs(", firmware: ", f); put_str(f, t->firmware);
+        fputs(", firmware: ", f); put_path(f, cfg, base, t->firmware);
         if (t->secure_firmware[0]) {
-            fputs(", secure_firmware: ", f); put_str(f, t->secure_firmware);
+            fputs(", secure_firmware: ", f); put_path(f, cfg, base, t->secure_firmware);
         }
         fputs(" }\n", f);
     }
@@ -813,7 +849,7 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
         const sim_test_config_t *t = &cfg->test;
         fputs("\ntest:\n", f);
         if (t->description[0]) { fputs("  description: ", f); put_str(f, t->description); fputc('\n', f); }
-        if (cfg->js_script_path[0]) { fputs("  js_script: ", f); put_str(f, cfg->js_script_path); fputc('\n', f); }
+        if (cfg->js_script_path[0]) { fputs("  js_script: ", f); put_path(f, cfg, base, cfg->js_script_path); fputc('\n', f); }
         if (cfg->js_script_inline) put_block(f, "js_script_inline", cfg->js_script_inline, 2);
         if (t->timeout_is_success) fputs("  timeout_is_success: true\n", f);
         if (t->step_count) {

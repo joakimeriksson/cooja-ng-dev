@@ -7,7 +7,73 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Changed — check these before upgrading
+- **An unknown or missing firmware extension is an error**, in `cngsim`
+  and `test_runner` alike: exit 2 before anything starts, naming the file.
+  It used to boot as a Tmote Sky, so an ARM image named `.elf` ran
+  silently as an MSP430 and did nothing.  Name the board with `board:` on
+  the mote type instead (below).  A node added at run time (shell `add`,
+  JS `addMote`, a timed config action) is refused the same way, and a
+  removed board's extension says that its board was removed.
+- **`test_runner` with no arguments, or an unknown mode, exits 2** with its
+  usage on stderr.  An unknown mode used to run nothing and exit 0.
+  `--help` prints the usage, now listing every mode and option.
+- **More than 16 mote types, or more nodes than the limit, is a load
+  error.**  Mote types beyond 8 used to be dropped without a word.
+- **Two nodes with the same id is a load error**, including an explicit id
+  equal to the one an unnumbered node is given.  They used to share an
+  address and a console label.
+- **Warnings are errors.** The build is warning-free on gcc 13–15 and
+  clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
+  compiler that reports something new. The vendored QuickJS header is a
+  system include (`-isystem`), so its function-pointer cast no longer warns
+  in every file that includes `js_node.h`. `make debug -jN` no longer races
+  `clean` against the compile.
+- **A PR that moves a simulation on purpose says which workloads.** A
+  `baseline-moves: shell54` line in its description lets the
+  `byte-identity vs main` job pass when exactly those workloads differ;
+  any other difference, or a named workload that does not move, still
+  fails it. `tools/check-baseline.sh` takes the list as `MOVED`.
+
 ### Added
+- **`cngsim`, the command for people** (`docs/quick-start.md`).  `cngsim run
+  sim.yaml` runs a simulation and prints the node consoles, the checks and
+  a one-line verdict, without the radio traces and chip counters
+  (`--trace` or `-v` bring them back); `--ui` opens the browser, paused at
+  real time.  `cngsim new` writes a commented setup from a template,
+  `check` validates one, `examples` and `boards` list what there is, and
+  `convert` takes a Cooja `.csc`.  It runs the same simulation as
+  `test_runner test` (CI compares their console lines and exit codes),
+  which stays the developer and CI binary.  Its durations take a unit
+  (`--duration 60s`, `500ms`), and Ctrl-C ends a run with `INTERRUPTED`,
+  how far it got, and exit 130.  `new` places every node within radio
+  reach of node 1 and gives an RPL network time for its depth; the bundled
+  `udp-server` answers 15 clients (Contiki-NG's 16-route table), so
+  `new rpl-udp` takes up to 16 nodes.
+- **Edit a running simulation in the web UI**: add nodes of the setup's
+  mote types, remove and reboot nodes, send a line to a node's console,
+  and save the setup as YAML.  On by default on a loopback UI; a UI on
+  `--ui-bind` is look-only unless `--ui-edit` is given.  The browser never
+  names a file.
+- **Layouts**: a node entry with `count` and `layout` (`grid`, `line`,
+  `circle`, `random`) places many nodes, as Cooja's Add-motes dialog does.
+- **`board:` on a mote type** names the board, so Contiki-NG's `.nrf`,
+  `.simplelink` and `.zoul` images, or any `.elf`, run without renaming;
+  on a `.nrf52840` image it picks the board variant (`nrf52840-dongle`).
+  `--board NAME` does the same for images given on the command line.
+- **Firmware paths are relative to the config file** (falling back to the
+  current directory, as before), so a setup and its firmware can live
+  anywhere.  `--save-config` writes those paths relative to the file it
+  saves, and the browser's Save relative to the config; other paths are
+  written as the config gave them.  `cngsim` looks a path up last among
+  its bundled examples, so a copied example still finds its firmware.
+- **The web UI page is built into the binary**: `--ui` works from any
+  directory and from an installed binary.  A `ui/index.html` in the
+  current directory still wins, and `CSIM_UI_PAGE` names another.
+- **Twelve commented example simulations** (`examples/`), runnable by name.
+- **`make install`** (`PREFIX`, `DESTDIR`), and release tarballs that carry
+  `cngsim`, the examples, their firmware and the guides beside the
+  `build/test_runner` and `tools/` the Contiki-NG suite uses.
 - **Cooja-NG in the browser** (`wasm/`): the whole runner compiled to
   WebAssembly with Emscripten, running in a Web Worker behind the existing
   web UI, on the original firmware ELFs. Each demo on the site gets a "Run it
@@ -54,29 +120,6 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `firmware` per node. A click no longer sends a move: a node is dragged
   only once the pointer has moved. A `name` over 47 characters, or a `meta`
   over its limits or with a key twice, is refused rather than trimmed.
-
-### Changed
-- **Warnings are errors.** The build is warning-free on gcc 13–15 and
-  clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
-  compiler that reports something new. The vendored QuickJS header is a
-  system include (`-isystem`), so its function-pointer cast no longer warns
-  in every file that includes `js_node.h`. `make debug -jN` no longer races
-  `clean` against the compile.
-- **A PR that moves a simulation on purpose says which workloads.** A
-  `baseline-moves: shell54` line in its description lets the
-  `byte-identity vs main` job pass when exactly those workloads differ;
-  any other difference, or a named workload that does not move, still
-  fails it. `tools/check-baseline.sh` takes the list as `MOVED`.
-- **An unknown or missing firmware extension is an error.** The extension
-  selects the board, and a path whose extension matches no board used to
-  run as a Tmote Sky, so a typo or another board's image failed in
-  confusing ways inside the emulator. The runner now refuses it before
-  anything starts (exit 2), naming the file and listing the known
-  extensions; a node added at run time with one (shell `add`, JS
-  `addMote`, a timed config action) is refused the same way. Every
-  firmware in `configs/` and the test scripts already has a board
-  extension; a Zephyr or RIOT `.elf` still needs renaming to one, as
-  `docs/zephyr.md` and `docs/riot.md` describe.
 
 ### Removed
 - **ESB, WisMote, MSP-EXP5438 and CC430** (`esb`, `wismote`, `exp5438`,

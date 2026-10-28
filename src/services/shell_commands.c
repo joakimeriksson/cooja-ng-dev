@@ -2299,7 +2299,7 @@ static int cmd_echo(shell_service_t *s, int argc, char **argv, const char *line,
 static int cmd_save_config(shell_service_t *s, int argc, char **argv, const char *line, const int *argpos) {
     (void)argc; (void)line; (void)argpos;
     if (!s->ctl->ops.save_config) { shell_error(s, "save-config is not available in this mode"); return -1; }
-    if (s->ctl->ops.save_config(s->ctl->ops.user, argv[1]) != 0) {
+    if (s->ctl->ops.save_config(s->ctl->ops.user, argv[1], 0) != 0) {
         shell_error(s, "save-config: cannot write %s", argv[1]); return -1;
     }
     return 0;

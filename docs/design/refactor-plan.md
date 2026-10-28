@@ -3289,6 +3289,40 @@ the same patch.
   never with `-Wno-...` or `-Wno-error=...` in `CFLAGS`.  Vendored code
   under `lib/` is silenced per directory (`-w` on its objects, `-isystem`
   for its headers), not patched.
+- **`cngsim` is a frontend; it never simulates differently (0.3.1).**  It
+  links the runner `test_runner` uses (`test_mixed_multinode.o`) and calls
+  `run_mixed_multinode_test` with the same arguments, filtering only what
+  reaches the terminal; its runner hooks (`csim_cli_*`: Enter resumes,
+  pause at the end, hold after the verdict, clean Ctrl-C, and how far the
+  run got, read back for the verdict line) are off for `test_runner`.  `tools/check-cngsim.sh` compares their console lines and
+  exit codes.  `test_runner`'s output stays the determinism gates' input and
+  is not trimmed for people.
+- **No default board (0.3.1).**  An unknown firmware extension is an error;
+  `mote_types[].board` names the board (resolved through the config's mote
+  type that names the image, `sim_board_resolve`), and contradicting a known
+  extension is an error.  The Tmote Sky fallback is gone.
+- **Config paths: next to the config first, then the current directory
+  (0.3.1).**  A path found next to the config is stored as its absolute
+  path; one that is not is left as written, so every repo config (repo-root
+  paths, run from the root) loads byte-identically.
+- **Layouts expand at load (0.3.1).**  `count` + `layout` exist only in the
+  file: the normalized config, the runtime and the YAML writer see placed
+  nodes.  `random` uses its own generator seeded from the config seed and
+  the entry index, never the simulation's.
+- **The browser never names a file (0.3.1).**  UI Add creates only the mote
+  types the runner hands the service (the config's, or the images already
+  running), because adding a node loads an image and `.cooja` is native
+  code; Save returns YAML text instead of writing a path.  Editing is on for
+  a loopback UI only, unless `--ui-edit`.
+- **Ctrl-C is exit 130 in `cngsim`, not 7 (0.3.1).**  128 + SIGINT, the
+  shell's convention, for a person ending a run before it is decided; 7
+  stays the protocol's "cancelled".  A Ctrl-C after the duration or the
+  checks decided a `--ui` run is how it is closed and keeps the verdict's
+  code.  `cngsim` durations take a unit (`60s`, `500ms`): a bare number is
+  refused, because `-t` is ms and `--wall-timeout` is s in `test_runner`.
+- **Node ids are unique at load (0.3.1).**  Two nodes with one id (easy with
+  a layout's ids followed by a listed node) are a load error, after ids are
+  filled in, so an explicit id that equals an auto-assigned one is too.
 - **With the web UI on, nothing but the UI (or `--wall-timeout`) ends the
   run.**  Neither `-t` nor a test verdict — JSON steps or a JS script —
   leaves the main loop while `ui_service_active()`: the verdict is printed
@@ -3296,7 +3330,8 @@ the same patch.
   the full report comes at the end.  A UI or shell restart is a new run
   and re-arms the test; a `--wall-timeout` after the verdict keeps its
   exit code (only a run cut short before its verdict exits 6).  Headless
-  and `--ui-record` runs end on the verdict exactly as before.  Reason: a
+  and `--ui-record` runs end on the verdict exactly as before; a `cngsim
+  --ui` run also pauses there (hold after the verdict, below).  Reason: a
   viewer (the native page or the browser build's live demos) must not see
   the network freeze because a test passed.
 - **The browser build (`wasm/`) is held to native
@@ -3305,8 +3340,9 @@ the same patch.
   builds — the plain one and the page's own objects with ASYNCIFY — and
   requires identical output and exit codes; `test.yml` runs it on every
   PR and `pages.yml` before publishing.  The only C that differs from
-  native is `ws_server_worker.c` (`ws_server.h` over `postMessage`) and
-  `web_main.c` (exits with the runner's code, which ASYNCIFY would drop).
+  native is `ws_server_worker.c` (`ws_server.h` over `postMessage`),
+  `web_main.c` (exits with the runner's code, which ASYNCIFY would drop)
+  and `ui_page_none.c` (no built-in page: the site serves it).
 
 ## Doc Status
 

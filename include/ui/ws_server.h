@@ -26,6 +26,10 @@ ws_server_t *ws_server_init(const char *bind_addr, int port);
  * bad --ui-bind can be refused when the options are parsed. */
 int ws_server_bind_addr_valid(const char *bind_addr);
 
+/* Nonzero if a server on bind_addr (NULL and "localhost" included) is
+ * bound to the loopback network, 127.0.0.0/8: reachable from this host only. */
+int ws_server_bind_is_loopback(const char *bind_addr);
+
 /* The URL a browser should open for a server on bind_addr:port. */
 void ws_server_url(const char *bind_addr, int port, char *out, size_t outsz);
 

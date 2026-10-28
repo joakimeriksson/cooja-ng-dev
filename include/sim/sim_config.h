@@ -95,6 +95,9 @@ typedef struct {
     int  cs_pin;
 } sim_peripheral_config_t;
 
+/* More mote types than this is a load error, not a silent truncation. */
+#define SIM_MAX_MOTE_TYPES 16
+
 typedef struct {
     char firmware[256];
     /* TrustZone-M split image: the Secure-world ELF loaded into the same
@@ -164,13 +167,30 @@ typedef struct {
     char js_script_path[512];       /* path to .js file */
     char *js_script_inline;         /* inline script (malloc'd, or NULL) */
 
+    /* The first file the config names that was found only relative to the
+     * current directory, not to the config's ("" = none).  cngsim warns
+     * about it: such a setup breaks when it is run from somewhere else. */
+    char cwd_fallback[256];
+    /* The first file found only in the last-lookup directory (below),
+     * as the config named it ("" = none). */
+    char bundled_fallback[256];
+
+    /* The files the config named relative to its own directory, as the
+     * absolute paths they were resolved to (or as written, for a config in
+     * the current directory, whose paths are kept).  The writer names these
+     * relative to the directory it writes for, so a saved setup keeps the
+     * user's paths relative instead of turning them into this host's. */
+#define SIM_CONFIG_MAX_REL_PATHS 32
+    char rel_paths[SIM_CONFIG_MAX_REL_PATHS][256];
+    int  rel_path_count;
+
     /* Mote types (for getMoteTypes()[index] mapping).  The legacy
      * index-keyed firmware table is read by TEST_ACTION_ADD at runtime; the
      * v2 parser writes both it and the richer mote_types[] table below. */
     int mote_type_count;
-    char mote_type_firmware[8][256]; /* firmware path per type index */
-    char mote_type_secure_firmware[8][256]; /* TZ Secure-world ELF per type index ("" = none) */
-    sim_mote_type_t mote_types[8];   /* v2 named mote types (M42)       */
+    char mote_type_firmware[SIM_MAX_MOTE_TYPES][256]; /* firmware path per type index */
+    char mote_type_secure_firmware[SIM_MAX_MOTE_TYPES][256]; /* TZ Secure-world ELF per type index ("" = none) */
+    sim_mote_type_t mote_types[SIM_MAX_MOTE_TYPES];   /* v2 named mote types (M42)       */
 
     /* v2 plugin/service names (captured for Phase 8 register-by-name;
      * inert in Phase 7).  e.g. "builtin:timeline", "builtin:pcap". */
@@ -202,15 +222,26 @@ void sim_config_free(sim_normalized_config_t *cfg);
  * runner tells a config argument from a firmware argument. */
 int  sim_config_is_file(const char *path);
 
+/* A directory a relative file path is looked up in last, after the
+ * config's directory and the current one (NULL = none, the default).
+ * cngsim sets its bundled examples/ directory, so a copied example still
+ * finds the firmware it names as ../firmware/...  A file found there is
+ * kept as an absolute path, like the bundled firmware `cngsim new` names. */
+void sim_config_set_last_lookup_dir(const char *dir);
+
 /* Write the config as canonical v2 YAML: stable key order, comments where
  * they help, the JS script as a literal block.  `header` (may be NULL) is
  * emitted as leading comment lines — the writer is used to save a running
  * simulation's setup, so it says where the file came from.  A v1 config is
  * lifted to v2 (mote types synthesized from the distinct firmware paths,
  * preserving the order of any existing mote_types so getMoteTypes()[i]
- * indices survive).  Returns 0 on success. */
+ * indices survive).  A file the config named relative to its own
+ * directory is written relative to `rel_dir` (normally the output file's
+ * directory), or absolute if the two share nothing below "/"; every other
+ * path is written as stored.  `rel_dir` NULL writes every path as stored.
+ * Returns 0 on success. */
 int  sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *out,
-                           const char *header);
+                           const char *header, const char *rel_dir);
 
 /* Print config summary to stdout. */
 void sim_config_print(const sim_normalized_config_t *cfg);
