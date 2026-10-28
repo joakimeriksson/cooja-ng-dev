@@ -225,6 +225,10 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - **Web UI LEDs of the OpenMote and the Firefly stayed off.** Every CC2538
   board was read from the CC2538DK's pins (PC0–2); each board's own pins
   (PC4/6/7, PD5/4/3) are read now. The simulation itself was not affected.
+- **Web UI: the topology stopped drawing in a panel under 80 px.** The
+  40 px margin made the scale negative and `arc()` threw `IndexSizeError`
+  on every update (seen on the site's live demos). The margin now shrinks
+  with the panel. The page also has a favicon now.
 
 ### Known limitations
 - SVC and UDF execute as no-ops: no SVCall or UsageFault exception is taken,
