@@ -75,14 +75,16 @@ the same type).
 
 ## Running a config: options
 
-`test_runner test <config | firmware...> [options]` takes these (`cngsim run`
-takes the same, with durations in units: `cngsim help run`):
+`test_runner test <config | firmware...> [options]` takes these.  `cngsim run`
+takes them too, except `-d` (put `startup_delay_ms` in the setup instead), and
+gives its duration with a unit; it adds a few of its own, below the table
+(`cngsim help run`).
 
 | Option | Effect |
 |---|---|
-| `-t MS` | simulated time, overriding `timeout_ms` |
+| `-t MS` | simulated time in whole milliseconds, 1 to 2147483647 (24.8 days), overriding `timeout_ms`; anything else is refused (exit 2) |
 | `-n N` | with firmware files: the number of nodes (at most 128) |
-| `-d MS` | spread the nodes' start times over 0 to MS ms (`startup_delay_ms`), so their timers do not run in lockstep |
+| `-d MS` | test_runner only: spread the nodes' start times over 0 to MS ms (`startup_delay_ms`), so their timers do not run in lockstep |
 | `--seed N` | the seed, overriding `seed` |
 | `--board NAME` | with firmware files: the board, for an image not named `<app>.<board>` |
 | `--save-config OUT.yaml` | write the setup as it is at the end ([above](#saving-a-running-setup)) |
@@ -93,7 +95,16 @@ takes the same, with durations in units: `cngsim help run`):
 | `--shell`, `--script FILE` | the command line and command scripts ([shell.md](shell.md)) |
 | `--wall-timeout DUR` | give up after this much real time (exit 6) |
 | `--gdb [NODE:]PORT`, `--gdb-wait` | a GDB server on a node |
+| `--renode [ADDR:MAIN:ASYNC]`, `--renode-freq HZ` | run as Renode's clock slave |
 | `-v` / `-q` | more output / less |
+
+`cngsim run` only:
+
+| Option | Effect |
+|---|---|
+| `--duration D` (or `-t D`) | simulated time with its unit (`60s`, `500ms`, `2m`, `1.5h`), rounded to whole milliseconds; 1 ms to 596 h (24.8 days), anything else is refused |
+| `--no-open`, `--start` | with `--ui`: do not open the browser; start running at once rather than paused |
+| `--trace radio\|boot\|stats\|all` | add the developer output test_runner prints, by kind |
 
 ## Config File Structure
 
@@ -115,7 +126,7 @@ test: { ... }
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `title` | string | — | Display name for the simulation |
-| `timeout_ms` | int | 20000 | Total simulation duration in milliseconds |
+| `timeout_ms` | int | 20000 | Total simulation duration, in whole milliseconds from 1 to 2147483647 (24.8 days) |
 | `seed` | int | 0 | Random seed (0 = not set) |
 | `startup_delay_ms` | int | 0 | Each node gets a random startup delay in `[0, startup_delay_ms)` |
 | `speed` | float | 0 | Real-time speed multiplier for UI mode (0 = the default: 10x for `test_runner --ui`, 1x for `cngsim run --ui`) |
@@ -310,7 +321,7 @@ steps:
 | `wait` | string | **required** | Substring to match in node console output |
 | `node` | int | -1 (any) | Only match output from this node ID |
 | `count` | int | 1 | Number of matches required before advancing |
-| `timeout_ms` | int | 0 | Per-step timeout (0 = use global `timeout_ms`) |
+| `timeout_ms` | int | — | Per-step timeout, in whole milliseconds from 1 to 2147483647; leave it out to use the global `timeout_ms` (`0` is refused) |
 
 **Matching behavior:**
 - Each line of console output (UART) is checked against the current step's `wait` pattern using substring match (`strstr`).
@@ -651,7 +662,7 @@ Some Cooja test scripts use features that can't be fully auto-converted. The con
 - `generateMote` — creating new mote instances at runtime (without a matching addMote)
 - `java.util.Random` — Java random number generator in script logic
 
-Complex validation logic (e.g., collecting IP addresses and cross-checking per-node) requires manual validators in the JSON config.
+Complex validation logic (e.g., collecting IP addresses and cross-checking per-node) requires manual validators in the setup file.
 
 ## Running Tests
 

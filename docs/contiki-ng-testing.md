@@ -110,7 +110,7 @@ no result that is green by accident:
 | TUN tests without `--with-tun`; missing firmware with `--no-build` | `SKIP` — the only two, and both are explicit opt-outs |
 
 When a new upstream `.csc` uses a feature Cooja-NG lacks, the fix is to add
-real support or port that test to Cooja-NG's native JSON config — never to
+real support or port that test to a Cooja-NG setup file (YAML or JSON) — never to
 loosen the check. `csc2json.py --lax` exists for local exploration and must not
 be used in CI.
 
@@ -232,7 +232,7 @@ green over enough PR traffic, drop `continue-on-error` and it is the gate.
 
 - **`ERROR … (conversion failed): unsupported radio medium class …`** — the
   test needs something Cooja-NG does not implement. Add support, or port the
-  test to a native JSON config ([`test-format.md`](test-format.md)). Do not
+  test to a Cooja-NG setup file ([`test-format.md`](test-format.md)). Do not
   use `--lax` in CI.
 - **`ERROR … (firmware build failed)`** — the Contiki-NG build for that
   target failed; run `tools/build-test-firmware.sh --from-json …` or the

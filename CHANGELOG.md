@@ -125,9 +125,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - **Edit a running simulation in the web UI**: add nodes of the setup's
   mote types, remove and reboot nodes, send a line to a node's console,
   and save the setup as YAML.  On by default on a loopback UI; a UI bound
-  to another address with `--ui-bind` is look-only unless `--ui-edit` is
-  given.  The browser never
-  names a file.
+  to another address with `--ui-bind` needs `--ui-edit` for these (anyone
+  who reaches it can still pause, play, change the speed, restart and move
+  nodes).  The browser never names a file.
 - **Layouts**: a node entry with `count` and `layout` (`grid`, `line`,
   `circle`, `random`) places many nodes, as Cooja's Add-motes dialog does.
 - **`board:` on a mote type** names the board, so Contiki-NG's `.nrf`,
@@ -205,6 +205,13 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   `firmware` per node. A click no longer sends a move: a node is dragged
   only once the pointer has moved. A `name` over 47 bytes, or a `meta`
   over its limits or with a key twice, is refused rather than trimmed.
+- **A shorter README**: what Cooja-NG is, the quick start, building, the
+  board table, the features, running the tests and the known issues. The
+  detail moved where it belongs: the ports-and-adapters design, the time
+  model and the environment variables to `docs/architecture.md`, the Cooja
+  suite's coverage and the serial-socket delay to
+  `docs/contiki-ng-testing.md`, and the UI's network access to
+  `docs/quick-start.md`.
 
 ### Removed
 - **ESB, WisMote, MSP-EXP5438 and CC430** (`esb`, `wismote`, `exp5438`,

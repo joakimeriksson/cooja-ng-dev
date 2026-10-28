@@ -590,8 +590,8 @@ def main():
         r.close()
 
     # Editing (Add node / Remove / Reboot / serial input / Save) is on for a
-    # loopback UI and off on --ui-bind unless --ui-edit: a UI shared on a
-    # network is look-only by default.  Save is the probe: it answers with
+    # loopback UI and off on --ui-bind unless --ui-edit (pause, play, speed,
+    # restart and move are not gated).  Save is the probe: it answers with
     # the setup as YAML only when editing is allowed.
     for label, extra, want in (('loopback', (), True),
                                ('--ui-bind localhost', ('--ui-bind', 'localhost'), True),

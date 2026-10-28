@@ -100,12 +100,13 @@ verdict.
 
 The UI takes commands, so it listens on loopback only and refuses WebSocket
 connections from other sites' pages. `--ui-bind 0.0.0.0` (or one IPv4
-address) makes it reachable from the network: anyone who can reach the port
-can then pause, restart or reconfigure the run. It also turns off the Host
+address) makes it reachable from the network. It also turns off the Host
 check that stops DNS rebinding, so any web page open in your own browser can
-drive the run too, even with the port firewalled. Such a UI is look-only
-unless you add `--ui-edit`; with it, Save sends the setup, file paths
-included, to every page connected at the time.
+drive the run too, even with the port firewalled. Anyone who reaches such a
+UI can pause, play, change the speed, restart the run and move nodes. Adding,
+removing and rebooting nodes, sending a node a line, and Save also need
+`--ui-edit` (on loopback they are always on). With `--ui-edit`, Save sends
+the setup, file paths included, to every page connected at the time.
 
 ## 4. Make your own setup
 

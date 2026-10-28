@@ -107,15 +107,15 @@ passes, re-run the release run's failed jobs. Tagging main's head avoids it.
 
 ```sh
 # MSP430 tests
-./build/test_runner correctness -v    # 83 instruction-level tests
+./build/test_runner correctness -v    # instruction-level tests
 ./build/test_runner bench             # 7 micro-benchmarks + 2 firmware benchmarks
 ./build/test_runner firmware          # Firmware integration tests (cputest.sky, timertest.sky)
 ./build/test_runner multinode         # 2-node nullnet-broadcast (default 20s)
 ./build/test_runner multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 60000
 
 # ARM Cortex-M3/M4 tests
-./build/test_runner arm-correctness -v   # 230 instruction-level tests (Thumb-2 + M4 DSP/VFP + M33),
-                                         # of which 71 are ARMv8-M TrustZone-M
+./build/test_runner arm-correctness -v   # instruction-level tests (Thumb-2 + M4 DSP/VFP + M33,
+                                         # and ARMv8-M TrustZone-M)
 ./build/test_runner arm-decode           # Decoder differential test: exhaustive over all
                                          # 65536 Thumb halfwords x 6 random register/flag
                                          # states, running decoder + arm_execute_decoded()
@@ -213,8 +213,8 @@ python3 tools/check-shell-tty.py            # terminal-only paths via a pseudo-t
                                             # exit verdict, blocked-while-paused hint)
 
 # Chip-driver + radio-medium unit suites
-./build/test_runner cc1200-mock-host        # 73 CC1200 chip tests (mock host, no CPU)
-./build/test_runner radio-medium            # 241 radio-medium routing tests
+./build/test_runner cc1200-mock-host        # CC1200 chip tests (mock host, no CPU)
+./build/test_runner radio-medium            # radio-medium routing tests
 ./build/test_runner event-queue             # kernel heap: (time, seq) order, one wakeup per node,
                                             # reschedule-in-place vs a sorted-array reference
 ./build/test_runner renode-cosim -v         # Renode co-simulation (csim as clock SLAVE):
@@ -624,7 +624,7 @@ Compiles hot basic blocks to native code. Auto-detected via pkg-config.
 
 **Configuration:**
 - `MSPSIM_JIT_THRESHOLD` env var (default 100): executions before compiling
-- `MSPSIM_JIT_INBLOCK_CHECKS` env var (default 0): interrupt checks inside JIT blocks
+- `MSPSIM_JIT_INBLOCK_CHECKS` env var (default 1): interrupt checks inside JIT blocks
 - `block_exec_count[pc>>1]` tracks execution count per block
 - Cache invalidation on memory writes (clears compiled_cache + block_exec_count)
 

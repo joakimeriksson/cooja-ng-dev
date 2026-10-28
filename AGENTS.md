@@ -16,40 +16,49 @@ make pgo          # Profile-guided optimization (~40% faster)
 make clean        # Remove build/
 ```
 
-GNU Lightning is optional (auto-detected via pkg-config). Without it, the interpreter is used for all execution.
+GNU Lightning is optional (auto-detected via pkg-config). With it, the MSP430 JIT and the ARM Thumb-16 JIT
+(`src/arm/arm_jit.c`, on by default; `CSIM_ARM_JIT=0` turns it off) compile hot blocks; without it, every
+CPU runs on its interpreter. Both JITs are cycle-exact: output is byte-identical with them on or off.
 
 ## Testing
 
 ```sh
 # MSP430 tests
-./build/test_runner correctness -v    # 72 instruction-level tests
+./build/test_runner correctness -v    # instruction-level tests
 ./build/test_runner bench             # 7 micro-benchmarks + 2 firmware benchmarks
 ./build/test_runner firmware          # Firmware integration tests (cputest.sky, timertest.sky)
 ./build/test_runner multinode         # 2-node nullnet-broadcast (default 20s)
 ./build/test_runner multinode firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 60000
 
 # ARM Cortex-M3 tests
-./build/test_runner arm-correctness -v   # 146 instruction-level tests (Thumb-2 + M4 DSP/VFP + M33)
+./build/test_runner arm-correctness -v   # instruction-level tests (Thumb-2 + M4 DSP/VFP + M33 + TrustZone-M)
 ./build/test_runner arm-firmware -v      # Firmware boot test (hello-world.cc2538dk)
 ./build/test_runner arm-multinode firmware/cc2538dk/nullnet-broadcast.cc2538dk -t 20000
 ./build/test_runner arm-multinode firmware/cc2538dk/udp-server.cc2538dk firmware/cc2538dk/udp-client.cc2538dk -t 60000
 
 # Chip-driver + radio-medium unit suites
-./build/test_runner cc1200-mock-host        # 73 CC1200 chip tests (mock host, no CPU)
-./build/test_runner radio-medium            # 235 radio-medium routing tests
+./build/test_runner cc1200-mock-host        # CC1200 chip tests (mock host, no CPU)
+./build/test_runner radio-medium            # radio-medium routing tests
+./build/test_runner all                     # every unit suite
 ```
 
 Multinode options: `-t ms` (sim duration), `-n nodes` (node count), `-q` (quiet), `-v` (verbose).
+The full list of suites, checks and determinism gates is in [`CLAUDE.md`](CLAUDE.md).
 
 ## Project Structure
 
 ```
 src/
   sim/                Simulation kernel: runtime, event pump, radio bus, board registry
+  motes/              Mote adapters behind sim_mote_ops_t (MSP430, ARM, native, JS, external, Renode)
   common/             Shared infrastructure: event queue, radio medium, ELF loader, GDB stub
   msp430/             MSP430 emulator source files
-  arm/                ARM Cortex-M3/M4/M33 emulator source files
+  arm/                ARM Cortex-M3/M4/M33 emulator and SoC source files
+  riscv/              RV32EMC core (the nRF54L15 FLPR coprocessor)
+  chips/              Radio and peripheral chips (CC2420, CC1200, SPI flash, ENC28J60)
   native/             Native Cooja motes (dlopen) + JS app motes (QuickJS)
+  services/           Services: web UI, shell, pcap, energest, test engines
+  cli/                cngsim, the command for people
   ui/                 WebSocket/state bridge (observation only)
 include/
   sim/                Kernel headers (sim_runtime.h, sim_mote.h, sim_radio_bus.h, sim_board.h)
@@ -69,10 +78,10 @@ firmware/cc2538dk/    Pre-compiled Contiki-NG firmware for CC2538DK
 | `sim_serial_bridge.c` | TCP serial socket service (Cooja serial-socket protocol) |
 | `sim_external_command.c` | External command service (border-router etc. helper processes) |
 
-The mote vtable (`include/sim/sim_mote.h`, `sim_mote_ops_t`) abstracts the four
-node kinds (MSP430/ARM/native/JS); adapter implementations live in the runner
-until Phase 4 moves them to `src/motes/`. See `docs/design/refactor-plan.md`
-§3.15/§3.16 for the completed Phase 1–3 milestones.
+The mote vtable (`include/sim/sim_mote.h`, `sim_mote_ops_t`) abstracts the node
+kinds (MSP430, ARM, native Cooja, JS app, external process, Renode); the adapters
+live in `src/motes/`. See `docs/design/refactor-plan.md` for the refactor's
+milestones and its Decisions Log.
 
 ### MSP430 Source Files (src/msp430/)
 
@@ -168,7 +177,7 @@ Compiles hot basic blocks to native code. Auto-detected via pkg-config.
 
 **Configuration:**
 - `MSPSIM_JIT_THRESHOLD` env var (default 100): executions before compiling
-- `MSPSIM_JIT_INBLOCK_CHECKS` env var (default 0): interrupt checks inside JIT blocks
+- `MSPSIM_JIT_INBLOCK_CHECKS` env var (default 1): interrupt checks inside JIT blocks
 - `block_exec_count[pc>>1]` tracks execution count per block
 - Cache invalidation on memory writes (clears compiled_cache + block_exec_count)
 
@@ -280,7 +289,12 @@ Same event-driven kernel as MSP430, with CC2538 RF Core for 802.15.4 radio:
 - JMP offset: raw 10-bit value * 2 added to PC
 - Reset interrupt adds 6 cycles
 
-## Performance (Apple Silicon, PGO build)
+## Performance (historical: Apple Silicon, PGO build)
+
+These are early measurements, kept for comparison; they are not current
+limits.  Current figures are in the README's Performance section, and where
+the time goes per ISA and node count in
+[`docs/design/kernel-radio-review-and-performance-plan.md`](docs/design/kernel-radio-review-and-performance-plan.md).
 
 | Benchmark | MIPS |
 |-----------|------|
@@ -290,7 +304,7 @@ Same event-driven kernel as MSP430, with CC2538 RF Core for 802.15.4 radio:
 | 2-node nullnet (20s sim) | ~800x real-time |
 | 2-node RPL-UDP (60s sim) | ~2400x real-time |
 
-### ARM (CC2538, interpreter only)
+### ARM (CC2538, measured before the ARM JIT and the kernel work)
 
 | Benchmark | Speed |
 |-----------|-------|
