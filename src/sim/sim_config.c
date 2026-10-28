@@ -19,6 +19,32 @@
 
 static int parse_v1(cJSON *root, sim_normalized_config_t *cfg);
 static int parse_v2(cJSON *root, sim_normalized_config_t *cfg);
+
+/* A duration in milliseconds the runner can hold: a whole number from 1 to
+ * INT_MAX (24.8 days).  cJSON would clamp a larger one to INT_MAX and cut a
+ * fraction off without a word. */
+static int check_ms(const cJSON *v, const char *what, const char *path) {
+    if (!cJSON_IsNumber(v)) return 0;
+    double d = v->valuedouble;
+    if (d >= 1 && d <= INT_MAX && d == (double)(int)d) return 0;
+    fprintf(stderr, "%s: %s: %.17g is not a whole number of milliseconds from 1 to %d "
+            "(24.8 days)\n", path, what, d, INT_MAX);
+    return -1;
+}
+
+static int check_durations(const cJSON *root, const char *path) {
+    int bad = check_ms(cJSON_GetObjectItemCaseSensitive(root, "timeout_ms"), "timeout_ms", path);
+    const cJSON *test = cJSON_GetObjectItemCaseSensitive(root, "test");
+    const cJSON *steps = test ? cJSON_GetObjectItemCaseSensitive(test, "steps") : NULL;
+    const cJSON *st;
+    int k = 0;
+    cJSON_ArrayForEach(st, steps) {
+        char what[48];
+        snprintf(what, sizeof(what), "test step %d timeout_ms", ++k);
+        bad |= check_ms(cJSON_GetObjectItemCaseSensitive(st, "timeout_ms"), what, path);
+    }
+    return bad;
+}
 static int v1_image_count(const sim_normalized_config_t *cfg);
 /* "peripherals": [ { "chip": "mx25r6435f", "spim": 0, "cs": "P2.05" }, ... ]
  * cs is written the way the firmware prints it (P<port>.<pin>). */
@@ -319,7 +345,8 @@ int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
         cfg->version = ver->valueint;
 
     /* Every key known, every value the right type — or the load fails. */
-    if (sim_config_validate_tree(root, cfg->version, json_path) != 0) {
+    if (sim_config_validate_tree(root, cfg->version, json_path) != 0 ||
+        check_durations(root, json_path) != 0) {
         cJSON_Delete(root);
         return -1;
     }

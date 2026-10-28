@@ -159,6 +159,10 @@ printf 'version: 2\nmote_types:\n  - { name: a, board: nrf52840-dongle, firmware
 "$CNGSIM" run "$WORK/dongle.yaml" --duration 1s -q >/dev/null 2>&1 \
     && ok "board: nrf52840-dongle on a .nrf52840 image" || bad "board: nrf52840-dongle on a .nrf52840 image"
 expect2 "a duration without a unit" "$CNGSIM" run hello-sky -t 10
+expect2 "a duration longer than a run can simulate (720h)" "$CNGSIM" run hello-sky --duration 720h
+expect2 "a duration under 1 ms" "$CNGSIM" run hello-sky --duration 0.0004s
+expect2 "test_runner -t beyond an int" "$RUNNER" multinode "$ROOT/firmware/sky/hello-world.sky" -t 3000000000
+expect2 "test_runner -t that is no number" "$RUNNER" multinode "$ROOT/firmware/sky/hello-world.sky" -t 12x
 expect2 "rpl-udp with more nodes than the server answers" "$CNGSIM" new rpl-udp -n 17 -o "$WORK/x.yaml"
 expect2 "nullnet with one node (nothing to receive from)" "$CNGSIM" new nullnet -n 1 -o "$WORK/x.yaml"
 sed -e 's/node: 2 }/node: 77 }/' -e "s#\.\./firmware/#$ROOT/firmware/#g" \

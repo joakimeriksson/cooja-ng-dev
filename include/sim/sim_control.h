@@ -90,9 +90,11 @@ typedef struct sim_control_ops {
     void  (*remove)(void *u, int idx);
     /* Create a NEW slot booted from `firmware` (plus an optional TrustZone-M
      * Secure-world image, NULL/"" = single image) with Cooja id node_id, and
-     * grow every runner-side node count.  Returns the slot index or -1. */
+     * grow every runner-side node count.  `type_name` is the config mote
+     * type the node is (its board, and what a save calls it), or NULL for
+     * an image named only by its path.  Returns the slot index or -1. */
     int   (*add)(void *u, const char *firmware, const char *secure_firmware,
-                 int node_id);
+                 int node_id, const char *type_name);
     /* Config v2 mote-type name → firmware path, or NULL if unknown.  When
      * non-NULL, *secure_firmware receives the type's Secure-world image
      * (NULL or "" = none). */
@@ -205,6 +207,13 @@ int  sim_control_reboot(sim_control_t *c, int node_id, unsigned flags);
 int  sim_control_add(sim_control_t *c, const char *fw_or_type,
                      const char *secure_fw, int node_id,
                      double x, double y, unsigned flags);
+/* The same with the mote type given apart from its images: `type_name`
+ * (NULL = none) is the type the node is, `fw`/`secure_fw` what it boots.
+ * For a caller that already holds both (the web UI's type list, a JS
+ * addMote by type index). */
+int  sim_control_add_typed(sim_control_t *c, const char *type_name,
+                           const char *fw, const char *secure_fw, int node_id,
+                           double x, double y, unsigned flags);
 /* Console input into one node.  Returns bytes consumed (or queued when
  * SIM_CONTROL_RETRY), -1 if the id is unknown. */
 int  sim_control_send(sim_control_t *c, int node_id, const uint8_t *buf,

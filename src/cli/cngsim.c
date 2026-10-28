@@ -540,7 +540,8 @@ static void *filter_thread(void *p) {
 /* A simulated duration, which must carry its unit: "60s", "500ms", "2m".
  * A bare number is refused rather than guessed — test_runner's -t takes
  * milliseconds and --wall-timeout seconds, so "-t 10" would be 10 ms to one
- * reader and 10 s to the next.  -2 = a number without a unit. */
+ * reader and 10 s to the next.  -2 = a number without a unit; -3 = less
+ * than 1 ms or more than the INT_MAX ms (24.8 days) a run can simulate. */
 static int parse_duration_ms(const char *s, long *ms) {
     char *end;
     double v = strtod(s, &end);
@@ -552,9 +553,13 @@ static int parse_duration_ms(const char *s, long *ms) {
     else if (strcmp(end, "m") == 0 || strcmp(end, "min") == 0) mult = 60000.0;
     else if (strcmp(end, "h") == 0) mult = 3600000.0;
     else return -1;
-    *ms = (long)(v * mult + 0.5);
+    double r = floor(v * mult + 0.5);
+    if (r < 1 || r > INT_MAX) return -3;
+    *ms = (long)r;
     return 0;
 }
+
+#define DURATION_RANGE "from 1ms to 596h (24.8 days)"
 
 /* Ctrl-C: the first one ends the run the normal way (the verdict, the exit
  * code, --save-config); a second one, if that hangs, ends cngsim at once. */
@@ -618,6 +623,10 @@ static int cmd_run(int argc, char **argv) {
             if (dr == -2) {
                 fail("run: %s %s: give the unit, e.g. %ss or %sms", a, argv[i],
                      argv[i], argv[i]);
+                return EXIT_INVALID;
+            }
+            if (dr == -3) {
+                fail("run: %s %s: a run simulates " DURATION_RANGE, a, argv[i]);
                 return EXIT_INVALID;
             }
             if (dr != 0) {
@@ -1221,6 +1230,10 @@ static int cmd_new(int argc, char **argv) {
             int dr = parse_duration_ms(v, &duration_ms);
             if (dr == -2) {
                 fail("new: --duration %s: give the unit, e.g. %ss", v, v);
+                return EXIT_INVALID;
+            }
+            if (dr == -3) {
+                fail("new: --duration %s: a run simulates " DURATION_RANGE, v);
                 return EXIT_INVALID;
             }
             if (dr != 0) {

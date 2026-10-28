@@ -1,0 +1,5 @@
+{
+  "title": "a 720 h run: more milliseconds than the runner can hold",
+  "timeout_ms": 2592000000,
+  "nodes": [ { "firmware": "firmware/sky/hello-world.sky" } ]
+}

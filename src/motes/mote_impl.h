@@ -33,8 +33,10 @@
 extern "C" {
 #endif
 
+/* NODE_NONE: a slot whose boot failed (a reboot from a file that is gone);
+ * no platform stands behind it. */
 typedef enum { NODE_MSP430, NODE_ARM, NODE_NATIVE, NODE_JS, NODE_EXT,
-               NODE_RENODE } node_type_t;
+               NODE_RENODE, NODE_NONE } node_type_t;
 
 /*
  * Per-chip TX listener context.

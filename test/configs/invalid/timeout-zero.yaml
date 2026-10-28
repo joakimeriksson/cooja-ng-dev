@@ -1,0 +1,7 @@
+version: 2
+title: a run of no time
+timeout_ms: 0
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }

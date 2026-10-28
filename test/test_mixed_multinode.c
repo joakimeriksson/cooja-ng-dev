@@ -1477,9 +1477,28 @@ static bool same_file(const char *a, const char *b) {
            sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
 }
 
-static const sim_board_desc_t *board_for_firmware(const char *firmware_path,
+/* The config mote type each slot is (index into node_cfg_src->mote_types),
+ * or -1 for an image named only by its path.  The type, not the firmware
+ * file, is the node's identity: two types may share an image and differ in
+ * board, and reboot, Save and the UI keep to the one the node was given. */
+static int node_type_of[MAX_NODES];
+
+static int mote_type_index(const char *name) {
+    if (!node_cfg_src || !name || !name[0]) return -1;
+    for (int t = 0; t < node_cfg_src->mote_type_count && t < SIM_MAX_MOTE_TYPES; t++)
+        if (strcmp(node_cfg_src->mote_types[t].name, name) == 0) return t;
+    return -1;
+}
+
+static const sim_board_desc_t *board_for_firmware(const char *firmware_path, int type_idx,
                                                   char *err, size_t errlen) {
     const char *board = NULL;
+    if (type_idx >= 0) {
+        const char *b = node_cfg_src->mote_types[type_idx].board;
+        return sim_board_resolve(firmware_path, b[0] ? b : NULL, err, errlen);
+    }
+    /* No type (a v1 node, an image added by path): the first type naming
+     * the same image with a board, as a v1 config's types are only that. */
     if (node_cfg_src) {
         for (int t = 0; t < node_cfg_src->mote_type_count && t < SIM_MAX_MOTE_TYPES; t++) {
             const sim_mote_type_t *mt = &node_cfg_src->mote_types[t];
@@ -1512,16 +1531,17 @@ static void ui_label_node(int i, const char **name, const char **board,
 }
 
 static int init_node(int idx, const char *firmware_path,
-                     const char *secure_firmware_path, int node_id) {
+                     const char *secure_firmware_path, int node_id, int type_idx) {
     char board_err[512];
     const sim_board_desc_t *board =
-        board_for_firmware(firmware_path, board_err, sizeof(board_err));
+        board_for_firmware(firmware_path, type_idx, board_err, sizeof(board_err));
     if (!board) {
         fprintf(stderr, "%s\n", board_err);
         return INIT_NODE_NO_BOARD;
     }
     mixed_node_t *node = &nodes[idx];
     memset(node, 0, sizeof(*node));
+    node_type_of[idx] = type_idx;
     /* Clock deviation from config (Cooja MspClock deviation).  Set here, not
      * by the caller: reboots and added nodes come through init_node too, and
      * a deviation left at 0 freezes the mote's clock. */
@@ -1578,8 +1598,12 @@ static int init_node(int idx, const char *firmware_path,
                                               nc->peripheral_count,
                                               &mixed_mote_env)
                 : 1;
-        if (prc < 0)
+        if (prc < 0) {
+            /* Booted, but cannot run as configured: release it, as a
+             * failed boot does, so the caller holds no live platform. */
+            mote_store[idx].ops->destroy(&mote_store[idx]);
             return -1;
+        }
         if (prc > 0)
             fprintf(stderr, "Node %d: 'peripherals' ignored — board %s has no SPI chip support\n",
                     node_id, node->board->label);
@@ -1603,10 +1627,57 @@ static void destroy_node(int idx) {
     m->ops->destroy(m);
 }
 
+/* The mote of a slot whose boot failed: no platform behind it.  It reads as
+ * caught up with no work, takes nothing, and destroying it is a no-op. */
+static int64_t no_mote_now(const sim_mote_t *m) { (void)m; return sim_runtime_now_ns(&sim_rt); }
+static int64_t no_mote_zero(const sim_mote_t *m) { (void)m; return 0; }
+static uint32_t no_mote_freq(const sim_mote_t *m) { (void)m; return 0; }
+static int64_t no_mote_execute(sim_mote_t *m, int64_t now_ns) { (void)m; (void)now_ns; return INT64_MAX; }
+static void no_mote_step(sim_mote_t *m, int64_t target) { (void)m; (void)target; }
+static int no_mote_serial(sim_mote_t *m, const uint8_t *buf, int len) { (void)m; (void)buf; (void)len; return 0; }
+static void no_mote_destroy(sim_mote_t *m) { (void)m; }
+static void no_mote_reset_time(sim_mote_t *m, int64_t now_ns) { (void)m; (void)now_ns; }
+static void *no_mote_interface(sim_mote_t *m, int iface) { (void)m; (void)iface; return NULL; }
+static int no_mote_frame(sim_mote_t *m, const uint8_t *frame, int len, int64_t now_ns,
+                         int sender_idx) {
+    (void)m; (void)frame; (void)len; (void)now_ns; (void)sender_idx; return 0;
+}
+static const sim_mote_ops_t no_mote_ops = {
+    .kind          = "NONE",
+    .sim_time_ns   = no_mote_now,
+    .cycles        = no_mote_zero,
+    .freq_hz       = no_mote_freq,
+    .instructions  = no_mote_zero,
+    .execute       = no_mote_execute,
+    .step_until    = no_mote_step,
+    .serial_input  = no_mote_serial,
+    .destroy       = no_mote_destroy,
+    .reset_time    = no_mote_reset_time,
+    .get_interface = no_mote_interface,
+    .receive_frame = no_mote_frame,
+};
+
+/* A configured slot whose boot failed after init_node began on it.  The old
+ * mote is gone and the boot released what it allocated, so nothing may
+ * reach the slot's platform again: not the kernel, the radio bus, the UI,
+ * the diagnostics or the teardown.  The slot keeps its id and position and
+ * stays removed; a later reboot that succeeds revives it. */
+static void retire_failed_slot(int idx) {
+    sim_cancel_mote_events(&sim_rt, idx);
+    sim_runtime_bump_mote_generation(&sim_rt, idx);
+    sim_radio_bus_reset_node(&radio_bus, idx);
+    sim_radio_bus_register(&radio_bus, idx, NULL, NULL, SIM_RADIO_DELIVERY_NONE, 0);
+    memset(&nodes[idx].plat, 0, sizeof(nodes[idx].plat));
+    nodes[idx].type = NODE_NONE;
+    node_start_ns[idx] = INT64_MAX;
+    register_node_mote(idx, &no_mote_ops);
+}
+
 /* --- Reboot node (destroy + reinitialize) --- */
 
 static int reboot_node(int idx) {
     int node_id = nodes[idx].id;
+    int type_idx = node_type_of[idx];
     /* Copy firmware path before destroy — init_node's memset would zero it */
     char fw[256], sfw[256];
     snprintf(fw, sizeof(fw), "%s", nodes[idx].firmware_path);
@@ -1626,7 +1697,20 @@ static int reboot_node(int idx) {
      * what matters is that any events queued between this point and the
      * old slot's last activity are guaranteed to miss the new generation. */
     destroy_node(idx);
-    return init_node(idx, fw, sfw, node_id);
+    int rc = init_node(idx, fw, sfw, node_id, type_idx);
+    if (rc == INIT_NODE_NO_BOARD) {
+        /* init_node returned before touching the slot, but the old mote
+         * is already destroyed. */
+        nodes[idx].id = node_id;
+        snprintf(nodes[idx].firmware_path, sizeof(nodes[idx].firmware_path), "%s", fw);
+        snprintf(nodes[idx].secure_firmware_path, sizeof(nodes[idx].secure_firmware_path),
+                 "%s", sfw);
+    }
+    if (rc != 0) {
+        retire_failed_slot(idx);
+        fprintf(stderr, "node %d: reboot failed; the node is removed\n", node_id);
+    }
+    return rc;
 }
 
 /* ============================================================
@@ -1696,11 +1780,12 @@ static void ctl_remove(void *u, int idx) {
     /* Stop node: set start_ns to far future so it's never active */
     node_start_ns[idx] = INT64_MAX;
 }
-static int ctl_add(void *u, const char *fw, const char *sfw, int node_id) {
+static int ctl_add(void *u, const char *fw, const char *sfw, int node_id,
+                   const char *type_name) {
     (void)u;
     int nc = ctl_node_count(NULL);
     if (nc >= MAX_NODES) return -1;
-    int rc = init_node(nc, fw, sfw, node_id);
+    int rc = init_node(nc, fw, sfw, node_id, mote_type_index(type_name));
     if (rc == INIT_NODE_NO_BOARD) return -1;     /* the slot was not touched */
     if (rc != 0) {
         /* init_node registered the slot before boot failed (boot already
@@ -1749,6 +1834,46 @@ static int g_save_timeout_ms = 0;
 /* Shell/script runs have no fixed duration: save the time actually run. */
 static int g_save_elapsed = 0;
 static int64_t g_sim_start_ns = 0;
+static bool mote_name_taken(const sim_normalized_config_t *live, const char *name, int upto) {
+    for (int t = 0; t < upto; t++)
+        if (strcmp(live->mote_types[t].name, name) == 0) return true;
+    return false;
+}
+
+/* Name node `n` by a mote type of `live` carrying `board` for its images,
+ * adding one ("<stem>-<board>") if no earlier node made it. */
+static void save_board_type(sim_normalized_config_t *live, sim_node_config_t *n,
+                            const char *board) {
+    int t;
+    for (t = 0; t < live->mote_type_count; t++) {
+        const sim_mote_type_t *mt = &live->mote_types[t];
+        if (strcmp(mt->board, board) == 0 && strcmp(mt->firmware, n->firmware) == 0 &&
+            strcmp(mt->secure_firmware, n->secure_firmware) == 0) break;
+    }
+    if (t == live->mote_type_count) {
+        if (t >= SIM_MAX_MOTE_TYPES) return;      /* the check below says so */
+        sim_mote_type_t *mt = &live->mote_types[t];
+        memset(mt, 0, sizeof(*mt));
+        const char *base = strrchr(n->firmware, '/');
+        char stem[64];
+        snprintf(stem, sizeof(stem), "%s", base ? base + 1 : n->firmware);
+        char *dot = strrchr(stem, '.');
+        if (dot && dot != stem) *dot = '\0';
+        snprintf(mt->name, sizeof(mt->name), "%.40s-%.20s", stem, board);
+        for (int k = 2; mote_name_taken(live, mt->name, t); k++)
+            snprintf(mt->name, sizeof(mt->name), "%.40s-%.16s-%d", stem, board, k);
+        snprintf(mt->board, sizeof(mt->board), "%s", board);
+        snprintf(mt->firmware, sizeof(mt->firmware), "%s", n->firmware);
+        snprintf(mt->secure_firmware, sizeof(mt->secure_firmware), "%s", n->secure_firmware);
+        snprintf(live->mote_type_firmware[t], sizeof(live->mote_type_firmware[t]), "%s",
+                 n->firmware);
+        snprintf(live->mote_type_secure_firmware[t], sizeof(live->mote_type_secure_firmware[t]),
+                 "%s", n->secure_firmware);
+        live->mote_type_count++;
+    }
+    snprintf(n->type_name, sizeof(n->type_name), "%s", live->mote_types[t].name);
+}
+
 static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns,
                             int for_page) {
     static sim_normalized_config_t live;
@@ -1767,8 +1892,10 @@ static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns,
         live.success_ratio_rx   = radio_medium.udgm.success_ratio_rx;
     }
     live.node_count = 0;
+    int slot_of[MAX_SIM_NODES];               /* saved node -> slot, for the check */
     for (int i = 0; i < nc && live.node_count < MAX_SIM_NODES; i++) {
         if (node_start_ns[i] == INT64_MAX) continue;      /* removed */
+        slot_of[live.node_count] = i;
         sim_node_config_t *n = &live.nodes[live.node_count++];
         int from_cfg = config_loaded && i < config->node_count;
         memset(n, 0, sizeof(*n));
@@ -1782,8 +1909,25 @@ static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns,
         n->y = radio_medium.nodes[i].y;
         n->has_position = (from_cfg && config->nodes[i].has_position) ||
                           n->x != 0.0 || n->y != 0.0;
-        n->clock_deviation = from_cfg ? config->nodes[i].clock_deviation : 1.0;
+        /* What the node is now: its own type, its clock as last set.  The
+         * descriptive fields come from its config entry, by slot (a removed
+         * node before it does not shift them). */
+        n->clock_deviation = nodes[i].clock_deviation;
         if (n->clock_deviation == 0.0) n->clock_deviation = 1.0;
+        if (from_cfg) {
+            snprintf(n->name, sizeof(n->name), "%s", config->nodes[i].name);
+            snprintf(n->meta, sizeof(n->meta), "%s", config->nodes[i].meta);
+        }
+        int t = node_type_of[i];
+        if (t >= 0 && config->mote_types[t].name[0]) {
+            snprintf(n->type_name, sizeof(n->type_name), "%s", config->mote_types[t].name);
+        } else if (nodes[i].board && nodes[i].board->name) {
+            /* No type, and a board its file name does not give (--board, a
+             * variant): a type that says so, shared by nodes alike. */
+            const sim_board_desc_t *by_ext = sim_board_for_path(n->firmware);
+            if (!by_ext || !by_ext->name || strcmp(by_ext->name, nodes[i].board->name) != 0)
+                save_board_type(&live, n, nodes[i].board->name);
+        }
         if (from_cfg && config->nodes[i].has_peripherals) {
             n->has_peripherals  = 1;
             n->peripheral_count = config->nodes[i].peripheral_count;
@@ -1818,8 +1962,26 @@ static int save_live_config(const char *path, int timeout_ms, int64_t sim_ns,
                     path);
             save_rc = -1;
         } else {
+            /* ...and give every node the board it runs on now. */
+            for (int k = 0; k < check.node_count && k < live.node_count && save_rc == 0; k++) {
+                const sim_node_config_t *cn = &check.nodes[k];
+                const char *b = NULL;
+                for (int t = 0; t < check.mote_type_count; t++)
+                    if (strcmp(check.mote_types[t].name, cn->type_name) == 0 &&
+                        check.mote_types[t].board[0]) b = check.mote_types[t].board;
+                char err[512];
+                const sim_board_desc_t *got = sim_board_resolve(cn->firmware, b, err, sizeof(err));
+                const sim_board_desc_t *want = nodes[slot_of[k]].board;
+                if (!got || !want || got->kind != want->kind ||
+                    (got->name != want->name &&
+                     (!got->name || !want->name || strcmp(got->name, want->name) != 0))) {
+                    fprintf(stderr, "--save-config: %s would run node %d as %s, not %s\n",
+                            path, cn->id, got ? got->label : err, want ? want->label : "?");
+                    save_rc = -1;
+                }
+            }
             sim_config_free(&check);
-            if (!for_page)      /* the page's file is temporary: nothing to report */
+            if (!for_page && save_rc == 0)   /* the page's file is temporary */
                 printf("Saved config: %s (%d nodes)\n", path, live.node_count);
         }
     } else {
@@ -2487,7 +2649,17 @@ int run_mixed_multinode_test(int argc, char **argv) {
                 return SHELL_EXIT_INVALID;
             }
         } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
-            sim_ms = atoi(argv[++i]);
+            /* Whole milliseconds the int can hold: atoi made "abc" 0 and
+             * 3000000000 a negative run that ended at once. */
+            char *end;
+            errno = 0;
+            long v = strtol(argv[++i], &end, 10);
+            if (end == argv[i] || *end || errno || v < 1 || v > INT_MAX) {
+                fprintf(stderr, "-t %s: give whole milliseconds from 1 to %d (24.8 days)\n",
+                        argv[i], INT_MAX);
+                return SHELL_EXIT_INVALID;
+            }
+            sim_ms = (int)v;
             sim_ms_set = 1;
         } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
             /* Per-node startup delay spread (ms). Each node gets a
@@ -2591,7 +2763,9 @@ int run_mixed_multinode_test(int argc, char **argv) {
      * extension without a "board:" is a configuration error. */
     for (int i = 0; i < firmware_count; i++) {
         char board_err[512];
-        if (!board_for_firmware(firmware_paths[i], board_err, sizeof(board_err))) {
+        int type_idx = (config_loaded && i < config.node_count)
+                       ? mote_type_index(config.nodes[i].type_name) : -1;
+        if (!board_for_firmware(firmware_paths[i], type_idx, board_err, sizeof(board_err))) {
             fprintf(stderr, "%s\n", board_err);
             return SHELL_EXIT_INVALID;
         }
@@ -2602,9 +2776,11 @@ int run_mixed_multinode_test(int argc, char **argv) {
         /* M60: the banner label is data on the mote-kind row, not a type
          * switch — adding a platform needs no runner edit. */
         char board_err[512];
+        int type_idx = (config_loaded && i < config.node_count)
+                       ? mote_type_index(config.nodes[i].type_name) : -1;
         const sim_mote_kind_t *kind =
             sim_registry_mote_kind_for(&g_registry,
-                board_for_firmware(firmware_paths[i], board_err,
+                board_for_firmware(firmware_paths[i], type_idx, board_err,
                                    sizeof(board_err))->kind);
         printf("Firmware[%d]: %s (%s)\n", i, firmware_paths[i],
                kind->banner_label);
@@ -2727,7 +2903,9 @@ sim_restart:
                       ? config.nodes[i].id : i + 1;
         const char *sfw = (config_loaded && i < config.node_count)
                           ? config.nodes[i].secure_firmware : NULL;
-        if (init_node(i, fw, sfw, node_id) != 0) {
+        int type_idx = (config_loaded && i < config.node_count)
+                       ? mote_type_index(config.nodes[i].type_name) : -1;
+        if (init_node(i, fw, sfw, node_id, type_idx) != 0) {
             fprintf(stderr, "Failed to initialize node %d\n", node_id);
             return SHELL_EXIT_INVALID;
         }
@@ -3547,8 +3725,10 @@ sim_restart:
                             sfw = config.mote_type_secure_firmware[type_idx];
                         }
                         if (fw) {
-                            found = sim_control_add(&sim_ctl, fw, sfw, act->node,
-                                                    act->x, act->y, 0);
+                            found = sim_control_add_typed(&sim_ctl,
+                                                          config.mote_types[type_idx].name,
+                                                          fw, sfw, act->node,
+                                                          act->x, act->y, 0);
                             if (found >= 0 && verbose)
                                 printf("  JS ACTION: create new node %d (type %d, fw=%s)\n",
                                        act->node, type_idx, fw);

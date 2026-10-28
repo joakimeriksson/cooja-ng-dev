@@ -44,6 +44,12 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   type: one with 17 images loaded, and the file Save wrote from it did not.
   On the command line `-n` over 128, or more than 128 firmware images, is
   refused the same way; it used to run 128 nodes under a banner naming more.
+- **Durations outside 1 ms to 24.8 days are refused** (exit 2): `-t`,
+  `--duration`, a config's `timeout_ms` and a test step's.  `-t` took
+  `atoi`'s word, so `abc` was 0 and `3000000000` wrapped to a negative run
+  that ended at once, and `cngsim run --duration 720h` reported DONE at
+  0 s; a config's `timeout_ms` of 3000000000 was cut to 24.8 days and 1.5
+  to 1 without a word.  `-t` takes whole milliseconds only.
 - **A plugin that cannot be loaded, or a medium no plugin provides, is an
   error** (exit 2, before the run starts), from `--plugin`, a config's
   `plugins` list or its `medium`.  A misspelt built-in name (`energist`)
@@ -61,7 +67,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - **libcsim: changed signatures and layouts.**  `sim_board_for_path`
   returns NULL for an unknown extension instead of the Sky board;
   `sim_config_write_yaml` takes the directory to write paths relative to,
-  and the `sim_control` ops' `save_config` a `for_page` flag;
+  the `sim_control` ops' `save_config` a `for_page` flag and `add` the
+  mote type's name (`sim_control_add_typed` names it apart from the
+  images);
   `msp430_config_find`, `msp430f149_config` and `cc430f5137_config` are
   gone with their boards.  `sim_normalized_config_t` (16 mote types, node
   `name`, `meta` and relative paths), `arm_cpu_t` (96 IO windows,
@@ -143,6 +151,10 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   release's unpacked tarball, beside a check that the README's platform
   table matches `cngsim boards`. `test-format.md` lists the run options,
   `--pcap`, `--plugin` and `-d` among them.
+- **A sanitizer job in CI** (ASan + UBSan, interpreter build) runs the
+  malformed-firmware images, failed reboots (`tools/check-lifecycle.sh`),
+  live saves (`tools/check-save.sh`) and the config loader's refusals on
+  every PR; the two new checks also run in the normal jobs.
 - **`make install`** (`PREFIX`, `DESTDIR`), and release tarballs that carry
   `cngsim`, the examples, their firmware, the guides and the setups the
   guides run, beside the `build/test_runner` and `tools/` the Contiki-NG
@@ -269,6 +281,25 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - **CI: the determinism, config-equivalence and browser-parity checks
   passed when both sides failed the same way** (a missing firmware twice).
   Each now requires the runs to exit 0.
+- **A reboot whose boot failed left a dead node in the run.** Rebooting a
+  node whose firmware had gone or been truncated freed its platform but
+  left the slot counted, so the end-of-run diagnostics read freed memory
+  and the teardown freed it again: the run aborted (MSP430 and ARM alike),
+  or died with a bus error once radio traffic reached the node.  The
+  reboot now fails with a message, the node is left removed, the others
+  run on, and a later reboot that succeeds revives it.  An external mote
+  whose peer would not start, and a node whose `peripherals` cannot be
+  set up, release what they allocated too.
+- **A node ran on the board of the first mote type with its image**, not
+  its own: with two types naming one image and different boards (the
+  nRF52840 DK and the dongle), every node booted on the first type's.
+  Reboot, a shell `add`, the web UI's Add node and a JS `addMote` kept the
+  wrong board, and a save wrote every such node under the first type.
+- **A save lost what made a node what it was:** a board given with
+  `--board` (the saved file then would not load: `hello.elf` has no board
+  of its own), each node's `name` and `meta`, and a clock deviation set
+  from the shell, which was saved as the config's value.  A save now also
+  checks that every node it wrote resolves to the board it ran on.
 - **Test suites that passed without testing:** `firmware` and `arm-firmware`
   counted an image they could not load as a skip and exited 0, and the
   cc2538dk hello-world entry had no assertion; `config-reject` passed a
