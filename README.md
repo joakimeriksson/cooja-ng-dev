@@ -17,10 +17,10 @@ runner extraction plan.
                           │                                              │
 firmware/*.sky / .z1 ────►│  MSP430 F1611/F2617/FR5969                   │
 firmware/*.cc2538dk    ──►│  ARM Cortex-M3 + CC2538 RF Core (on-chip)    │──► UART, packets,
-firmware/*.zoul-firefly►──│  ARM Cortex-M3 + CC2538 + CC1200 sub-GHz     │    timeline,
+firmware/*.zoul-firefly──►│  ARM Cortex-M3 + CC2538 + CC1200 sub-GHz     │    timeline,
 firmware/*.nrf52840-dk ──►│  ARM Cortex-M4F + Nordic 802.15.4 radio      │    web UI,
 firmware/*.nrf54l15-dk ──►│  ARM Cortex-M33 + Nordic 802.15.4 + DPPI/GRTC│    COOJA.testlog
-   └─ + RV32E FLPR  ──────►│  RISC-V coprocessor, dual-core, shared SRAM  │
+   └─ + RV32E FLPR  ─────►│  RISC-V coprocessor, dual-core, shared SRAM  │
 firmware/*.cooja       ──►│  Native Cooja motes (dlopen)                 │
                           │                                              │
                           │  shared event queue • per-radio medium       │
