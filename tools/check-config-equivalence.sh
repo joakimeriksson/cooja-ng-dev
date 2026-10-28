@@ -25,8 +25,19 @@ trap 'rm -rf "$tmp"' EXIT
 # independently buffered streams — on Linux this produced a "difference" that
 # was the same lines in a different order, with a console line spliced into
 # the middle of a [PKT] line.  Each stream on its own is deterministic.
-"$RUNNER" test "$V1" "$@" 2>"$tmp/v1.err" | grep -vE "$NOISE" > "$tmp/v1.txt"
-"$RUNNER" test "$V2" "$@" 2>"$tmp/v2.err" | grep -vE "$NOISE" > "$tmp/v2.txt"
+# Both runs must also pass: two configs that fail to load the same way
+# would otherwise compare equal.
+for v in v1 v2; do
+    cfg=$V1; [ "$v" = v2 ] && cfg=$V2
+    "$RUNNER" test "$cfg" "$@" >"$tmp/$v.raw" 2>"$tmp/$v.err"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "FAILED: $cfg exited $rc"
+        tail -20 "$tmp/$v.err"
+        exit 1
+    fi
+    grep -vE "$NOISE" "$tmp/$v.raw" > "$tmp/$v.txt"
+done
 grep -vE "$NOISE" "$tmp/v1.err" > "$tmp/v1.err.f"; grep -vE "$NOISE" "$tmp/v2.err" > "$tmp/v2.err.f"
 
 if diff -q "$tmp/v1.txt" "$tmp/v2.txt" >/dev/null && diff -q "$tmp/v1.err.f" "$tmp/v2.err.f" >/dev/null; then

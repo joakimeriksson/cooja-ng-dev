@@ -15,7 +15,8 @@
 #       firmware/sky/udp-server.sky firmware/sky/udp-client.sky -t 60000
 #   ./tools/check-determinism.sh test configs/chain-4node-sky.json
 #
-# Exit 0 = deterministic (empty diff); exit 1 = divergence (diff shown);
+# Exit 0 = deterministic (empty diff); exit 1 = divergence (diff shown), or
+# a run that did not exit 0 (two runs failing the same way are not a pass);
 # exit 2 = usage/build error.
 
 set -u
@@ -42,11 +43,21 @@ trap 'rm -rf "$OUT_DIR"' EXIT
 
 run_once() {
     # Merge stdout+stderr, strip the noise lines, normalise nothing else.
-    "$RUNNER" "$@" 2>&1 | grep -avE "$NOISE"
+    "$RUNNER" "$@" > "$OUT_DIR/raw.txt" 2>&1
+    local rc=$?
+    grep -avE "$NOISE" "$OUT_DIR/raw.txt"
+    return $rc
 }
 
-run_once "$@" > "$OUT_DIR/a.txt"
-run_once "$@" > "$OUT_DIR/b.txt"
+for run in a b; do
+    run_once "$@" > "$OUT_DIR/$run.txt"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "FAILED: run $run of $* exited $rc" >&2
+        tail -20 "$OUT_DIR/$run.txt" >&2
+        exit 1
+    fi
+done
 
 if diff -u "$OUT_DIR/a.txt" "$OUT_DIR/b.txt" > "$OUT_DIR/diff.txt"; then
     lines=$(wc -l < "$OUT_DIR/a.txt")

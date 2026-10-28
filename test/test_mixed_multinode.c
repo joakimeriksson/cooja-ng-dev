@@ -2482,7 +2482,10 @@ int run_mixed_multinode_test(int argc, char **argv) {
         else if (strcmp(argv[i], "-q") == 0) verbose = 0;
         else if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
             node_count = atoi(argv[++i]);
-            if (node_count > MAX_NODES) node_count = MAX_NODES;
+            if (node_count > MAX_NODES) {
+                fprintf(stderr, "-n %d: at most %d nodes\n", node_count, MAX_NODES);
+                return SHELL_EXIT_INVALID;
+            }
         } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
             sim_ms = atoi(argv[++i]);
             sim_ms_set = 1;
@@ -2504,8 +2507,11 @@ int run_mixed_multinode_test(int argc, char **argv) {
                 config_path = argv[i];
                 sim_config_print(&config);
             } else {
-                if (firmware_count < MAX_NODES)
-                    firmware_paths[firmware_count++] = argv[i];
+                if (firmware_count >= MAX_NODES) {
+                    fprintf(stderr, "%s: more than %d firmware images\n", argv[i], MAX_NODES);
+                    return SHELL_EXIT_INVALID;
+                }
+                firmware_paths[firmware_count++] = argv[i];
             }
         } else {
             fprintf(stderr, "unknown option '%s'\n", argv[i]);
@@ -3125,11 +3131,17 @@ sim_restart:
      * whole block is a no-op, so the default path stays byte-identical. */
     {
         int svc_before = g_registry.service_count;
+        /* A plugin that cannot be loaded or attached ends the run before it
+         * starts: a misspelt name would otherwise run without the output it
+         * was asked for and still pass. */
+        int plugin_failed = 0;
         /* CLI --plugin paths (always .so paths). */
         for (int p = 0; p < plugin_path_count; p++) {
             char err[256] = {0};
-            if (sim_plugin_load(plugin_paths[p], &g_registry, err, sizeof(err)) < 0)
+            if (sim_plugin_load(plugin_paths[p], &g_registry, err, sizeof(err)) < 0) {
                 fprintf(stderr, "plugin: %s: %s\n", plugin_paths[p], err);
+                plugin_failed = 1;
+            }
         }
         /* Config v2 plugins[]: a "/"-bearing or ".so"-suffixed entry is a path
          * to dlopen; otherwise it names a COMPILED-IN service ("builtin:NAME"
@@ -3146,21 +3158,26 @@ sim_restart:
                           (len > 3 && strcmp(entry + len - 3, ".so") == 0);
             if (is_path) {
                 char err[256] = {0};
-                if (sim_plugin_load(entry, &g_registry, err, sizeof(err)) < 0)
+                if (sim_plugin_load(entry, &g_registry, err, sizeof(err)) < 0) {
                     fprintf(stderr, "plugin: %s: %s\n", entry, err);
+                    plugin_failed = 1;
+                }
             } else {
                 const char *name = strncmp(entry, "builtin:", 8) == 0
                                        ? entry + 8 : entry;
                 const sim_service_ops_t *ops =
                     sim_registry_find_service(&g_registry, name);
-                if (!ops)
+                if (!ops) {
                     fprintf(stderr, "plugin: unknown builtin service '%s'\n",
                             name);
-                else if (sim_service_attach(&sim_rt, ops, NULL) < 0)
+                    plugin_failed = 1;
+                } else if (sim_service_attach(&sim_rt, ops, NULL) < 0) {
                     fprintf(stderr, "plugin: failed to attach builtin '%s' "
                             "(needs config it wasn't given?)\n", name);
-                else
+                    plugin_failed = 1;
+                } else {
                     attached_builtin = true;
+                }
             }
         }
         /* Attach the dynamically-registered (.so) services — those appended to
@@ -3168,9 +3185,15 @@ sim_restart:
          * (they're already in the catalog, so this range excludes them). */
         for (int s = svc_before; s < g_registry.service_count; s++) {
             const sim_service_ops_t *ops = g_registry.services[s];
-            if (sim_service_attach(&sim_rt, ops, NULL) < 0)
+            if (sim_service_attach(&sim_rt, ops, NULL) < 0) {
                 fprintf(stderr, "plugin: failed to attach service '%s'\n",
                         ops && ops->name ? ops->name : "?");
+                plugin_failed = 1;
+            }
+        }
+        if (plugin_failed) {
+            ui_service_destroy(&ui_svc);
+            return SHELL_EXIT_INVALID;
         }
         /* A plugin service may want the radio-state stream (e.g. an energy /
          * duty-cycle tracker).  Turn tracking on when any plugin service was
@@ -3188,8 +3211,9 @@ sim_restart:
         const sim_medium_type_t *mt =
             sim_registry_find_radio_medium(&g_registry, config.medium_name);
         if (!mt) {
-            fprintf(stderr, "medium: unknown type '%s' (using default)\n",
-                    config.medium_name);
+            fprintf(stderr, "medium: unknown type '%s'\n", config.medium_name);
+            ui_service_destroy(&ui_svc);
+            return SHELL_EXIT_INVALID;
         } else {
             /* Run the named medium on the UDGM pipeline with its own policy.
              * configure_udgm sets type+params (+ the built-in ops), then we

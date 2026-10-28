@@ -33,6 +33,12 @@ OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 
 one() {
     $NATIVE "$@" > "$OUT/n.out" 2> "$OUT/n.err"; local rn=$?
+    # A scenario that fails natively proves nothing by failing the same way
+    # in the browser build.
+    if [ "$rn" != 0 ]; then
+        echo "FAILED natively (exit $rn): $*"; tail -20 "$OUT/n.err"
+        return 1
+    fi
     local s
     for s in out err; do grep -avE "$NOISE" "$OUT/n.$s" > "$OUT/n.$s.f"; done
     local bad=0 b

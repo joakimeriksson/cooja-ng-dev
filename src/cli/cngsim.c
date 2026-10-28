@@ -27,6 +27,7 @@
 #include "csim_version.h"
 #include "sim_board.h"
 #include "sim_config.h"
+#include "sim_registry.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -380,6 +381,11 @@ static void stdout_line(int out, char *line) {
     }
     if (is_console_line(line)) {
         if (!F.quiet) out_fmt(out, "%s\n", line);
+        return;
+    }
+    /* The energest plugin's end-of-run report: the setup asked for it. */
+    if (strncmp(t, "energest: ", 10) == 0) {
+        if (!F.quiet) out_fmt(out, "%s\n", t);
         return;
     }
     /*   TEST step 2 PASS: "Received response" matched 3/3 (node 2, 37083 ms) */
@@ -937,6 +943,28 @@ static int cmd_check(int argc, char **argv) {
     if (cfg.bundled_fallback[0])
         fprintf(stderr, "%s: note: %s is not next to the setup, so the bundled "
                 "firmware is used (as for the examples)\n", argv[0], cfg.bundled_fallback);
+    /* Plugins as the runner resolves them: a path must be readable, a bare
+     * or "builtin:" name must be a compiled-in service. */
+    static sim_registry_t reg;
+    if (!reg.service_count) csim_register_builtin_services(&reg);
+    for (int p = 0; p < cfg.plugin_count; p++) {
+        const char *entry = cfg.plugins[p];
+        size_t len = strlen(entry);
+        if (!len) continue;
+        if (strchr(entry, '/') || (len > 3 && strcmp(entry + len - 3, ".so") == 0)) {
+            if (access(entry, R_OK) != 0) {
+                fprintf(stderr, "%s: cannot read plugin %s\n", argv[0], entry);
+                bad++;
+            }
+        } else {
+            const char *name = strncmp(entry, "builtin:", 8) == 0 ? entry + 8 : entry;
+            if (!sim_registry_find_service(&reg, name)) {
+                fprintf(stderr, "%s: unknown plugin '%s' (not a built-in service, "
+                        "and not a path to a .so)\n", argv[0], name);
+                bad++;
+            }
+        }
+    }
     if (cfg.has_js_script && cfg.js_script_path[0] && access(cfg.js_script_path, R_OK) != 0) {
         fprintf(stderr, "%s: cannot read js_script %s\n", argv[0], cfg.js_script_path);
         bad++;
@@ -981,16 +1009,19 @@ typedef struct {
     const char *roles[2], *images[2];
     const char *expect;                   /* console line the check waits for */
     int expect_radio;                     /* the check needs a radio path */
+    const char *not_on;                   /* a board whose bundled images don't run it */
 } template_t;
 
 static const template_t templates[] = {
     { "rpl-udp", "an RPL network: node 1 is the UDP server and the RPL root, the "
       "others are clients that send it requests",
-      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1 },
+      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1,
+      /* its XIAO images boot but never form a network (as in 0.3.0) */
+      "nrf54l15-xiao" },
     { "nullnet", "broadcast without IP: every node broadcasts and prints what "
-      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1 },
+      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1, NULL },
     { "hello", "hello world on every node", { "node", NULL }, { "hello-world", NULL },
-      "Hello, world", 0 },
+      "Hello, world", 0, NULL },
 };
 
 #define RPL_UDP_MAX_NODES 16          /* the server and 15 clients */
@@ -999,6 +1030,19 @@ static const template_t *find_template(const char *name) {
     for (size_t i = 0; i < sizeof(templates) / sizeof(templates[0]); i++)
         if (strcmp(templates[i].name, name) == 0) return &templates[i];
     return NULL;
+}
+
+/* The bundled image for one role of a template on a board, in `out`: the
+ * board's UART-console build when it has one (the dongle's plain hello-world
+ * prints over native USB, which the simulator does not model).  Returns 0 if
+ * the board has no usable image. */
+static int template_image(const char *data, const char *board, const template_t *tp,
+                          int r, char *out, size_t outsz) {
+    if (tp->not_on && strcmp(board, tp->not_on) == 0) return 0;
+    snprintf(out, outsz, "%s/firmware/%s/%s-uart.%s", data, board, tp->images[r], board);
+    if (is_file(out)) return 1;
+    snprintf(out, outsz, "%s/firmware/%s/%s.%s", data, board, tp->images[r], board);
+    return is_file(out);
 }
 
 /* What `new` writes: the template, the board's bundled images and the
@@ -1257,16 +1301,14 @@ static int cmd_new(int argc, char **argv) {
     char fw[2][PATH_MAX];
     for (int r = 0; r < 2 && tp->roles[r]; r++) {
         char img[PATH_MAX + 256];
-        snprintf(img, sizeof(img), "%s/firmware/%s/%s.%s", data, board, tp->images[r], board);
-        if (!is_file(img)) {
+        if (!template_image(data, board, tp, r, img, sizeof(img))) {
             char have[512] = "";
             for (int k = 0;; k++) {
                 const sim_board_desc_t *b = sim_board_at(k);
                 if (!b) break;
                 if (!b->name || strstr(have, b->name)) continue;
                 char p[PATH_MAX + 256];
-                snprintf(p, sizeof(p), "%s/firmware/%s/%s.%s", data, b->name, tp->images[r], b->name);
-                if (is_file(p)) {
+                if (template_image(data, b->name, tp, r, p, sizeof(p))) {
                     strncat(have, have[0] ? ", " : "", sizeof(have) - strlen(have) - 1);
                     strncat(have, b->name, sizeof(have) - strlen(have) - 1);
                 }

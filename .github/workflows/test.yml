@@ -564,6 +564,7 @@ jobs:
       # the run it was saved from.
       - name: Config save (--save-config reproduces the run)
         run: |
+          set -o pipefail   # the run's exit code, not grep's
           ./build/test_runner test configs/test-rpl-udp-sky.yaml --save-config saved.yaml | grep "Saved config"
           tools/check-config-equivalence.sh configs/test-rpl-udp-sky.yaml saved.yaml
 
