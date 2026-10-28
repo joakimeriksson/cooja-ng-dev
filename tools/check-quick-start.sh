@@ -57,7 +57,9 @@ while IFS= read -r line; do
     case $line in
         *--ui*)
             # As typed, then headless: no browser, no pause, as fast as it goes.
-            sh -c "${line%%#*} --no-open --start --speed max" > "$out" 2>&1 &
+            # exec, so that $! is cngsim itself: dash (Ubuntu's sh) does not
+            # exec a -c command, and the background sh ignores SIGINT.
+            sh -c "exec ${line%%#*} --no-open --start --speed max" > "$out" 2>&1 &
             pid=$!
             got=0
             for i in $(seq 1 100); do
@@ -66,9 +68,21 @@ while IFS= read -r line; do
                 kill -0 "$pid" 2>/dev/null || break
                 sleep 0.2
             done
-            kill -INT "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
-            if [ "$got" = 1 ]; then ok "$line   (served the web UI at :8080)"
-            else bad "$line   (no web UI at http://127.0.0.1:8080/)"; sed 's/^/        /' "$out" | tail -15; fi
+            # Ctrl-C ends the run (the guide says so); give it 10 s, then kill
+            # it rather than wait for ever.
+            kill -INT "$pid" 2>/dev/null
+            ended=0
+            for i in $(seq 1 50); do
+                kill -0 "$pid" 2>/dev/null || { ended=1; break; }
+                sleep 0.2
+            done
+            [ "$ended" = 1 ] || kill -KILL "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null
+            if [ "$got" != 1 ]; then
+                bad "$line   (no web UI at http://127.0.0.1:8080/)"; sed 's/^/        /' "$out" | tail -15
+            elif [ "$ended" != 1 ]; then
+                bad "$line   (still running 10 s after Ctrl-C)"; sed 's/^/        /' "$out" | tail -15
+            else ok "$line   (served the web UI at :8080, ended on Ctrl-C)"; fi
             ;;
         *)
             if sh -c "$line" < /dev/null > "$out" 2>&1; then ok "$line"

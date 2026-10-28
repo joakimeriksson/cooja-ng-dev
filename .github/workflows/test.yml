@@ -251,6 +251,7 @@ jobs:
       # Gate G3: docs/quick-start.md run as written, against a package laid
       # out as the release tarball is (release.yml's Package step).
       - name: Quick start, as written, from a package
+        timeout-minutes: 10
         run: |
           pkg="$RUNNER_TEMP/pkg"
           rm -rf "$pkg"; mkdir -p "$pkg/bin" "$pkg/build"
