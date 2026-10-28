@@ -19,6 +19,7 @@
 
 static int parse_v1(cJSON *root, sim_normalized_config_t *cfg);
 static int parse_v2(cJSON *root, sim_normalized_config_t *cfg);
+static int v1_image_count(const sim_normalized_config_t *cfg);
 /* "peripherals": [ { "chip": "mx25r6435f", "spim": 0, "cs": "P2.05" }, ... ]
  * cs is written the way the firmware prints it (P<port>.<pin>). */
 static int parse_cs_pin(const char *txt, int *port, int *pin) {
@@ -39,7 +40,7 @@ static int parse_node_name(cJSON *node_item, sim_node_config_t *n, int idx) {
     if (!cJSON_IsString(name) || !name->valuestring) return 0;
     size_t len = strlen(name->valuestring);
     if (len >= sizeof(n->name)) {
-        fprintf(stderr, "sim_config: node %d: 'name' is longer than %zu characters\n",
+        fprintf(stderr, "sim_config: node %d: 'name' is longer than %zu bytes\n",
                 idx, sizeof(n->name) - 1);
         return -1;
     }
@@ -77,12 +78,12 @@ static int parse_node_meta(cJSON *node_item, sim_node_config_t *n, int idx) {
         }
         size_t klen = strlen(e->string);
         if (klen == 0 || klen > NODE_META_MAX_KEY) {
-            fprintf(stderr, "sim_config: node %d: 'meta' key '%s' must be 1 to %d characters\n",
+            fprintf(stderr, "sim_config: node %d: 'meta' key '%s' must be 1 to %d bytes\n",
                     idx, e->string, NODE_META_MAX_KEY);
             return -1;
         }
         if (cJSON_IsString(e) && strlen(e->valuestring) > NODE_META_MAX_VALUE) {
-            fprintf(stderr, "sim_config: node %d: 'meta.%s' is longer than %d characters\n",
+            fprintf(stderr, "sim_config: node %d: 'meta.%s' is longer than %d bytes\n",
                     idx, e->string, NODE_META_MAX_VALUE);
             return -1;
         }
@@ -170,6 +171,14 @@ static void note_rel_path(sim_normalized_config_t *cfg, const char *p) {
         snprintf(cfg->rel_paths[cfg->rel_path_count++], sizeof(cfg->rel_paths[0]), "%s", p);
 }
 
+/* Replace a path in place, clearing what the old one left past the new
+ * one's end: a shorter path would otherwise keep the old tail, and the
+ * config round-trip compares the struct bitwise. */
+static void set_path(char *p, size_t sz, const char *s) {
+    memset(p, 0, sz);
+    snprintf(p, sz, "%s", s);
+}
+
 /* `dir_is_cwd`: the config is in the current directory, so a relative path
  * means the same file either way and is kept exactly as written. */
 static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
@@ -180,7 +189,7 @@ static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
         const char *home = getenv("HOME");
         if (!home || !*home) return;
         snprintf(buf, sizeof(buf), "%s%s", home, p + 1);
-        if (strlen(buf) < sz) snprintf(p, sz, "%s", buf);
+        if (strlen(buf) < sz) set_path(p, sz, buf);
         return;
     }
     if (p[0] == '/') return;
@@ -190,7 +199,7 @@ static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
     } else {
         snprintf(buf, sizeof(buf), "%s/%s", dir, p);
         if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz) {
-            snprintf(p, sz, "%s", real);
+            set_path(p, sz, real);
             note_rel_path(cfg, real);
             return;
         }
@@ -205,7 +214,7 @@ static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
         if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz) {
             if (!cfg->bundled_fallback[0])
                 snprintf(cfg->bundled_fallback, sizeof(cfg->bundled_fallback), "%s", p);
-            snprintf(p, sz, "%s", real);
+            set_path(p, sz, real);
         }
     }
 }
@@ -340,7 +349,45 @@ int sim_config_load(sim_normalized_config_t *cfg, const char *json_path) {
         }
     }
     resolve_paths(cfg, json_path);
+    /* Each distinct image becomes a mote type when the config is saved,
+     * which is always as v2, so a v1 config is held to the same limit:
+     * otherwise it loads and runs, and the file Save writes is refused.
+     * Counted after resolving, on the paths the writer sees. */
+    if (cfg->version < 2) {
+        int images = v1_image_count(cfg);
+        if (images > SIM_MAX_MOTE_TYPES) {
+            fprintf(stderr, "%s: %d distinct firmware images, but a config can "
+                    "have at most %d mote types\n", json_path, images,
+                    SIM_MAX_MOTE_TYPES);
+            return -1;
+        }
+    }
     return 0;
+}
+
+static int same_image(const char *fw, const char *sfw,
+                       const char *fw2, const char *sfw2) {
+    return strcmp(fw, fw2) == 0 && strcmp(sfw, sfw2) == 0;
+}
+
+/* The number of mote types a v1 config becomes when written as v2, counted
+ * as the YAML writer's build_types() does: every listed mote type, then
+ * each node image pair not seen yet. */
+static int v1_image_count(const sim_normalized_config_t *cfg) {
+    int n = cfg->mote_type_count;
+    for (int i = 0; i < cfg->node_count; i++) {
+        const sim_node_config_t *a = &cfg->nodes[i];
+        int seen = 0;
+        for (int t = 0; t < cfg->mote_type_count && !seen; t++)
+            seen = same_image(a->firmware, a->secure_firmware,
+                              cfg->mote_type_firmware[t],
+                              cfg->mote_type_secure_firmware[t]);
+        for (int k = 0; k < i && !seen; k++)
+            seen = same_image(a->firmware, a->secure_firmware,
+                              cfg->nodes[k].firmware, cfg->nodes[k].secure_firmware);
+        if (!seen) n++;
+    }
+    return n;
 }
 
 /* v1 (legacy) JSON → normalized config.  Verbatim move of the original

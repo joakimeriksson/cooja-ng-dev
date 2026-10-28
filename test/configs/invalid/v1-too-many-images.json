@@ -1,0 +1,74 @@
+{
+    "title": "v1: 17 distinct firmware images, more than 16 mote types",
+    "timeout_ms": 1000,
+    "nodes": [
+        {
+            "firmware": "firmware/sky/img0.sky",
+            "id": 1
+        },
+        {
+            "firmware": "firmware/sky/img1.sky",
+            "id": 2
+        },
+        {
+            "firmware": "firmware/sky/img2.sky",
+            "id": 3
+        },
+        {
+            "firmware": "firmware/sky/img3.sky",
+            "id": 4
+        },
+        {
+            "firmware": "firmware/sky/img4.sky",
+            "id": 5
+        },
+        {
+            "firmware": "firmware/sky/img5.sky",
+            "id": 6
+        },
+        {
+            "firmware": "firmware/sky/img6.sky",
+            "id": 7
+        },
+        {
+            "firmware": "firmware/sky/img7.sky",
+            "id": 8
+        },
+        {
+            "firmware": "firmware/sky/img8.sky",
+            "id": 9
+        },
+        {
+            "firmware": "firmware/sky/img9.sky",
+            "id": 10
+        },
+        {
+            "firmware": "firmware/sky/img10.sky",
+            "id": 11
+        },
+        {
+            "firmware": "firmware/sky/img11.sky",
+            "id": 12
+        },
+        {
+            "firmware": "firmware/sky/img12.sky",
+            "id": 13
+        },
+        {
+            "firmware": "firmware/sky/img13.sky",
+            "id": 14
+        },
+        {
+            "firmware": "firmware/sky/img14.sky",
+            "id": 15
+        },
+        {
+            "firmware": "firmware/sky/img15.sky",
+            "id": 16
+        },
+        {
+            "firmware": "firmware/sky/img16.sky",
+            "id": 17
+        }
+    ]
+}

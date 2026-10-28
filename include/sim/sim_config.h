@@ -180,7 +180,9 @@ typedef struct {
      * the current directory, whose paths are kept).  The writer names these
      * relative to the directory it writes for, so a saved setup keeps the
      * user's paths relative instead of turning them into this host's. */
-#define SIM_CONFIG_MAX_REL_PATHS 32
+    /* Every file a config can name: two per node (v1), two per mote type,
+     * and the JS script.  Sized from the limits, so none goes unnoted. */
+#define SIM_CONFIG_MAX_REL_PATHS (2 * MAX_SIM_NODES + 2 * SIM_MAX_MOTE_TYPES + 1)
     char rel_paths[SIM_CONFIG_MAX_REL_PATHS][256];
     int  rel_path_count;
 

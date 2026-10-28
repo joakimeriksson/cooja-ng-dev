@@ -1,5 +1,5 @@
 {
-    "title": "name: longer than 47 characters",
+    "title": "name: longer than 47 bytes",
     "timeout_ms": 1000,
     "nodes": [
         {

@@ -19,7 +19,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   usage on stderr.  An unknown mode used to run nothing and exit 0.
   `--help` prints the usage, now listing every mode and option.
 - **More than 16 mote types, or more nodes than the limit, is a load
-  error.**  Mote types beyond 8 used to be dropped without a word.
+  error.**  Mote types beyond 8 used to be dropped without a word.  A v1
+  config is held to it too, counting each distinct firmware image as a
+  type: one with 17 images loaded, and the file Save wrote from it did not.
 - **Two nodes with the same id is a load error**, including an explicit id
   equal to the one an unnumbered node is given.  They used to share an
   address and a console label.
@@ -118,7 +120,7 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   transmission and the nodes in range, with a link to its console; it works
   in recordings too. The full state carries `name`, `meta`, `board` and
   `firmware` per node. A click no longer sends a move: a node is dragged
-  only once the pointer has moved. A `name` over 47 characters, or a `meta`
+  only once the pointer has moved. A `name` over 47 bytes, or a `meta`
   over its limits or with a key twice, is refused rather than trimmed.
 
 ### Removed

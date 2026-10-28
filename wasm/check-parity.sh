@@ -81,6 +81,8 @@ for name, sc in json.load(open("wasm/web/scenarios.json")).items():
         if subprocess.run([native, "config-convert", sc["args"][1], conv],
                           stdout=subprocess.DEVNULL).returncode != 0:
             print("FILES %s: cannot read %s" % (name, sc["args"][1])); bad = 1; continue
+        # Unanchored on purpose: it matches secure_firmware: too, which the
+        # TrustZone scenario needs.  A quoted path fails the check loudly.
         need += re.findall(r"firmware: ([^,} ]+)", open(conv).read())
     for f in dict.fromkeys(need):
         if f not in sc["files"]:

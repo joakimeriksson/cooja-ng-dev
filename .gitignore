@@ -49,3 +49,6 @@ examples/renode/firmware/*.elf
 # Browser (WebAssembly) build output — make -C wasm
 wasm/build/
 wasm/dist/
+
+# config-roundtrip's deep copy, left behind only when it fails
+/csim-roundtrip-deep-*/

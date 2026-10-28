@@ -20,6 +20,7 @@
 #include "msp430_usart.h"   /* msp_mote_serial_input (M38) */
 #include "sim_state.h"      /* SIM_RADIO_* for msp_mote_ui_radio_state (M38) */
 
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -748,6 +749,11 @@ static int msp_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     msp430_usart_t *console = (plat->config->console_usart == 0)
         ? &plat->usart0 : &plat->usart1;
     bool has_dma = (console->dma_trigger != NULL);
+    /* Only called between pump passes, while no node runs: it steps the
+     * core and leaves no node executing, as the ARM path does.  Checked
+     * before the early return, so input that arrives before RX is on is
+     * held to it too. */
+    assert(bus->executing_node == -1);
     if (!has_dma) {
         if (!console->ie_ptr ||
             !(*console->ie_ptr & console->ie_rx_mask))
