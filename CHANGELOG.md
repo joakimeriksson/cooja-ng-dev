@@ -118,7 +118,7 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   transmission and the nodes in range, with a link to its console; it works
   in recordings too. The full state carries `name`, `meta`, `board` and
   `firmware` per node. A click no longer sends a move: a node is dragged
-  only once the pointer has moved. A `name` over 47 characters, or a `meta`
+  only once the pointer has moved. A `name` over 47 bytes, or a `meta`
   over its limits or with a key twice, is refused rather than trimmed.
 
 ### Removed

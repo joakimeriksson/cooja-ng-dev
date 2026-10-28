@@ -20,6 +20,7 @@
 #include "msp430_usart.h"   /* msp_mote_serial_input (M38) */
 #include "sim_state.h"      /* SIM_RADIO_* for msp_mote_ui_radio_state (M38) */
 
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -756,6 +757,9 @@ static int msp_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     int baud_cycles = (int)((int64_t)plat->cpu.cpu_freq_hz * 69 / 1000000);
     if (baud_cycles < 200) baud_cycles = 200;
     int consumed = 0;
+    /* Only called between pump passes, never while this node runs: it
+     * steps the core and leaves no node executing (as the ARM path). */
+    assert(bus->executing_node != idx);
     sim_radio_bus_set_executing(bus, idx);
     while (consumed < len) {
         if (!has_dma) {

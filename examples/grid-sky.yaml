@@ -2,8 +2,8 @@
 # empty) with the RPL root in the middle.  Each node only hears its grid
 # neighbours, so the corners reach the root over three hops.  15 clients,
 # not 16: the bundled udp-server's routing table holds 16 routes, one of
-# them its own, so a 16th client would never be answered.  Watch the routes (the arrows in the browser)
-# settle towards node 1.
+# them its own, so a 16th client would never be answered.  Watch the
+# routes (the arrows in the browser) settle towards node 1.
 #   cngsim run grid-sky --ui
 
 version: 2

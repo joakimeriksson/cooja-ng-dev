@@ -39,7 +39,7 @@ static int parse_node_name(cJSON *node_item, sim_node_config_t *n, int idx) {
     if (!cJSON_IsString(name) || !name->valuestring) return 0;
     size_t len = strlen(name->valuestring);
     if (len >= sizeof(n->name)) {
-        fprintf(stderr, "sim_config: node %d: 'name' is longer than %zu characters\n",
+        fprintf(stderr, "sim_config: node %d: 'name' is longer than %zu bytes\n",
                 idx, sizeof(n->name) - 1);
         return -1;
     }
@@ -77,12 +77,12 @@ static int parse_node_meta(cJSON *node_item, sim_node_config_t *n, int idx) {
         }
         size_t klen = strlen(e->string);
         if (klen == 0 || klen > NODE_META_MAX_KEY) {
-            fprintf(stderr, "sim_config: node %d: 'meta' key '%s' must be 1 to %d characters\n",
+            fprintf(stderr, "sim_config: node %d: 'meta' key '%s' must be 1 to %d bytes\n",
                     idx, e->string, NODE_META_MAX_KEY);
             return -1;
         }
         if (cJSON_IsString(e) && strlen(e->valuestring) > NODE_META_MAX_VALUE) {
-            fprintf(stderr, "sim_config: node %d: 'meta.%s' is longer than %d characters\n",
+            fprintf(stderr, "sim_config: node %d: 'meta.%s' is longer than %d bytes\n",
                     idx, e->string, NODE_META_MAX_VALUE);
             return -1;
         }
@@ -170,6 +170,14 @@ static void note_rel_path(sim_normalized_config_t *cfg, const char *p) {
         snprintf(cfg->rel_paths[cfg->rel_path_count++], sizeof(cfg->rel_paths[0]), "%s", p);
 }
 
+/* Replace a path in place, clearing what the old one left past the new
+ * one's end: a shorter path would otherwise keep the old tail, and the
+ * config round-trip compares the struct bitwise. */
+static void set_path(char *p, size_t sz, const char *s) {
+    memset(p, 0, sz);
+    snprintf(p, sz, "%s", s);
+}
+
 /* `dir_is_cwd`: the config is in the current directory, so a relative path
  * means the same file either way and is kept exactly as written. */
 static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
@@ -180,7 +188,7 @@ static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
         const char *home = getenv("HOME");
         if (!home || !*home) return;
         snprintf(buf, sizeof(buf), "%s%s", home, p + 1);
-        if (strlen(buf) < sz) snprintf(p, sz, "%s", buf);
+        if (strlen(buf) < sz) set_path(p, sz, buf);
         return;
     }
     if (p[0] == '/') return;
@@ -190,7 +198,7 @@ static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
     } else {
         snprintf(buf, sizeof(buf), "%s/%s", dir, p);
         if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz) {
-            snprintf(p, sz, "%s", real);
+            set_path(p, sz, real);
             note_rel_path(cfg, real);
             return;
         }
@@ -205,7 +213,7 @@ static void resolve_one(sim_normalized_config_t *cfg, char *p, size_t sz,
         if (access(buf, F_OK) == 0 && realpath(buf, real) && strlen(real) < sz) {
             if (!cfg->bundled_fallback[0])
                 snprintf(cfg->bundled_fallback, sizeof(cfg->bundled_fallback), "%s", p);
-            snprintf(p, sz, "%s", real);
+            set_path(p, sz, real);
         }
     }
 }

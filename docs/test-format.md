@@ -139,7 +139,7 @@ nodes:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `firmware` | string | **required** | Path to firmware ELF file |
-| `name` | string | none | Display name in the web UI, shown with the node id ("Node 2 · Zephyr"); at most 47 characters |
+| `name` | string | none | Display name in the web UI, shown with the node id ("Node 2 · Zephyr"); at most 47 bytes of UTF-8 |
 | `meta` | mapping | none | Facts about the node for the web UI's node card, shown as rows in the order given, see below |
 | `id` | int | auto (index+1) | Node ID, used for MAC address and test step filtering |
 | `x`, `y` | float | 0, 0 | Position in meters (for radio medium) |
@@ -151,9 +151,10 @@ whatever a reader of the demo should know about the node — its OS, its
 role, where its source is.  The simulation never reads it.  Clicking the
 node in the web UI shows the entries in its card; a value that is an
 `http(s)://` URL becomes a link.  At most 8 entries with distinct keys,
-keys up to 32 characters, string values up to 128, and 511 bytes in all as
-JSON; a config outside these limits, or with a `name` over 47 characters,
-is refused, not trimmed.
+keys up to 32 bytes, string values up to 128, and 511 bytes in all as
+JSON; a config outside these limits, or with a `name` over 47 bytes, is
+refused, not trimmed.  The limits count bytes of UTF-8, so a character
+outside ASCII counts two to four.
 
 ```json
 { "firmware": "firmware/nrf52840-dk/zephyr-echo-server.nrf52840-dk",
@@ -250,8 +251,9 @@ paths from the repo root still works from there.
 config named relative to itself relative to the file they write (through
 `../` where needed; absolute only if the two share nothing below `/`).
 The browser's Save, whose text you store yourself, writes them relative
-to the config, and its header says so.  Absolute paths, `~/` paths and
-paths found only from the current directory are written as given.
+to the config, and its header says so.  Absolute paths and paths found
+only from the current directory are written as given; a `~/` path is
+written expanded, as the absolute path it named.
 
 ## Test Section
 
