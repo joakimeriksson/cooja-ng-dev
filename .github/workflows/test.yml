@@ -211,6 +211,17 @@ jobs:
           ./build/cngsim --version
           tools/check-cngsim.sh
 
+      # Gate G3: docs/quick-start.md run as written, against a package laid
+      # out as the release tarball is (release.yml's Package step).
+      - name: Quick start, as written, from a package
+        run: |
+          pkg="$RUNNER_TEMP/pkg"
+          rm -rf "$pkg"; mkdir -p "$pkg/bin" "$pkg/build"
+          cp build/cngsim "$pkg/bin/"
+          cp build/test_runner "$pkg/build/"
+          tools/install-data.sh "$pkg"
+          tools/check-quick-start.sh "$pkg"
+
       - name: Malformed firmware (MSP430 ELF images)
         # Firmware symbol values index chip memory, so each image points
         # one at or past the end of the address space.  Each boots in its own

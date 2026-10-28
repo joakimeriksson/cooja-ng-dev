@@ -1563,10 +1563,12 @@ static void help_run(void) {
         "  --ui [PORT]           watch it in the browser (http://127.0.0.1:8080/): it\n"
         "                        opens paused, at real time; --start runs at once,\n"
         "                        --no-open does not open the browser\n"
+        "  --ui-bind ADDR        serve the UI on ADDR; off loopback it is look-only\n"
         "  --ui-edit             allow adding/removing nodes from a UI on --ui-bind\n"
+        "  --paused              start paused (with --ui, --shell or --script)\n"
         "  --duration 60s, -t    simulated time, with its unit: 60s, 500ms, 2m\n"
         "  --seed N              another run, as reproducible as the first\n"
-        "  --speed N|max|realtime  pacing (headless runs are unpaced)\n"
+        "  --speed N|max|realtime  pacing (headless runs are unpaced); --realtime is 1x\n"
         "  --shell               interactive command line (docs/shell.md)\n"
         "  --script FILE         a command script with a pass/fail verdict\n"
         "  --save-config F.yaml  write the setup as it is at the end (moved/added nodes)\n"
@@ -1574,6 +1576,8 @@ static void help_run(void) {
         "  --ui-record FILE      record the run for replay in the browser\n"
         "  --plugin LIB.so       load a plugin (service or radio medium)\n"
         "  --wall-timeout DUR    give up after this much real time (exit 6)\n"
+        "  --gdb [NODE:]PORT     a GDB server on a node; --gdb-wait waits for GDB\n"
+        "  --renode [ADDR:MAIN:ASYNC]  run as Renode's clock slave; --renode-freq HZ\n"
         "  -n N                  with firmware files: the number of nodes\n"
         "  --board NAME          with firmware files: the board they run on, for an\n"
         "                        image not named <app>.<board> (cngsim boards)\n"
@@ -1604,13 +1608,21 @@ static int cmd_help(int argc, char **argv) {
     else if (argc > 0 && strcmp(argv[0], "new") == 0) help_new();
     else if (argc > 0 && strcmp(argv[0], "check") == 0)
         printf("cngsim check <sim.yaml>\n\nLoads the setup the way run would: every key known, every value\n"
-               "of the right type, every firmware image found and its board known.\n"
+               "of the right type, every firmware image found and its board known,\n"
+               "every plugin a built-in name or a readable file.\n"
                "Prints a summary and exits 0, or the problems and exits 2.\n");
     else if (argc > 0 && strcmp(argv[0], "convert") == 0)
         printf("cngsim convert <sim.csc> [-o sim.yaml] [--contiki DIR] [--firmware-dir DIR]\n\n"
                "Converts a Cooja simulation (Sky, Z1 and Cooja motes, UDGM, the test\n"
                "script) with tools/csc2json.py.  Needs python3.  The firmware must\n"
                "already be built; see docs/contiki-ng-testing.md.\n");
+    else if (argc > 0 && strcmp(argv[0], "examples") == 0)
+        printf("cngsim examples\n\nLists the bundled example simulations and where they are.  Run one\n"
+               "by name (cngsim run rpl-udp-sky), or copy it and edit the copy.\n");
+    else if (argc > 0 && strcmp(argv[0], "boards") == 0)
+        printf("cngsim boards\n\nLists the boards, their CPU and radio, and the Contiki-NG TARGET/BOARD\n"
+               "that builds for each.  An image named <app>.<board> runs as that board;\n"
+               "for any other name, add  board: <board>  to its mote type.\n");
     else help(stdout);
     return 0;
 }

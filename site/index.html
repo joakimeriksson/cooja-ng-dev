@@ -348,6 +348,7 @@
       <h2>Three commands to a running network.</h2>
       <p class="lede"><code>cngsim</code> runs a simulation from a short YAML file and prints what the nodes print, the checks and a verdict, or opens it in your browser. The examples, the firmware they run and the guide come in the same download.</p>
       <ol>
+        <li><b>Install.</b><span> Download the <a href="https://github.com/mikroverk/cooja-ng/releases/latest">latest release</a> for your machine (Linux x86-64, macOS) and put its <code>bin/</code> on your PATH, or build from source: <code>make &amp;&amp; make install PREFIX=~/.local</code>.</span></li>
         <li><b>Run an example.</b><span><code>cngsim examples</code> lists them; <code>cngsim run rpl-udp-sky</code> runs one headless, with an exit code CI understands.</span></li>
         <li><b>Watch it.</b><span><code>--ui</code> opens the browser, paused. Drag nodes, add and remove them, type into a node's console, and save the setup as YAML.</span></li>
         <li><b>Make your own.</b><span><code>cngsim new</code> writes a commented setup from a template, on any board, in a grid, line, circle or at random. Point it at your own Contiki-NG builds with <code>board:</code>.</span></li>

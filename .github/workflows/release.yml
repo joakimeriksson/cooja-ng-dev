@@ -334,6 +334,8 @@ jobs:
           for i in $(seq 1 50); do curl -s http://127.0.0.1:8765/ > page.html && break; sleep 0.2; done
           kill -INT $!; wait || true
           grep -q '<title>Cooja-NG Simulator</title>' page.html || { echo "::error::cngsim --ui did not serve the page"; cat ui.out; exit 1; }
+          # Gate G3: the quick-start the package ships, run as written.
+          "$GITHUB_WORKSPACE/tools/check-quick-start.sh" "$pkg"
 
       # The test configs are not in the tarball, so run the unpacked binary
       # from the checkout, where configs/ and firmware/ are.

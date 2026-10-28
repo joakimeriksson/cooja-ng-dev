@@ -216,9 +216,17 @@ int run_config_reject(int argc, char **argv);
 int run_config_reject(int argc, char **argv) {
     int failed = 0, passed = 0;
     printf("=== Config rejection: each file must fail to load ===\n");
+    /* Refused because it is not there proves nothing: an empty glob or a
+     * renamed fixture would pass. */
+    if (argc == 0) { printf("  FAIL: no configs given\n"); failed++; }
     for (int i = 0; i < argc; i++) {
         sim_normalized_config_t cfg;
         fprintf(stderr, "--- %s ---\n", argv[i]);
+        if (access(argv[i], R_OK) != 0) {
+            printf("  FAIL %s: no such file\n", argv[i]);
+            failed++;
+            continue;
+        }
         int rc = sim_config_load(&cfg, argv[i]);
         if (rc == 0) { sim_config_free(&cfg); printf("  FAIL %s: loaded, but must be rejected\n", argv[i]); failed++; }
         else { printf("  PASS %s (rejected)\n", argv[i]); passed++; }

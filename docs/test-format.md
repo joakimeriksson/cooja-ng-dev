@@ -73,6 +73,28 @@ synthesized from the distinct firmware paths, keeping the order of any
 existing `mote_types` so `getMoteTypes()[i]` in a JS script still refers to
 the same type).
 
+## Running a config: options
+
+`test_runner test <config | firmware...> [options]` takes these (`cngsim run`
+takes the same, with durations in units: `cngsim help run`):
+
+| Option | Effect |
+|---|---|
+| `-t MS` | simulated time, overriding `timeout_ms` |
+| `-n N` | with firmware files: the number of nodes (at most 128) |
+| `-d MS` | spread the nodes' start times over 0 to MS ms (`startup_delay_ms`), so their timers do not run in lockstep |
+| `--seed N` | the seed, overriding `seed` |
+| `--board NAME` | with firmware files: the board, for an image not named `<app>.<board>` |
+| `--save-config OUT.yaml` | write the setup as it is at the end ([above](#saving-a-running-setup)) |
+| `--pcap FILE` | write every radio frame to a pcap file (IEEE 802.15.4 with FCS) for Wireshark |
+| `--plugin LIB.so` | load a plugin (a service or a radio medium); a config lists them under `plugins:`. One that cannot be loaded ends the run with exit 2 |
+| `--ui [PORT]`, `--ui-bind ADDR`, `--ui-edit`, `--ui-record FILE` | the web UI; recordings in [ui-replay.md](ui-replay.md) |
+| `--speed N\|max\|realtime`, `--realtime`, `--paused` | pacing, and starting paused |
+| `--shell`, `--script FILE` | the command line and command scripts ([shell.md](shell.md)) |
+| `--wall-timeout DUR` | give up after this much real time (exit 6) |
+| `--gdb [NODE:]PORT`, `--gdb-wait` | a GDB server on a node |
+| `-v` / `-q` | more output / less |
+
 ## Config File Structure
 
 ```yaml
@@ -96,7 +118,7 @@ test: { ... }
 | `timeout_ms` | int | 20000 | Total simulation duration in milliseconds |
 | `seed` | int | 0 | Random seed (0 = not set) |
 | `startup_delay_ms` | int | 0 | Each node gets a random startup delay in `[0, startup_delay_ms)` |
-| `speed` | float | 0 | Real-time speed multiplier for UI mode (0 = default 10x) |
+| `speed` | float | 0 | Real-time speed multiplier for UI mode (0 = the default: 10x for `test_runner --ui`, 1x for `cngsim run --ui`) |
 
 ### Radio Medium
 

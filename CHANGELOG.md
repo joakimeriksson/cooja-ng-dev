@@ -136,6 +136,13 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   directory and from an installed binary.  A `ui/index.html` in the
   current directory still wins, and `CSIM_UI_PAGE` names another.
 - **Twelve commented example simulations** (`examples/`), runnable by name.
+- **The quick start is a test** (`tools/check-quick-start.sh`): every
+  command in `docs/quick-start.md` runs as written, from an empty directory
+  against a package laid out as the release tarball, and the output it
+  shows must be what the package prints. It runs on every PR and on each
+  release's unpacked tarball, beside a check that the README's platform
+  table matches `cngsim boards`. `test-format.md` lists the run options,
+  `--pcap`, `--plugin` and `-d` among them.
 - **`make install`** (`PREFIX`, `DESTDIR`), and release tarballs that carry
   `cngsim`, the examples, their firmware, the guides and the setups the
   guides run, beside the `build/test_runner` and `tools/` the Contiki-NG
@@ -196,6 +203,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   `.exp5438` firmware file is now refused with a message saying its board
   was removed. The MSP430F5437 config stays as the MSP430X core of the
   CPU tests; no board uses it.
+- **`scripts/csc2json.py`**, a stale copy of `tools/csc2json.py`, and
+  `firmware/udp-client.cooja`, a macOS build of a native mote that nothing
+  used and every tarball carried.
 
 ### Fixed
 - **`--ui`: a finished test ended the run**, about two seconds into the
@@ -259,6 +269,11 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - **CI: the determinism, config-equivalence and browser-parity checks
   passed when both sides failed the same way** (a missing firmware twice).
   Each now requires the runs to exit 0.
+- **Test suites that passed without testing:** `firmware` and `arm-firmware`
+  counted an image they could not load as a skip and exited 0, and the
+  cc2538dk hello-world entry had no assertion; `config-reject` passed a
+  file that does not exist and a call with no files.  Each is a failure
+  now, and the cc2538dk entry waits for "Hello, world".
 - **Web UI: the topology stopped drawing in a panel under 80 px.** The
   40 px margin made the scale negative and `arc()` threw `IndexSizeError`
   on every update (seen on the site's live demos). The margin now shrinks
@@ -275,6 +290,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   saving that session writes a file the loader refuses.
 - `kind`, `cpu` and `soc` on a mote type are labels and select nothing
   (`docs/test-format.md`).
+- The MSP-EXP430FR5969 LaunchPad (`.msp430fr5969`) has no bundled firmware,
+  so no test runs it: its two test images went in 0.1.0, and the `firmware`
+  suite's entries for them are gone too.
 - The bundled XIAO nRF54L15 `udp-server`/`udp-client` images boot but never
   form a network (as in 0.3.0), so `cngsim new rpl-udp` does not offer the
   XIAO; its TrustZone RPL-UDP setup (`configs/test-tz-rpl-udp-nrf54l15-xiao.yaml`)
