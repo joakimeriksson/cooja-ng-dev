@@ -1,0 +1,11 @@
+{
+    "title": "name: longer than 47 characters",
+    "timeout_ms": 1000,
+    "nodes": [
+        {
+            "firmware": "firmware/sky/hello-world.sky",
+            "id": 1,
+            "name": "a display name of sixty-four characters, which is more than 47 ok"
+        }
+    ]
+}

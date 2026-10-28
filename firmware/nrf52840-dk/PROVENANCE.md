@@ -54,3 +54,36 @@
 - **Built**: 2026-07-02 by Joakim Eriksson / Claude
 - **Build command**: `make TARGET=nrf52840 BOARD=dk` in examples/6tisch/simple-node
 - **Purpose**: 2-node TSCH regression (association + held sync + EACK'd keepalives); node 1 becomes coordinator, node 2 associates
+
+## echo-zephyr.nrf52840-dk / riot-root.nrf52840-dk
+
+The Contiki-NG side of the two interop demos (`configs/interop-contiki-zephyr.json`,
+`configs/interop-contiki-riot.json`).
+
+- **Source**: `examples/interop/echo-zephyr` and `examples/interop/riot-root` in
+  this repository (files: `echo-zephyr.c`, `riot-root.c`), against contiki-ng
+  commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2`.  The clone had local changes
+  and untracked directories; none of them is compiled into these builds (no
+  tracked file under `os/`, `arch/cpu/nrf52840/` or `arch/platform/nrf52840/`
+  differs from the commit).
+- **TARGET**: `nrf52840`
+- **BOARD**: `dk`
+- **Config**: each example's `project-conf.h` and `Makefile` (echo-zephyr:
+  nullrouting, so standard Neighbor Discovery; riot-root: RPL Classic in storing
+  mode).
+- **Toolchain**: host (Arm GNU Toolchain 15.2.rel1)
+- **Built**: 2026-10-26 by Joakim Eriksson; echo-zephyr rebuilt 2026-10-27 from
+  the same clone after its datagram header was shortened (`fill()`), so the
+  16 B datagram carries pattern bytes too.
+- **Build command**: `tools/build-device-firmware.sh --local --contiki-dir <clone> --target nrf52840 --board dk --example examples/interop/<name> --output firmware/nrf52840-dk/<name>.nrf52840-dk --make-args "CONTIKI=<clone>"`
+
+## riot-gnrc-networking.nrf52840-dk
+
+- **Source**: RIOT `fa7ffa17756c73abc92bf267abe8e53e32c4adfe`
+- **Source path**: `examples/networking/gnrc/networking`
+- **BOARD**: `nrf52840dk`
+- **Config**: STOCK.  The demo sets the PAN ID from the shell (RIOT's default is
+  0x23, Contiki-NG's and Zephyr's 0xabcd).
+- **Toolchain**: arm-none-eabi-gcc 13.2.1 (Ubuntu 24.04 package), on jftest4
+- **Built**: 2026-10-26 by Joakim Eriksson; stripped with `--strip-debug`.
+- **Build command**: `BOARD=nrf52840dk make -C examples/networking/gnrc/networking`

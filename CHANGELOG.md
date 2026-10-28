@@ -8,6 +8,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **Cooja-NG in the browser** (`wasm/`): the whole runner compiled to
+  WebAssembly with Emscripten, running in a Web Worker behind the existing
+  web UI, on the original firmware ELFs. Each demo on the site gets a "Run it
+  live" link next to its recording. It is the same C code as the native
+  build, held to it by `make -C wasm check`: every live scenario gives output
+  identical to `build/test_runner`, down to each node's final cycle count,
+  checked on every PR and before every deploy. Interpreter only; no `.so`
+  plugins, TUN, serial socket, GDB, Renode, shell or JS-scripted tests
+  (`wasm/README.md`).
 - **TI CC1352R1 LaunchPad** (`cc1352r1-launchpad`): the CC13x2 SoC on a
   stand-in ROM built from driverlib, and a command-level RF core model in
   both radio modes — sub-GHz proprietary (Contiki's default) and 2.4 GHz
@@ -25,6 +34,26 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   identity words are read from an LP-CC1312R7. Contiki-NG support is
   contiki-ng/contiki-ng#3285, not merged yet
   (`firmware/cc1312r7-launchpad/PROVENANCE.md`).
+- **Two interop demos on the nRF52840 DK**, on the site and live in the
+  browser. `configs/interop-contiki-zephyr.json`: a Contiki-NG node sends
+  datagrams of 16 to 640 bytes to Zephyr's stock echo_server and checks each
+  echo, found by Neighbor Discovery and 6LoWPAN-fragmented both ways.
+  `configs/interop-contiki-riot.json`: a stock RIOT gnrc_networking node,
+  driven from its shell, joins a Contiki-NG RPL root's DODAG, takes its
+  address from the root's prefix, pings it and trades UDP with it. The
+  Contiki-NG sides are in `examples/interop/`; what each pairing needs (PAN
+  ID, RPL storing mode, link-local traffic because RIOT drops RFC 6553's RPL
+  Option) is in `docs/riot.md` and `docs/zephyr.md`.
+- **Web UI: node names, node metadata and a node card.** A config node may
+  carry a `name`, shown with its id on the canvas and in the sidebar
+  ("Node 2 · Zephyr"), and a free-form `meta` mapping (strings and numbers:
+  OS, role, source, ...). Clicking a node opens a card with its `meta`
+  entries, board, firmware file, clock, position, radio state, last
+  transmission and the nodes in range, with a link to its console; it works
+  in recordings too. The full state carries `name`, `meta`, `board` and
+  `firmware` per node. A click no longer sends a move: a node is dragged
+  only once the pointer has moved. A `name` over 47 characters, or a `meta`
+  over its limits or with a key twice, is refused rather than trimmed.
 
 ### Changed
 - **Warnings are errors.** The build is warning-free on gcc 13–15 and
@@ -60,6 +89,19 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   CPU tests; no board uses it.
 
 ### Fixed
+- **`--ui`: a finished test ended the run**, about two seconds into the
+  TSCH demo, while `-t` already did not. With the web UI on, a test verdict
+  (JSON steps or a JS script) is now printed when it is decided and the run
+  continues until the UI ends it; the full report still comes at the end.
+  Steps that pass with a validator still short of its count print as failed,
+  as the report will say. A restart from the UI or the shell re-arms the test
+  instead of keeping the previous run's verdict, and a `--wall-timeout` after
+  the verdict keeps its exit code (it exits 6 only when it cut the test
+  short). Headless and `--ui-record` runs are unchanged.
+- **A restart fed every console line to a JS test twice.** The JS test
+  service was attached again on each restart, so a script counting messages
+  passed early (at 10.7 s instead of 20.7 s in a three-line count). It is
+  attached once now.
 - **A timed config action could apply seconds late.** The loop applied it
   at the first event after its time, and an idle tickless node (RIOT with no
   timer armed) has none for seconds. The loop now stops on each action's
@@ -74,6 +116,12 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   that clears ENDRX before it reads the 1-byte buffer (RIOT): the next byte
   was written into the buffer at the ack. It now arrives one byte time
   (10 bits at 115200 baud) later, as on the wire.
+- **Web UI consoles showed terminal codes.** Colours and Zephyr's prompt
+  redraw (cursor left, erase) now render as the text a terminal would show.
+- **Web UI Pause button moved while the run went on.** The header stats in
+  front of it grew with their numbers and pushed it up to 100 px within
+  seconds, so clicks missed it; Pause and Play were different widths too.
+  The stats and the button now have fixed widths.
 - **ARM: a core sleeping in WFI with no event queued spun forever.** It now
   sleeps to the slice horizon. Firmware always had a timer armed until RIOT,
   which idles with none.

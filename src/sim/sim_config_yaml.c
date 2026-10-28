@@ -348,13 +348,15 @@ static const field_t peripheral_fields[] = {   /* off-SoC SPI chip on a node */
     {"chip", 's', 0}, {"spim", 'n', 0}, {"cs", 's', 0}, {0, 0, 0}
 };
 static const field_t node_v1_fields[] = {
-    {"firmware", 's', 0}, {"secure_firmware", 's', 0},
+    {"firmware", 's', 0}, {"secure_firmware", 's', 0}, {"name", 's', 0},
+    {"meta", 'o', 0},
     {"id", 'n', 0}, {"x", 'n', 0}, {"y", 'n', 0},
     {"clock_deviation", 'n', 0}, {"peripherals", 'a', &peripheral_schema},
     {"build", 'o', &build_schema}, {"_mote_type_desc", 's', 0}, {0, 0, 0}
 };
 static const field_t node_v2_fields[] = {
-    {"type", 's', 0}, {"id", 'n', 0}, {"x", 'n', 0}, {"y", 'n', 0},
+    {"type", 's', 0}, {"name", 's', 0}, {"meta", 'o', 0},
+    {"id", 'n', 0}, {"x", 'n', 0}, {"y", 'n', 0},
     {"clock_deviation", 'n', 0}, {"peripherals", 'a', &peripheral_schema},
     {"build", 'o', &build_schema}, {"_mote_type_desc", 's', 0}, {0, 0, 0}
 };
@@ -583,6 +585,28 @@ static void put_num(FILE *f, double d) {
     if (!strpbrk(buf, ".eE")) fputs(".0", f);
 }
 
+/* A node's "meta" (compact JSON of strings and numbers, checked at load)
+ * as a flow mapping.  Integers stay integers: put_num marks every number
+ * a float, which is right for the typed fields but would turn 2 into 2.0. */
+static void put_meta(FILE *f, const char *json) {
+    cJSON *meta = cJSON_Parse(json);
+    if (!meta) return;
+    fputs(", meta: {", f);
+    const char *sep = " ";
+    cJSON *e;
+    cJSON_ArrayForEach(e, meta) {
+        fputs(sep, f); put_str(f, e->string); fputs(": ", f);
+        if (cJSON_IsString(e)) put_str(f, e->valuestring);
+        else if (e->valuedouble > -1e15 && e->valuedouble < 1e15 &&
+                 e->valuedouble == (double)(long long)e->valuedouble)
+            fprintf(f, "%lld", (long long)e->valuedouble);
+        else put_num(f, e->valuedouble);
+        sep = ", ";
+    }
+    fputs(" }", f);
+    cJSON_Delete(meta);
+}
+
 static void put_comment_lines(FILE *f, const char *text) {
     const char *p = text;
     while (*p) {
@@ -754,6 +778,8 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
         for (int k = 0; k < ntypes; k++)
             if (same_images(&types[k], n->firmware, n->secure_firmware)) { tname = types[k].name; break; }
         fputs("  - { type: ", f); put_str(f, tname);
+        if (n->name[0]) { fputs(", name: ", f); put_str(f, n->name); }
+        if (n->meta[0]) put_meta(f, n->meta);
         fprintf(f, ", id: %d", n->id);
         if (n->has_position) {
             fputs(", x: ", f); put_num(f, n->x);

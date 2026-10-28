@@ -18,6 +18,29 @@ dodag [2001:db8::1 | R: 512 | OP: Router | PIO: on | ...]
 > narrower — the cases documented here work end-to-end, but coverage is limited
 > to `gnrc_networking` on `nrf52840dk` and the known gaps under *Limitations*.
 
+## Quick start
+
+No RIOT checkout needed: a stock `gnrc_networking` image is bundled as
+`firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk`
+(`firmware/nrf52840-dk/PROVENANCE.md` says how it was built).
+
+```sh
+# One node boots to its shell
+./build/test_runner nrf52840-dk-multinode \
+    firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk -n 1 -t 3000
+
+# RIOT joins a Contiki-NG RPL network, driven by timed shell commands
+# (passes when it has pinged the root and traded UDP with it)
+./build/test_runner test configs/interop-contiki-riot.json
+
+# The same in the browser at http://localhost:8080/ (click a node for its
+# card; Ctrl-C to stop)
+./build/test_runner test configs/interop-contiki-riot.json --ui 8080
+```
+
+To drive the shell your own way, copy that config: each of its `actions`
+types a command into a node's shell at a set time (`docs/test-format.md`).
+
 ## Build a firmware
 
 No Zephyr-style SDK is needed — RIOT builds with `make` and the system
@@ -61,12 +84,29 @@ CSIM_NODE1_INPUT='\nrpl init 5\n' CSIM_NODE1_AT_MS=4000 \
 ```
 
 Node 1 becomes the root (emits DIOs); node 2 joins as a Router, sends a DAO, and
-gets a DAO-ACK. (`5` is the gnrc interface number — check it with `ifconfig`. A
-leading `\n` is a throwaway because the very first injected byte is dropped.)
+gets a DAO-ACK. (`5` is the gnrc interface number — check it with `ifconfig`.)
 
-> The env vars are quick scaffolding. The cleaner home is a JSON config: node
-> `x`/`y` positions and timed `send` test-actions already exist in `sim_config`
-> (`docs/test-format.md`) — a follow-up.
+> The env vars are quick scaffolding. A JSON config is the better home: timed
+> `send` actions type into the shell at an exact time (`docs/test-format.md`).
+> `configs/interop-contiki-riot.json` drives the bundled image that way.
+
+## RIOT in a Contiki-NG network
+
+`configs/interop-contiki-riot.json` puts the bundled
+`firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk` next to a Contiki-NG RPL
+root (`examples/interop/riot-root`). RIOT joins the root's DODAG, configures
+`fd00::` from its prefix, pings it and trades UDP messages with it. What it takes,
+all found on this emulator and each a property of the two stacks:
+
+- **PAN ID.** RIOT defaults to 0x23, Contiki-NG and Zephyr to 0xabcd; the config
+  sets it with `ifconfig 5 set pan_id 0xabcd`.
+- **Storing mode.** RIOT's RPL builds storing-mode DAOs only (a Transit option
+  without a parent address), and Contiki-NG's default RPL Lite is non-storing, so
+  the root runs RPL Classic in storing mode.
+- **Link-local traffic.** Contiki-NG adds the RPL Option (RFC 6553, type 0x63) to
+  packets for global addresses. RIOT has no handler for it, and the type's top
+  bits say "discard if unrecognised", so RIOT drops them; RFC 9008's type 0x23
+  would be skipped instead. The demo's ping and UDP use link-local addresses.
 
 ## What the emulator provides
 
@@ -109,9 +149,10 @@ thread's `pended_on` via DWARF — see `docs/design/zephyr-dad-test-plan.md`).
 
 ## Limitations
 
-- The RIOT firmware is not bundled in `firmware/` yet (build it as above); a
-  bundled image + a JSON config to retire the env-var scaffolding is a follow-up.
-- UDP data over the formed DODAG is not yet driven (the `udp server`/`udp send`
-  shell commands would do it the same way as the RPL setup above).
+- Global-address traffic from Contiki-NG to RIOT is dropped by RIOT (the RPL
+  Option, above); RIOT to RIOT is untested beyond the DODAG.
+- Contiki-NG sometimes misses RIOT's 802.15.4 ACK (RIOT sends it about 240 µs
+  after the frame, from software) and resends, so a reply can arrive twice.
+  Whether real hardware does the same is not checked.
 - `gnrc_networking` is shell-driven; non-shell apps that auto-configure would run
   without the injection step.

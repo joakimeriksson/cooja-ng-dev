@@ -52,6 +52,16 @@ static inline int json_test_finished(const json_test_service_t *svc) {
     return svc->active ? svc->finished : 0;
 }
 
+/* Whether every validator has reached its min_count.  The counters stop
+ * once the steps have finished, so after a pass this already decides the
+ * verdict json_test_report will give. */
+static inline bool json_test_validators_met(const json_test_service_t *svc) {
+    for (int i = 0; i < svc->config->validator_count; i++)
+        if (svc->validator_counts[i] < svc->config->validators[i].min_count)
+            return false;
+    return true;
+}
+
 /* Per-loop per-step timeout check.  `sim_ms` is the run duration used as
  * the default step timeout when a step sets none. */
 void json_test_check_step_timeout(json_test_service_t *svc, int64_t now_ns,

@@ -20,6 +20,11 @@ typedef struct {
     const char **console;   /* array of recent console lines */
     int console_count;
     int64_t last_tx_ns;     /* sim time of last RF TX (0 = never) */
+    /* Static description for the UI's node card; NULL or "" = left out. */
+    const char *name;       /* the config's display name */
+    const char *board;      /* "ARM/nRF52840-DK" */
+    const char *firmware;   /* image file name, without its directory */
+    const char *meta;       /* the config's "meta", compact JSON object */
 } sim_node_info_t;
 
 /* Radio medium info */

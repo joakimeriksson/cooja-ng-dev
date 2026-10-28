@@ -42,6 +42,8 @@ DEMOS=(
     "trustzone|test configs/test-tz-rpl-udp-nrf54l15-xiao.yaml|Received response>=1"
     "tsch|test configs/test-tsch-nrf52840-dk.json|"
     "energest|test configs/plugin-energest-builtin-v2.json|Received response>=1"
+    "zephyr|test configs/interop-contiki-zephyr.json|Received and replied>=1"
+    "riot|test configs/interop-contiki-riot.json|RIOT says>=1"
 )
 
 known() { local spec; for spec in "${DEMOS[@]}"; do [ "${spec%%|*}" = "$1" ] && return 0; done; return 1; }
