@@ -1,7 +1,9 @@
 # Binary releases — the artifact Contiki-NG CI downloads instead of compiling us.
 #
-# Pushing a tag `v*` builds a per-platform tarball of test_runner + the three
-# runner scripts, smoke-tests THE UNPACKED TARBALL (not the build tree), and
+# Pushing a tag `v*` builds a per-platform tarball of test_runner + the
+# runner scripts the Contiki-NG suite uses, with cngsim, its examples, their
+# firmware and the guides beside them (tools/install-data.sh), smoke-tests
+# THE UNPACKED TARBALL (not the build tree), and
 # attaches everything plus SHA256SUMS to a GitHub release.  Running the
 # workflow by hand (Actions -> release -> Run workflow, or
 # `gh workflow run release.yml --ref main`) is a dry run: the same builds and
@@ -291,7 +293,8 @@ jobs:
           Own simulations: cngsim run my-sim.yaml (YAML or JSON). Schema:
           docs/test-format.md
 
-          Requires: python3 (csc conversion), a Contiki-NG checkout, and the
+          cngsim and its examples need nothing else. The Contiki-NG suite
+          needs python3 (csc conversion), a Contiki-NG checkout, and the
           usual embedded toolchains for the firmware builds.
 
           Self-check without a Contiki-NG tree:

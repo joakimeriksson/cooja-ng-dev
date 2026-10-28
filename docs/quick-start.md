@@ -14,8 +14,8 @@ Download a release for your machine and put its `bin/` on your PATH. On
 Linux (x86-64):
 
 ```sh
-curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.3.1/cooja-ng-v0.3.1-linux-x86_64.tar.gz | tar xz
-export PATH=$PWD/cooja-ng-v0.3.1-linux-x86_64/bin:$PATH
+curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.4.0/cooja-ng-v0.4.0-linux-x86_64.tar.gz | tar xz
+export PATH=$PWD/cooja-ng-v0.4.0-linux-x86_64/bin:$PATH
 cngsim --version
 ```
 
@@ -46,7 +46,7 @@ cngsim run rpl-udp-sky
 and sends it a UDP request every ten seconds or so; node 1 answers each one:
 
 ```
-cooja-ng 0.3.1 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
+cooja-ng 0.4.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
     ...
     9.423 [Node 2/MSP430] [INFO: App       ] Not reachable yet
    19.000 [Node 2/MSP430] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101

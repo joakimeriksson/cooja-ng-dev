@@ -7,6 +7,25 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-28
+
+Cooja-NG for people who did not build it. `cngsim` takes a download to a
+running simulation in three commands, with commented examples, layouts that
+place many nodes at once, and a web UI that edits the running network and
+saves it as YAML. The same C code runs in the browser on the original
+firmware ELFs, held to the native build byte for byte, behind every demo on
+the site. Two TI SimpleLink LaunchPads join (CC1352R1 and CC1312R7, checked
+against hardware), Contiki-NG talks to Zephyr and to RIOT in two interop
+demos, and four boards without a radio model leave. Configs are checked
+harder: an image whose board cannot be told, a duplicate id or too many mote
+types is a load error now rather than a quiet surprise, so read *Changed*
+before upgrading. The plugin ABI (version 3) and the files Contiki-NG's CI
+uses are unchanged.
+
+Contributors to this release: @nfi (warnings as errors, and reviews of the
+CC13x2 boards, `cngsim`, the browser build, the engine timing fixes and the
+board removal), and @nvt (reviews of `cngsim` and the browser build).
+
 ### Changed — check these before upgrading
 - **An unknown or missing firmware extension is an error**, in `cngsim`
   and `test_runner` alike: exit 2 before anything starts, naming the file.
@@ -36,6 +55,20 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `byte-identity vs main` job pass when exactly those workloads differ;
   any other difference, or a named workload that does not move, still
   fails it. `tools/check-baseline.sh` takes the list as `MOVED`.
+- **Simulation output moves relative to 0.3.0** where a model was fixed
+  (*Fixed* below), so a baseline recorded with 0.3.0 differs in these
+  places; of the nine `check-baseline` workloads only shell54 moves:
+  - a timed config action applies at its time: shell54's `send` lands at
+    2000 ms instead of 2007 ms;
+  - console input to an idle ARM node runs at the time it arrives, and
+    wakes the node;
+  - nRF52840 UARTE input keeps the first byte of a line, which arrives one
+    byte time after the ENDRX acknowledgement;
+  - an ARM core in WFI with no event queued sleeps to the slice horizon;
+  - radio-bus frames over 160 bytes reach a busy receiver whole, and a
+    frame whose length cannot be read no longer holds up the queue;
+  - the 802.15.4g frame tracker takes each frame's own channel and counts
+    the CC1200's trailing CRC bytes with it.
 
 ### Added
 - **`cngsim`, the command for people** (`docs/quick-start.md`).  `cngsim run
@@ -184,6 +217,30 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   it. It is handed to the chip, whose own sync search ignores it.
 - **ARM: an SoC registering more than 64 IO windows lost the extra ones
   silently.** The limit is 96 and exceeding it stops at init.
+- **A node rebooted or added late started at a wrong cycle count.** The
+  count came from `now_ns * cpu_freq_hz`, which overflows past 72 s at
+  128 MHz (nRF54L15) and 144 s at 64 MHz: an nRF54L15 rebooted at 80 s from
+  the shell or the UI sat at −8.2 × 10⁹ cycles and printed nothing more.
+  MSP430 nodes had the same product, past about 38 minutes.
+- **Web UI LEDs of the OpenMote and the Firefly stayed off.** Every CC2538
+  board was read from the CC2538DK's pins (PC0–2); each board's own pins
+  (PC4/6/7, PD5/4/3) are read now. The simulation itself was not affected.
+
+### Known limitations
+- SVC and UDF execute as no-ops: no SVCall or UsageFault exception is taken,
+  so a Zephyr kernel oops or a `udf` trap runs on where silicon would fault.
+  An unhandled 32-bit instruction prints a message and continues.
+- An ARM core in WFI whose next event lies beyond the slice can set its
+  cycle count back to the horizon after running past it (#76).
+- nRF52840 console timestamps can run backwards across a burst of output.
+- A node added at run time can bring a 17th firmware image into a session;
+  saving that session writes a file the loader refuses.
+- `kind`, `cpu` and `soc` on a mote type are labels and select nothing
+  (`docs/test-format.md`).
+- From 0.3.0, still standing: the kernel/radio review's open findings (F2,
+  F3, F6, F18), Renode as an RPL client of a csim root, no FreeBSD binary,
+  MSP430 CS HFXT returning the DCO frequency, the energest ARM CPU current,
+  and the serial socket's 40 ms host-link latency.
 
 ## [0.3.0] — 2026-10-11
 
@@ -722,7 +779,8 @@ frequency — unmodeled; only affects firmware that uses them. The serial socket
 carries a deliberate 40 ms wall-clock host-link latency (see below) that a
 future flow-controlled link should remove.
 
-[Unreleased]: https://github.com/mikroverk/cooja-ng/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mikroverk/cooja-ng/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0
 [0.2.3]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.3
 [0.2.2]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.2
