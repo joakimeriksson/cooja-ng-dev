@@ -3323,6 +3323,26 @@ the same patch.
 - **Node ids are unique at load (0.3.1).**  Two nodes with one id (easy with
   a layout's ids followed by a listed node) are a load error, after ids are
   filled in, so an explicit id that equals an auto-assigned one is too.
+- **With the web UI on, nothing but the UI (or `--wall-timeout`) ends the
+  run.**  Neither `-t` nor a test verdict — JSON steps or a JS script —
+  leaves the main loop while `ui_service_active()`: the verdict is printed
+  once when decided (`--ui: test passed at N ms; the run continues`) and
+  the full report comes at the end.  A UI or shell restart is a new run
+  and re-arms the test; a `--wall-timeout` after the verdict keeps its
+  exit code (only a run cut short before its verdict exits 6).  Headless
+  and `--ui-record` runs end on the verdict exactly as before; a `cngsim
+  --ui` run also pauses there (hold after the verdict, below).  Reason: a
+  viewer (the native page or the browser build's live demos) must not see
+  the network freeze because a test passed.
+- **The browser build (`wasm/`) is held to native
+  parity.**  `make -C wasm check` runs every live
+  scenario (`web/scenarios.json`) on `build/test_runner` and on both WASM
+  builds — the plain one and the page's own objects with ASYNCIFY — and
+  requires identical output and exit codes; `test.yml` runs it on every
+  PR and `pages.yml` before publishing.  The only C that differs from
+  native is `ws_server_worker.c` (`ws_server.h` over `postMessage`),
+  `web_main.c` (exits with the runner's code, which ASYNCIFY would drop)
+  and `ui_page_none.c` (no built-in page: the site serves it).
 
 ## Doc Status
 

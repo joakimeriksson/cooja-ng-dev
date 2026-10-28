@@ -4,7 +4,7 @@ A fast, multi-architecture emulator and network simulator for Contiki-NG, writte
 
 **Status:** the full Contiki-NG Cooja test suite passes — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root).  See [Test results](#test-results).
 
-**Watch it run:** <https://mikroverk.github.io/cooja-ng/> — recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH) replayed in the browser by the simulator's own web UI.
+**Watch it run:** <https://mikroverk.github.io/cooja-ng/> — recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT) replayed in the browser by the simulator's own web UI, or **run live in the browser**: the simulator compiled to WebAssembly, on the original firmware, with no server ([`wasm/`](wasm/README.md)).
 
 Architecture and refactor direction are tracked in
 [`docs/design/refactor-plan.md`](docs/design/refactor-plan.md), including the
@@ -124,7 +124,7 @@ Shared 802.15.4 helpers live in [`include/common/ieee_802154.h`](include/common/
 
 **Test scripting** — JSON config files (see [`docs/test-format.md`](docs/test-format.md)), embedded QuickJS engine for Cooja-style JS scripts (`TIMEOUT`, `WAIT_UNTIL`, `log.testOK`, `log.testFailed`), `tools/csc2json.py` to convert `.csc` files, `tools/run-cooja-tests.sh` to drive the whole upstream test suite.
 
-**Web UI** — `--ui [port]` starts a WebSocket server, single embedded HTML page at `http://localhost:8080/`: live node positions, packet animations, RPL parent edges, per-node UART, pause/step/speed.  No Node.js, no build step.  The UI accepts commands, so it listens on loopback only and refuses WebSocket connections from other sites' pages; `--ui-bind 0.0.0.0` (or a specific IPv4 address) makes it reachable from the network — anyone who can reach the port can then pause, restart or reconfigure the run.  It also turns off the Host check that stops DNS rebinding (a server meant to be reached by name cannot insist on a loopback name), so any web page open in the operator's own browser can then drive the run, even when a firewall keeps the port off the network.  Such a UI is look-only unless `--ui-edit` is given; with it, note that Save sends the setup text, file paths included, to every page connected at the time (only the page that asked offers it as a download).
+**Web UI** — `--ui [port]` starts a WebSocket server, single embedded HTML page at `http://localhost:8080/`: live node positions, packet animations, RPL parent edges, per-node UART, pause/step/speed.  No Node.js, no build step.  With the UI on, the run lasts until the UI ends it (or `--wall-timeout`): neither `-t` nor a config's test verdict stops it, and the test report comes at the end.  The UI accepts commands, so it listens on loopback only and refuses WebSocket connections from other sites' pages; `--ui-bind 0.0.0.0` (or a specific IPv4 address) makes it reachable from the network — anyone who can reach the port can then pause, restart or reconfigure the run.  It also turns off the Host check that stops DNS rebinding (a server meant to be reached by name cannot insist on a loopback name), so any web page open in the operator's own browser can then drive the run, even when a firewall keeps the port off the network.  Such a UI is look-only unless `--ui-edit` is given; with it, note that Save sends the setup text, file paths included, to every page connected at the time (only the page that asked offers it as a download).
 
 ## Running tests
 

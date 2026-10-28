@@ -55,6 +55,11 @@ typedef void (*ui_describe_fn)(int i, int *id, const char **type,
                                int64_t *cycles, uint32_t *freq,
                                int64_t *sim_time);
 
+/* Optional: a node's static description for the UI's node card (config
+ * name, board, firmware file, config meta as JSON); any may be left NULL. */
+typedef void (*ui_label_fn)(int i, const char **name, const char **board,
+                            const char **firmware, const char **meta);
+
 typedef struct websocket_ui_service {
     ws_server_t *server;          /* NULL = inactive                       */
 
@@ -92,6 +97,7 @@ typedef struct websocket_ui_service {
     timeline_t             *tl;
     const int              *node_count;
     ui_describe_fn          describe;
+    ui_label_fn             label;    /* optional; set after start       */
     sim_control_t          *ctl;      /* pause/play/speed/move target       */
 
     /* Live global stats the runner refreshes each broadcast. */

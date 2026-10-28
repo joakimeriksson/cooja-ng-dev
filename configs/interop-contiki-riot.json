@@ -1,0 +1,124 @@
+{
+  "title": "Contiki-NG + RIOT: one RPL network",
+  "description": "A stock RIOT gnrc_networking node joins a DODAG rooted at a Contiki-NG node (examples/interop/riot-root, RPL Classic in storing mode), configures fd00:: from the root's prefix, pings the root (300-byte pings are 6LoWPAN-fragmented) and exchanges UDP with it. RIOT is driven from its shell; it needs the PAN ID set (its default is 0x23). The traffic is link-local: Contiki-NG adds the RFC 6553 RPL Option to global traffic, which RIOT drops.",
+  "timeout_ms": 30000,
+  "radiomedium": {
+    "type": "udgm",
+    "tx_range": 50.0,
+    "interference_range": 100.0
+  },
+  "nodes": [
+    {
+      "firmware": "firmware/nrf52840-dk/riot-root.nrf52840-dk",
+      "name": "Contiki-NG root",
+      "meta": {"OS": "Contiki-NG", "Role": "RPL root, storing mode", "Source": "examples/interop/riot-root"},
+      "id": 1,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "firmware": "firmware/nrf52840-dk/riot-gnrc-networking.nrf52840-dk",
+      "name": "RIOT",
+      "meta": {"OS": "RIOT", "Role": "joins the DODAG, driven from its shell", "Source": "examples/networking/gnrc/networking"},
+      "id": 2,
+      "x": 25,
+      "y": 0
+    }
+  ],
+  "test": {
+    "actions": [
+      {
+        "at_ms": 1000,
+        "type": "send",
+        "node": 2,
+        "data": "ifconfig 5 set pan_id 0xabcd\n"
+      },
+      {
+        "at_ms": 1200,
+        "type": "send",
+        "node": 2,
+        "data": "rpl init 5\n"
+      },
+      {
+        "at_ms": 1400,
+        "type": "send",
+        "node": 2,
+        "data": "udp server start 8765\n"
+      },
+      {
+        "at_ms": 10000,
+        "type": "send",
+        "node": 2,
+        "data": "rpl\n"
+      },
+      {
+        "at_ms": 11000,
+        "type": "send",
+        "node": 2,
+        "data": "ifconfig 5\n"
+      },
+      {
+        "at_ms": 13000,
+        "type": "send",
+        "node": 2,
+        "data": "ping -c 3 -i 500 fe80::f6ce:3601:f1f4:1%5\n"
+      },
+      {
+        "at_ms": 16000,
+        "type": "send",
+        "node": 2,
+        "data": "ping -c 3 -i 700 -s 300 fe80::f6ce:3601:f1f4:1%5\n"
+      },
+      {
+        "at_ms": 20000,
+        "type": "send",
+        "node": 2,
+        "data": "udp send [fe80::f6ce:3601:f1f4:1%5]:5678 hello-from-RIOT\n"
+      },
+      {
+        "at_ms": 23000,
+        "type": "send",
+        "node": 2,
+        "data": "udp send [fe80::f6ce:3601:f1f4:1%5]:5678 temp=21.5C\n"
+      }
+    ],
+    "steps": [
+      {
+        "wait": "routes: 1",
+        "node": 1,
+        "timeout_ms": 10000
+      },
+      {
+        "wait": "parent [addr: fe80::f6ce:3601:f1f4:1",
+        "node": 2,
+        "timeout_ms": 10000
+      },
+      {
+        "wait": "inet6 addr: fd00::",
+        "node": 2,
+        "timeout_ms": 3000
+      },
+      {
+        "wait": ", 0% packet loss",
+        "node": 2,
+        "count": 2,
+        "timeout_ms": 10000
+      },
+      {
+        "wait": "RIOT says 'hello-from-RIOT'",
+        "node": 1,
+        "timeout_ms": 3000
+      },
+      {
+        "wait": "Received UDP data from",
+        "node": 2,
+        "timeout_ms": 1000
+      },
+      {
+        "wait": "RIOT says 'temp=21.5C'",
+        "node": 1,
+        "timeout_ms": 4000
+      }
+    ]
+  }
+}

@@ -657,6 +657,8 @@ static void broadcast_tick(websocket_ui_service_t *svc, int64_t sim_ns,
             ni[i].freq_hz = freq;
             ni[i].sim_time_ns = simt;
             ni[i].last_tx_ns = svc->node_last_tx_ns[i];
+            if (svc->label)
+                svc->label(i, &ni[i].name, &ni[i].board, &ni[i].firmware, &ni[i].meta);
             /* Send ALL console history for full state — for the
              * recording's first one, every line since it began. */
             if (rec && svc->record_deltas < 0 &&

@@ -108,6 +108,11 @@ typedef struct {
     int  has_position; /* true if x,y specified in JSON */
     double clock_deviation; /* 1.0 = normal, <1.0 = slower (Cooja MspClock deviation) */
     char type_name[64]; /* v2: the named mote-type this node uses ("" for v1) */
+    char name[48];      /* display name for the web UI ("" = none) */
+    /* "meta": free-form facts for the web UI's node card (OS, role, ...),
+     * as a compact JSON object of strings and numbers ("" = none).  The
+     * runtime never reads it; it is passed on as is. */
+    char meta[512];
     /* "peripherals": absent → board defaults; present (even empty) →
      * exactly this list replaces the defaults. */
     int  has_peripherals;
