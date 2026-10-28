@@ -11,7 +11,7 @@ Reference files:
 - API: [`include/common/radio_medium.h`](../include/common/radio_medium.h)
 - Implementation: [`src/common/radio_medium.c`](../src/common/radio_medium.c)
 - Harness integration: [`test/test_mixed_multinode.c`](../test/test_mixed_multinode.c) (search for `mixed_rf_tx_handler`, `mixed_node_radio_set_channel`, `sync_native_node_channel`)
-- Unit tests: [`test/test_radio_medium.c`](../test/test_radio_medium.c) — 235 assertions pinning the API contract
+- Unit tests: [`test/test_radio_medium.c`](../test/test_radio_medium.c) — 250 assertions pinning the API contract
 
 ## Mental model
 
@@ -264,7 +264,7 @@ Useful diagnostic patterns:
 
 ## Tests
 
-- **Unit**: `./build/test_runner radio-medium` — 235 assertions in
+- **Unit**: `./build/test_runner radio-medium` — 250 assertions in
   `test/test_radio_medium.c` covering channel match (within-band,
   cross-band, legacy mode), UDGM distance + probabilistic loss, frame
   tracker for both 802.15.4 and 802.15.4g, native mid-tick channel
@@ -279,8 +279,8 @@ Useful diagnostic patterns:
   - cc2538dk RPL-UDP convergence (`-d 100 -t 60000`) — gates the
     startup-delay mechanism end-to-end
   - Firefly L5 sub-GHz nullnet
-- **Cooja regression**: 81 of 88 tests pass via `tools/run-cooja-tests.sh`
-  (the 7 skipped require host TUN setup). All TSCH tests included.
+- **Cooja regression**: 85 of 93 tests pass via `tools/run-cooja-tests.sh`
+  headless, and the 8 `17-tun-rpl-br` tests with `--with-tun` and root. All TSCH tests included.
 
 ## Anti-patterns
 

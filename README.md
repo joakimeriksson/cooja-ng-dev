@@ -56,10 +56,10 @@ same simulation.
 
 ```sh
 # Unit tests (~5 seconds)
-./build/test_runner correctness         # 83 MSP430 instruction tests
-./build/test_runner arm-correctness     # 224 ARM Cortex-M3/M4F/M33 tests (71 TrustZone-M)
+./build/test_runner correctness         # 87 MSP430 instruction tests
+./build/test_runner arm-correctness     # 557 ARM Cortex-M3/M4F/M33 tests (333 TrustZone-M)
 ./build/test_runner cc1200-mock-host    # 73 CC1200 chip-driver tests
-./build/test_runner radio-medium        # 241 radio-medium routing tests
+./build/test_runner radio-medium        # 250 radio-medium routing tests
 
 # The full Contiki-NG Cooja test suite (93 tests, ~10–15 min warm)
 git clone https://github.com/contiki-ng/contiki-ng.git ../contiki-ng
@@ -113,7 +113,7 @@ Per-board details live in [`devices/`](devices/) and the SoC source files under 
 - **TI CC1200** (off-SoC) — event-driven SPI peripheral, register-level fidelity, IOCFG-driven GPIO events, full software auto-ACK, 73-test mock-host suite.
 - **Nordic nRF52840** — CLOCK/HFCLK/LFCLK (+ STAT/SRC status regs), RTC0/RTC1, TIMER0–4, GPIO/GPIOTE, PPI, RNG, NVMC, FICR (per-node DEVICEID), UART (legacy + UARTE EasyDMA), and a full 802.15.4 RADIO (PACKETPTR EasyDMA, SHORTS, INTENSET, BCMATCH, hardware-style auto-ACK).  **Also boots stock Zephyr OS and RIOT OS** (experimental / best-effort; Contiki-NG is the primary, fully-validated target) — an unmodified `nrf52840dk` `hello_world` prints over the default UARTE console, stock Zephyr `echo_server`/`echo_client` exchange UDP over 802.15.4, and two RIOT `gnrc_networking` nodes form an RPL DODAG; see [`docs/zephyr.md`](docs/zephyr.md) and [`docs/riot.md`](docs/riot.md).
 - **Nordic nRF54L15** — Cortex-M33 family with GRTC (1 MHz syscounter, RELATIVE_COMPARE + RELATIVE_SYSCOUNTER), DPPI (32-channel publish/subscribe), EGU (software-event bridge to NVIC), TIMER10/20–24, per-node FICR.DEVICEID, UARTE20 EasyDMA, GPIO P0/P1/P2, and an 802.15.4 RADIO with deferred PHYEND so the driver's NVIC-disabling critical section exits before the IRQ fires.  2-node and **multi-hop (3+ node) RPL-UDP chains** both route end-to-end (`configs/chain-3node-nrf54l15-dk.json`).
-- **Nordic nRF54L15 TrustZone-M (ARMv8-M security extension)** — the M33 runs *secure/non-secure partitioned* firmware, not just non-secure.  Implements SAU + SPU-as-IDAU attribution, banked SP/CONTROL, the transition instruction surface (`SG`, `BXNS`, `BLXNS`/`FNC_RETURN`, `TT`/`TTT`/`TTA`/`TTAT`), secure exception entry/return with the integrity signature, `SecureFault`/SFSR, and NVIC target-security banking (`NVIC_ITNS`) — plus **per-node world-transition counters** (SG / BXNS / secure exception), which is the point: transition cost becomes measurable network-wide.  csim boots the **real** Contiki-NG `trustzone/` split image — the secure world configures SAU/IDAU, validates the non-secure image, routes IRQs, and hands off to Non-secure; two different split apps pass, so the harness is app-independent.  71 dedicated tests in `arm-correctness`.  See [`docs/design/trustzone-m-plan.md`](docs/design/trustzone-m-plan.md).
+- **Nordic nRF54L15 TrustZone-M (ARMv8-M security extension)** — the M33 runs *secure/non-secure partitioned* firmware, not just non-secure.  Implements SAU + SPU-as-IDAU attribution, banked SP/CONTROL, the transition instruction surface (`SG`, `BXNS`, `BLXNS`/`FNC_RETURN`, `TT`/`TTT`/`TTA`/`TTAT`), secure exception entry/return with the integrity signature, `SecureFault`/SFSR, and NVIC target-security banking (`NVIC_ITNS`) — plus **per-node world-transition counters** (SG / BXNS / secure exception), which is the point: transition cost becomes measurable network-wide.  csim boots the **real** Contiki-NG `trustzone/` split image — the secure world configures SAU/IDAU, validates the non-secure image, routes IRQs, and hands off to Non-secure; two different split apps pass, so the harness is app-independent.  333 dedicated tests in `arm-correctness`.  See [`docs/design/trustzone-m-plan.md`](docs/design/trustzone-m-plan.md).
 - **Nordic nRF54L15 FLPR (RISC-V / RV32EMC)** — the on-die **VPR coprocessor**, modelled as a second core (`src/riscv/`) that shares the M33's bus. The M33 (`flpr-host`) loads the FLPR blob into shared SRAM and releases it via the VPR `CPURUN` register (SPU SECATTR-gated, as on hardware); the RV32EMC core then runs **unmodified Contiki-NG** (`hello-vpr`) dual-core with the M33. Verified end-to-end: the M33 prints `[FLPR] tick N` (reaching `tick 80` by 60 s) and LED0 (P2.9, RISC-V) / LED1 (P1.10, M33) blink at 1 Hz / 2 Hz — visible live in the web UI. ISA `rv32emc_zicsr_zifencei` (base integer + M (mul/div/rem) + C (compressed) + CSR + `fence.i`). With interrupt-driven etimers both cores idle in `WFI` between events — ~714× real-time at 60 s (see [Performance](#performance)). Plan + register map: [`docs/design/riscv-vpr-plan.md`](docs/design/riscv-vpr-plan.md).
 
 Shared 802.15.4 helpers live in [`include/common/ieee_802154.h`](include/common/ieee_802154.h) (PHY constants + CCITT-16 FCS used by all four radios) and [`include/arm/nrf_radio_common.h`](include/arm/nrf_radio_common.h) (one `nrf_radio_emit_ieee802154_frame()` for both nRF radios).
@@ -131,11 +131,11 @@ Shared 802.15.4 helpers live in [`include/common/ieee_802154.h`](include/common/
 ### Unit and integration
 
 ```sh
-./build/test_runner correctness         # 83 MSP430 instruction tests
-./build/test_runner arm-correctness     # 224 ARM (Thumb-2 + M4 DSP + VFP + ARMv8-M TrustZone)
+./build/test_runner correctness         # 87 MSP430 instruction tests
+./build/test_runner arm-correctness     # 557 ARM (Thumb-2 + M4 DSP + VFP + ARMv8-M TrustZone)
 ./build/test_runner timeline            # 76 radio-event serializer tests
 ./build/test_runner cc1200-mock-host    # 73 CC1200 chip-driver tests
-./build/test_runner radio-medium        # 235 multi-channel routing tests
+./build/test_runner radio-medium        # 250 multi-channel routing tests
 ./build/test_runner firmware            # boots cputest.sky, timertest.sky
 ./build/test_runner arm-firmware        # boots hello-world.cc2538dk + nRF
 ./build/test_runner bench               # MIPS micro + firmware benchmarks
@@ -172,7 +172,7 @@ The most thorough validation Cooja-NG has — runs every test in `contiki-ng/tes
 ```sh
 make configure CONTIKI_DIR=/path/to/contiki-ng     # one-time
 
-# All 81 non-TUN tests (no sudo) — ~10–15 min warm
+# All 85 non-TUN tests (no sudo) — ~10–15 min warm
 make cooja-tests
 make cooja-tests VERBOSE=1                         # per-test output
 make cooja-tests PATTERN='14-rpl-lite*'            # subset
@@ -345,7 +345,7 @@ while (sim_ns < end_ns) {
 
 Per-byte RF delivery is the key fidelity choice — receivers see one symbol at a time at the exact ns it arrives on the link, instead of whole frames dropped in one go.
 
-**Per-radio multi-channel medium.**  Every radio chip (CC2420, CC2538 RF Core, CC1200, nRF52840/nRF54L15) registers its own slot.  Frames route by `(band, channel)` so 2.4 GHz and sub-GHz networks coexist without cross-band leakage; TSCH channel hops correctly affect what each receiver hears.  235-test safety net — see [`docs/radio-medium.md`](docs/radio-medium.md) and [`docs/porting-a-device.md`](docs/porting-a-device.md) §8 for the chip-driver event model.
+**Per-radio multi-channel medium.**  Every radio chip (CC2420, CC2538 RF Core, CC1200, nRF52840/nRF54L15) registers its own slot.  Frames route by `(band, channel)` so 2.4 GHz and sub-GHz networks coexist without cross-band leakage; TSCH channel hops correctly affect what each receiver hears.  250-test safety net — see [`docs/radio-medium.md`](docs/radio-medium.md) and [`docs/porting-a-device.md`](docs/porting-a-device.md) §8 for the chip-driver event model.
 
 **Cooja test wrapper.**  `tools/run-cooja-tests.sh` is the bridge to upstream Contiki-NG's test infrastructure — treats Cooja-NG as a drop-in for `java -jar Cooja.jar --no-gui`, runs the same `.csc` topologies, parses the same JS scripts via `csc2json.py`, reports compatible PASS/FAIL.  Every fix is validated against the upstream test suite, not a private regression set.
 
@@ -366,11 +366,11 @@ Deeper notes on each subsystem in [`CLAUDE.md`](CLAUDE.md) and [`docs/architectu
 
 | Suite | Result |
 |---|---|
-| `correctness` (MSP430 instructions) | **68 / 68 PASS** |
-| `arm-correctness` (Cortex-M3/M4F/M33, incl. DSP + VFP) | **81 / 81 PASS** |
+| `correctness` (MSP430 instructions) | **87 / 87 PASS** |
+| `arm-correctness` (Cortex-M3/M4F/M33, incl. DSP + VFP) | **557 / 557 PASS** (333 TrustZone-M) |
 | `timeline` (event serializer) | **76 / 76 PASS** |
 | `cc1200-mock-host` (CC1200 chip driver) | **73 / 73 PASS** |
-| `radio-medium` (per-radio multi-channel) | **235 / 235 PASS** |
+| `radio-medium` (per-radio multi-channel) | **250 / 250 PASS** |
 | `firmware` (cputest.sky, timertest.sky) | **2 / 2 PASS** |
 | `arm-firmware` (cc2538dk + nRF bring-up) | **PASS** |
 | `zoul-firefly-multinode` RPL-UDP | **6 / 6 hello cycles** in 60 s, ~9× real-time |
@@ -378,15 +378,15 @@ Deeper notes on each subsystem in [`CLAUDE.md`](CLAUDE.md) and [`docs/architectu
 | `nrf54l15-dk-multinode` RPL-UDP | UDP request/response end-to-end (~100× real-time) |
 | **Cooja test suite (93 tests)** | **93 / 93 PASS** — 85 / 85 headless, plus 8 / 8 TUN (`--with-tun` + root) |
 
-Cooja-suite coverage: all 27 `07-simulation-base/*` (RPL-Lite, TSCH, Orchestra, multicast, IPv6, stack guard, data structures) including the once-stubborn `26-tsch-drift-z1` (16 s); all 12 `09-ipv6/*`; all 9 `13-ieee802154/*`; all 14 `14-rpl-lite/*` and 19 `15-rpl-classic/*` (including 28-h simulated DAG stability tests); all 3 `21-security-protocols/*` (EDHOC); and, with `--with-tun` + root, all 8 `17-tun-rpl-br/*` against a real `tun0` + `tunslip6`, including `10-native-nat64-cooja` (214 s, UDP+TCP echo through the NAT64 gateway) and `09-native-border-router-cooja-frag` (host-side 6LoWPAN fragmentation over the native border router — see the host-link latency note under [Known issues](#known-issues)).
+Cooja-suite coverage: all 27 `07-simulation-base/*` (RPL-Lite, TSCH, Orchestra, multicast, IPv6, stack guard, data structures) including the once-stubborn `26-tsch-drift-z1` (16 s); all 12 `09-ipv6/*`; all 10 `13-ieee802154/*`; all 14 `14-rpl-lite/*` and 19 `15-rpl-classic/*` (including 28-h simulated DAG stability tests); all 3 `21-security-protocols/*` (EDHOC); and, with `--with-tun` + root, all 8 `17-tun-rpl-br/*` against a real `tun0` + `tunslip6`, including `10-native-nat64-cooja` (214 s, UDP+TCP echo through the NAT64 gateway) and `09-native-border-router-cooja-frag` (host-side 6LoWPAN fragmentation over the native border router — see the host-link latency note under [Known issues](#known-issues)).
 
 ## Known issues
 
-Real, currently reproducible quirks.  The first is a deliberate workaround carried in the code; the rest are limitations of the *standalone CLI shortcuts* and do not affect the Cooja test wrapper, JSON-config flow, or production use.
+The serial-socket delay is a deliberate workaround carried in the code.  The numbered items are resolved and kept for the record.
 
 **The serial socket delays mote→host delivery by 40 ms of wall-clock time** (`CSIM_SERIAL_TX_LATENCY_MS`; `0` disables).  Without it, `border-router.native` deadlocks against us and `17-tun-rpl-br/09-native-border-router-cooja-frag` fails with 100% packet loss.  SLIP has no flow control, so Contiki substitutes a fixed 31 ms `SLIP_DEV_CONF_SEND_DELAY` implemented as a passive `struct timer` that the sleeping native platform cannot observe, against a flat 1 s `SELECT_TIMEOUT`.  A reply landing *inside* that 31 ms window consumes the router's only early wake-up while flushing is still forbidden, so it sleeps a full second per fragment and its 2048-byte queue overflows fatally.  Measured flush→reply latency: csim 0.2–26.5 ms (0 of 13 above the threshold, dies) versus Cooja 0.0–47.3 ms (5 of 14 above, passes) — Cooja is not correct here, only lucky, and stalls a full second whenever it loses the race.  We model the USB-CDC link a real slip-radio sits behind, which is what makes Contiki's 31 ms constant work on hardware.  Removal criteria are documented in `src/sim/sim_serial_bridge.c`.
 
-1. **`./build/test_runner multinode` (no firmware) hangs.**  The default-firmware shortcut routes to `firmware/sky/nullnet-broadcast.sky` and gets stuck after init.  Workaround: use a JSON config or explicit firmware pair.
+1. *(resolved — was: "`./build/test_runner multinode` (no firmware) hangs")* The default-firmware shortcut runs one node of `firmware/sky/nullnet-broadcast.sky` for 20 simulated seconds and exits.
 2. *(resolved — was: "multi-hop 3+ node chains don't route past the first hop")* nRF54L15 and nRF52840 multi-hop RPL-UDP chains now route end-to-end (`chain-3node-nrf54l15-dk`, `chain-3node`/`chain-4node-nrf52840-dk`; node 4 relays 3 hops).  Root cause was a radio-model bug, not 6LoWPAN forwarding: a mid-frame **aborted reception** left the `nrf_802154` driver's `psdu_being_received` flag set (the abort paths fired only a non-interrupting PHYEND; the flag needs a CRCOK/**CRCERROR** with its RX IRQ to clear), so the router's every later `nrf_802154_transmit_raw` returned `BUSY_CHANNEL` and it wedged.  Firing `END+PHYEND+CRCERROR` on abort clears it; nRF52840 additionally needed a destination-address check on the fabricated auto-ACK (two neighbours were ACKing every unicast, colliding at the sender).  Details: [`docs/design/nrf-multihop-forwarding-plan.md`](docs/design/nrf-multihop-forwarding-plan.md) §Resolution.
 3. *(resolved — was: "`test_firmware.c` reports `timertest.sky` as PASS even when the firmware prints `FAIL`")* `timertest.sky` now self-reports `OK:` for both assertions (`ticka0 >= 100`, `count > 10`) and then `EXIT`, so the reported PASS is genuine; the runner does match a leading `FAIL:` line.  A related false-green was fixed at the same time: a firmware that never self-reports (hung, stuck, or out of instructions) used to print `WARN` and return success, making a hang indistinguishable from a pass in the suite's exit status — it is now a `FAIL`.
 4. *(resolved — was: "the deferred-PHYEND fix has not been ported to nrf52840")* nrf52840 is **not** exposed to the critical-section-during-TX race: it fires PHYEND/END at full frame air-time (`(6+len)·32 µs`, ≥~350 µs after `TASKS_START`; `nrf52840_soc.c`), which already lands the IRQ during the driver's busy-wait, well after its NVIC-disabling critical section. nRF54L15 uses a *different* 100 µs defer only because it delivers the frame at TX-start (synchronous model) and a full-air-time defer would leave it stuck in TX when the peer's ACK arrives — not because nrf52840 lacks protection. The timing is per-frame air-time, independent of RPL rate.

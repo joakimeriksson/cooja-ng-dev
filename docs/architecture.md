@@ -109,10 +109,10 @@ flowchart TB
 
     %% ---- Tests ----
     subgraph TST["test/ — build/test_runner"]
-        T1["correctness / arm-correctness<br/>(72 + 224 insn tests)"]
+        T1["correctness / arm-correctness<br/>(87 + 557 insn tests)"]
         T2["firmware / arm-firmware"]
         T3["multinode / arm-multinode / nrf*-multinode<br/>zoul-firefly-multinode (mixed MSP430+ARM)"]
-        T4["bench • timeline (76) • radio-medium (241)<br/>radio-bus (120) • cc1200-mock-host (73)"]
+        T4["bench • timeline (76) • radio-medium (250)<br/>radio-bus (212) • cc1200-mock-host (73)"]
     end
 
     %% ---- Edges ----
@@ -223,8 +223,8 @@ are already tabled in `CLAUDE.md`. The rest of the tree:
 | File | Purpose |
 |------|---------|
 | `test_main.c` | Dispatcher for all subcommands (`correctness`, `bench`, `firmware`, `multinode`, `arm-correctness`, `arm-firmware`, `arm-multinode`, `zoul-firefly-multinode`, `nrf52840-{dk,dongle}-multinode`, `nrf54l15-dk-multinode`, `nrf54l15-spim`, `mx25r6435f-mock-host`, `enc28j60-mock-host`, `mixed-multinode`, `test`, `cc1200-mock-host`, `radio-medium`, `radio-bus`, `timeline`) |
-| `test_correctness.c` | 72 MSP430 instruction-level correctness tests (port of MSPSim's `CorrectnessTests.java`) |
-| `test_arm_correctness.c` | 224 ARM instruction-level tests — Thumb/Thumb-2, M4 DSP + FPv4-SP VFP, ARMv8-M (M33) load-acquire/store-release, plus **71 TrustZone-M tests** (SAU/IDAU attribution, SAU MMIO, access enforcement, TT, SG/BXNS, SecureFault, `NVIC_ITNS`, transition counters, BLXNS/FNC_RETURN) |
+| `test_correctness.c` | 87 MSP430 instruction-level correctness tests (port of MSPSim's `CorrectnessTests.java`) |
+| `test_arm_correctness.c` | 557 ARM instruction-level tests — Thumb/Thumb-2, M4 DSP + FPv4-SP VFP, ARMv8-M (M33) load-acquire/store-release, plus **333 TrustZone-M tests** (SAU/IDAU attribution, SAU MMIO, access enforcement, TT, SG/BXNS, SecureFault, `NVIC_ITNS`, transition counters, BLXNS/FNC_RETURN) |
 | `test_benchmark.c` | MSP430 micro-benchmarks + firmware benchmarks (port of `PerformanceBenchmark.java`) |
 | `test_firmware.c` | MSP430 firmware boot tests; loads ELF, monitors USART output |
 | `test_arm_firmware.c` | ARM firmware boot tests; loads CC2538 / zoul-firefly ELF, monitors UART banner |
@@ -234,8 +234,8 @@ are already tabled in `CLAUDE.md`. The rest of the tree:
 | `test_nrf54l15_spim.c` | 90 nRF54L15 SPIM register-model tests (mock host, EasyDMA over a byte array) |
 | `test_mx25r6435f.c` | 49 MX25R6435F serial-flash chip tests (mock host, no CPU) |
 | `test_enc28j60.c` | 47 ENC28J60 Ethernet-controller chip tests (mock host, no CPU) |
-| `test_radio_medium.c` | 241 radio-medium routing / range / interference tests |
-| `test_radio_bus.c` | 120 `sim_radio_bus` frame-assembly / delivery-mode / auto-ACK tests |
+| `test_radio_medium.c` | 250 radio-medium routing / range / interference tests |
+| `test_radio_bus.c` | 212 `sim_radio_bus` frame-assembly / delivery-mode / auto-ACK tests |
 | `test_timeline.c` | 76 unit tests for timeline ring buffer, serialization, sub-ms timestamp precision |
 
 ### `tools/` — scripts (selected)
