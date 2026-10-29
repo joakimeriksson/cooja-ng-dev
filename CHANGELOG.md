@@ -9,18 +9,21 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [0.4.0] — 2026-10-29
 
-Cooja-NG for people who did not build it. `cngsim` takes a download to a
-running simulation in three commands, with commented examples, layouts that
-place many nodes at once, and a web UI that edits the running network and
-saves it as YAML. The same C code runs in the browser on the original
-firmware ELFs, held to the native build byte for byte, behind the site's
-live demos. Two TI SimpleLink LaunchPads join (CC1352R1 and CC1312R7, checked
-against hardware), Contiki-NG talks to Zephyr and to RIOT in two interop
-demos, and four boards without a radio model leave. Configs are checked
-harder: an image whose board cannot be told, a duplicate id, too many mote
-types or a plugin that is not there is an error now rather than a quiet
-surprise, so read *Changed* before upgrading. The plugin API (version 3) and
-the files Contiki-NG's CI uses are unchanged; plugins that read
+This release makes Cooja-NG usable without building it from source. `cngsim`
+takes you from the download to a running simulation in three commands, with
+commented examples, layouts that place many nodes at once, and a web UI that
+edits the running network and saves it as YAML. Cooja-NG now also runs in
+the browser: the same C code, compiled to WebAssembly, runs the original
+firmware and gives byte-for-byte the same output as the native build. That
+build is what runs the site's live demos.
+
+New features include two TI SimpleLink LaunchPads join (CC1352R1 and
+CC1312R7, checked against hardware), Contiki-NG talks to Zephyr and to RIOT
+in two interop demos, and four boards without a radio model leave. Configs
+are checked harder: an image whose board cannot be told, a duplicate id, too
+many mote types or a plugin that is not there is an error now rather than a
+quiet surprise, so read *Changed* before upgrading. The plugin API (version
+3) and the files Contiki-NG's CI uses are unchanged; plugins that read
 `radio_medium_t` fields directly must be rebuilt (*Changed*).
 
 Contributors to this release: @nfi (warnings as errors, and reviews of the
