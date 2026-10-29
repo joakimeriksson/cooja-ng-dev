@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/cooja-ng-logo-dark.svg">
+    <img src="docs/assets/cooja-ng-logo.svg" alt="Cooja-NG" width="420">
+  </picture>
+</p>
+
 # Cooja-NG — a C-based Cooja / MSPSim re-implementation
 
 A fast, multi-architecture emulator and network simulator for Contiki-NG, written in portable C.  Cooja-NG (codename `csim`) is a clean-room re-implementation of the parts of Cooja and MSPSim needed to run the upstream Contiki-NG test suite headlessly, with a strong focus on simulation speed, deterministic timing, and faithful peripheral behaviour.
