@@ -215,9 +215,10 @@ static bool handle_edit(websocket_ui_service_t *svc, const char *cmd, cJSON *roo
         for (int t = 0; t < svc->type_count; t++) {
             if (strcmp(svc->type_name[t], jt->valuestring) != 0) continue;
             int id = next_free_id(svc);
-            if (sim_control_add(svc->ctl, svc->type_fw[t], svc->type_sfw[t], id,
-                                jx->valuedouble, jy->valuedouble,
-                                SIM_CONTROL_START | SIM_CONTROL_WAKE) < 0)
+            if (sim_control_add_typed(svc->ctl, svc->type_name[t], svc->type_fw[t],
+                                      svc->type_sfw[t], id, jx->valuedouble,
+                                      jy->valuedouble,
+                                      SIM_CONTROL_START | SIM_CONTROL_WAKE) < 0)
                 fprintf(stderr, "ui: could not add a %s node\n", svc->type_name[t]);
             break;
         }

@@ -10,23 +10,23 @@
 
 ## udp-server.nrf54l15-xiao
 
-- **Source**: contiki-ng commit `f15d82e66b9ea205b5cddbf38c286b9b4649d14d`
+- **Source**: contiki-ng commit `509e0b236c2eff219bd8e5da751da279e00f3da3`
 - **Source path**: `examples/rpl-udp` (file: `udp-server.c`)
 - **TARGET**: `nrf`
 - **BOARD**: `nrf54l15/xiao`
-- **Toolchain**: Docker contiker/contiki-ng:latest
-- **Built**: 2026-05-14T10:32:23Z by Joakim Eriksson
-- **Build command**: `tools/build-device-firmware.sh --target nrf --board nrf54l15/xiao --example examples/rpl-udp --output firmware/nrf54l15-xiao/udp-server.nrf54l15-xiao --source-file udp-server`
+- **Toolchain**: host
+- **Built**: 2026-10-29T08:30:31Z by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --target nrf --board nrf54l15/xiao --example examples/rpl-udp --output firmware/nrf54l15-xiao/udp-server.nrf54l15-xiao --source-file udp-server --local`
 
 ## udp-client.nrf54l15-xiao
 
-- **Source**: contiki-ng commit `f15d82e66b9ea205b5cddbf38c286b9b4649d14d`
+- **Source**: contiki-ng commit `509e0b236c2eff219bd8e5da751da279e00f3da3`
 - **Source path**: `examples/rpl-udp` (file: `udp-client.c`)
 - **TARGET**: `nrf`
 - **BOARD**: `nrf54l15/xiao`
-- **Toolchain**: Docker contiker/contiki-ng:latest
-- **Built**: 2026-05-14T10:32:38Z by Joakim Eriksson
-- **Build command**: `tools/build-device-firmware.sh --target nrf --board nrf54l15/xiao --example examples/rpl-udp --output firmware/nrf54l15-xiao/udp-client.nrf54l15-xiao --source-file udp-client`
+- **Toolchain**: host
+- **Built**: 2026-10-29T08:30:31Z by Joakim Eriksson
+- **Build command**: `tools/build-device-firmware.sh --target nrf --board nrf54l15/xiao --example examples/rpl-udp --output firmware/nrf54l15-xiao/udp-client.nrf54l15-xiao --source-file udp-client --local`
 
 ## secure-world-example.nrf54l15-xiao
 
@@ -97,4 +97,3 @@
 - **Toolchain**: host
 - **Built**: 2026-09-05T22:35:39Z by Niclas Finne
 - **Build command**: `tools/build-device-firmware.sh --target nrf --board nrf54l15/xiao --example examples/platform-specific/nrf/trustzone/normal-world --output firmware/nrf54l15-xiao/normal-world-fullplat.nrf54l15-xiao --make-args "TZ_MINIMAL_NONSECURE_PLATFORM=0" --local`
-

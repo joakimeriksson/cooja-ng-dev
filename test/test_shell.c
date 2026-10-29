@@ -143,8 +143,8 @@ static void m_set_position(void *u, int idx, double x, double y) { (void)u; (voi
 static int m_reboot(void *u, int idx) { (void)u; (void)idx; mock_reboots++; return 0; }
 static void m_start(void *u, int idx) { (void)u; mock_nodes[idx].start_ns = sim_runtime_now_ns(&mock_sim); }
 static void m_remove(void *u, int idx) { (void)u; mock_nodes[idx].start_ns = INT64_MAX; mock_removes++; }
-static int m_add(void *u, const char *fw, const char *sfw, int id) {
-    (void)u; (void)sfw; if (mock_count >= 8) return -1;
+static int m_add(void *u, const char *fw, const char *sfw, int id, const char *type) {
+    (void)u; (void)sfw; (void)type; if (mock_count >= 8) return -1;
     mock_nodes[mock_count].id = id; mock_nodes[mock_count].start_ns = 0;
     snprintf(mock_nodes[mock_count].fw, 64, "%s", fw);
     return mock_count++;

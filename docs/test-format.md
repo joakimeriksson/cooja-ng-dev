@@ -73,6 +73,39 @@ synthesized from the distinct firmware paths, keeping the order of any
 existing `mote_types` so `getMoteTypes()[i]` in a JS script still refers to
 the same type).
 
+## Running a config: options
+
+`test_runner test <config | firmware...> [options]` takes these.  `cngsim run`
+takes them too, except `-d` (put `startup_delay_ms` in the setup instead), and
+gives its duration with a unit; it adds a few of its own, below the table
+(`cngsim help run`).
+
+| Option | Effect |
+|---|---|
+| `-t MS` | simulated time in whole milliseconds, 1 to 2147483647 (24.8 days), overriding `timeout_ms`; anything else is refused (exit 2) |
+| `-n N` | with firmware files: the number of nodes (at most 128) |
+| `-d MS` | test_runner only: spread the nodes' start times over 0 to MS ms (`startup_delay_ms`), so their timers do not run in lockstep |
+| `--seed N` | the seed, overriding `seed` |
+| `--board NAME` | with firmware files: the board, for an image not named `<app>.<board>` |
+| `--save-config OUT.yaml` | write the setup as it is at the end ([above](#saving-a-running-setup)) |
+| `--pcap FILE` | write every radio frame to a pcap file (IEEE 802.15.4 with FCS) for Wireshark |
+| `--plugin LIB.so` | load a plugin (a service or a radio medium); a config lists them under `plugins:`. One that cannot be loaded ends the run with exit 2 |
+| `--ui [PORT]`, `--ui-bind ADDR`, `--ui-edit`, `--ui-record FILE` | the web UI; recordings in [ui-replay.md](ui-replay.md) |
+| `--speed N\|max\|realtime`, `--realtime`, `--paused` | pacing, and starting paused |
+| `--shell`, `--script FILE` | the command line and command scripts ([shell.md](shell.md)) |
+| `--wall-timeout DUR` | give up after this much real time (exit 6) |
+| `--gdb [NODE:]PORT`, `--gdb-wait` | a GDB server on a node |
+| `--renode [ADDR:MAIN:ASYNC]`, `--renode-freq HZ` | run as Renode's clock slave |
+| `-v` / `-q` | more output / less |
+
+`cngsim run` only:
+
+| Option | Effect |
+|---|---|
+| `--duration D` (or `-t D`) | simulated time with its unit (`60s`, `500ms`, `2m`, `1.5h`), rounded to whole milliseconds; 1 ms to 596 h (24.8 days), anything else is refused |
+| `--no-open`, `--start` | with `--ui`: do not open the browser; start running at once rather than paused |
+| `--trace radio\|boot\|stats\|all` | add the developer output test_runner prints, by kind |
+
 ## Config File Structure
 
 ```yaml
@@ -93,10 +126,10 @@ test: { ... }
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `title` | string | — | Display name for the simulation |
-| `timeout_ms` | int | 20000 | Total simulation duration in milliseconds |
+| `timeout_ms` | int | 20000 | Total simulation duration, in whole milliseconds from 1 to 2147483647 (24.8 days) |
 | `seed` | int | 0 | Random seed (0 = not set) |
 | `startup_delay_ms` | int | 0 | Each node gets a random startup delay in `[0, startup_delay_ms)` |
-| `speed` | float | 0 | Real-time speed multiplier for UI mode (0 = default 10x) |
+| `speed` | float | 0 | Real-time speed multiplier for UI mode (0 = the default: 10x for `test_runner --ui`, 1x for `cngsim run --ui`) |
 
 ### Radio Medium
 
@@ -239,10 +272,16 @@ mote_types:
 
 A `board:` that contradicts a known extension is an error too.
 
+`kind`, `cpu` and `soc` on a mote type (`kind: emulated-elf, cpu: msp430,
+soc: msp430f1611`, as many bundled configs carry) are labels for people:
+they are checked for type, kept on save, and select nothing.  `board:` or the
+extension decides what runs, so a `soc:` that disagrees with it is not an
+error.
+
 #### File paths
 
 A relative `firmware`, `secure_firmware` or `js_script` path is looked up
-next to the config file first, then (as before 0.3.1) relative to the
+next to the config file first, then (as before 0.4.0) relative to the
 current directory; `~/` is the home directory.  So a config and its
 firmware can live together anywhere, and every older config that names
 paths from the repo root still works from there.
@@ -282,7 +321,7 @@ steps:
 | `wait` | string | **required** | Substring to match in node console output |
 | `node` | int | -1 (any) | Only match output from this node ID |
 | `count` | int | 1 | Number of matches required before advancing |
-| `timeout_ms` | int | 0 | Per-step timeout (0 = use global `timeout_ms`) |
+| `timeout_ms` | int | — | Per-step timeout, in whole milliseconds from 1 to 2147483647; leave it out to use the global `timeout_ms` (`0` is refused) |
 
 **Matching behavior:**
 - Each line of console output (UART) is checked against the current step's `wait` pattern using substring match (`strstr`).
@@ -623,7 +662,7 @@ Some Cooja test scripts use features that can't be fully auto-converted. The con
 - `generateMote` — creating new mote instances at runtime (without a matching addMote)
 - `java.util.Random` — Java random number generator in script logic
 
-Complex validation logic (e.g., collecting IP addresses and cross-checking per-node) requires manual validators in the JSON config.
+Complex validation logic (e.g., collecting IP addresses and cross-checking per-node) requires manual validators in the setup file.
 
 ## Running Tests
 

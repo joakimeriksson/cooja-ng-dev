@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -121,17 +122,22 @@ static int compare(const sim_normalized_config_t *a, const sim_normalized_config
 
 /* Make ./csim-roundtrip-deep-<pid>/d/d/.../d, deep enough that "../" per
  * level outweighs the absolute path of the current directory.  Returns the
- * number of d levels, or -1. */
+ * number of d levels, or -1.  The length is the real path's, since that is
+ * what the loader resolves to (a symlinked cwd can be much shorter).
+ * The relative paths written from there must still fit a 255-byte
+ * firmware field: about cwd + 12 + the image name, so a checkout deeper
+ * than about 190 characters fails the deep copy (CI's is 35). */
 static int make_deep_dir(char *out, size_t sz) {
     char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) return -1;
+    if (!realpath(".", cwd)) return -1;
     int levels = (int)strlen(cwd) / 3 + 4;
     int n = snprintf(out, sz, "csim-roundtrip-deep-%d", (int)getpid());
-    if (mkdir(out, 0700) != 0) return -1;
+    /* a failed run leaves its directory; a later run can reuse the pid */
+    if (mkdir(out, 0700) != 0 && errno != EEXIST) return -1;
     for (int i = 0; i < levels; i++) {
         if ((size_t)n + 3 >= sz) return -1;
         n += snprintf(out + n, sz - (size_t)n, "/d");
-        if (mkdir(out, 0700) != 0) return -1;
+        if (mkdir(out, 0700) != 0 && errno != EEXIST) return -1;
     }
     return levels;
 }
@@ -210,9 +216,17 @@ int run_config_reject(int argc, char **argv);
 int run_config_reject(int argc, char **argv) {
     int failed = 0, passed = 0;
     printf("=== Config rejection: each file must fail to load ===\n");
+    /* Refused because it is not there proves nothing: an empty glob or a
+     * renamed fixture would pass. */
+    if (argc == 0) { printf("  FAIL: no configs given\n"); failed++; }
     for (int i = 0; i < argc; i++) {
         sim_normalized_config_t cfg;
         fprintf(stderr, "--- %s ---\n", argv[i]);
+        if (access(argv[i], R_OK) != 0) {
+            printf("  FAIL %s: no such file\n", argv[i]);
+            failed++;
+            continue;
+        }
         int rc = sim_config_load(&cfg, argv[i]);
         if (rc == 0) { sim_config_free(&cfg); printf("  FAIL %s: loaded, but must be rejected\n", argv[i]); failed++; }
         else { printf("  PASS %s (rejected)\n", argv[i]); passed++; }

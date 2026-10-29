@@ -17,11 +17,18 @@
 
 /* --- Platform definitions --- */
 
+/* LEDs as the UI shows them (red, yellow, green), from Contiki-NG's
+ * board.h for each board. */
 static const arm_platform_config_t platform_cc2538dk = {
     .name          = "cc2538dk",
     .soc           = &cc2538_config,
     .soc_ops       = &cc2538_soc_ops,
     .console_uart  = 0,
+    .leds = {
+        { .port = 2, .pin = 0, .active_low = false },  /* LED1 Red    PC0 */
+        { .port = 2, .pin = 1, .active_low = false },  /* LED2 Yellow PC1 */
+        { .port = 2, .pin = 2, .active_low = false },  /* LED3 Green  PC2 */
+    },
 };
 
 static const arm_platform_config_t platform_openmote = {
@@ -29,6 +36,11 @@ static const arm_platform_config_t platform_openmote = {
     .soc           = &cc2538_config,
     .soc_ops       = &cc2538_soc_ops,
     .console_uart  = 0,
+    .leds = {
+        { .port = 2, .pin = 4, .active_low = false },  /* LED1 Red    PC4 */
+        { .port = 2, .pin = 6, .active_low = false },  /* LED2 Yellow PC6 */
+        { .port = 2, .pin = 7, .active_low = false },  /* LED3 Green  PC7 */
+    },
 };
 
 /* Zolertia Firefly (TARGET=zoul, BOARD=firefly).

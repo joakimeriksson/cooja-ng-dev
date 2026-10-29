@@ -41,8 +41,10 @@ int external_mote_boot(mixed_node_t *node, int slot, const char *path,
      * carry log lines and a first transmission. */
     double x = 0.0, y = 0.0;
     radio_medium_node_pos(&env->sim->radio_medium, slot, &x, &y);
-    if (ext_node_start(en, x, y, (uint32_t)node_id) != 0)
+    if (ext_node_start(en, x, y, (uint32_t)node_id) != 0) {
+        ext_node_destroy(en);   /* the peer was spawned: end it, as any failed boot frees */
         return -1;
+    }
 
     printf("  Node %d [EXT] initialized (%s)\n", node_id, path);
     return 0;

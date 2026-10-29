@@ -74,7 +74,7 @@ Times: `5s`, `250ms`, `1500us`, `1.5s`, `2m`; a bare number is milliseconds;
 | `add <firmware\|type> [id] [x y]` | add a node from a config v2 mote-type name or a firmware path; id defaults to max+1; it boots and runs from now |
 | `remove <nodes>` | stop nodes for good (`reboot` revives them) |
 | `move <id> <x> <y>` | set a position (metres), neighbours recomputed |
-| `reboot <nodes>` | destroy + re-initialize from the same firmware, clock re-seeded to now |
+| `reboot <nodes>` | destroy + re-initialize from the same firmware, clock re-seeded to now; if that boot fails (the file is gone or malformed) the command fails and the node is left removed, until a reboot that succeeds |
 
 **Environment**
 

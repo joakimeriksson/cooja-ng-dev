@@ -63,7 +63,7 @@ int run_arm_firmware_test(const arm_firmware_test_entry_t *entry, int max_instru
 
     const arm_platform_config_t *pcfg = arm_platform_find(entry->platform);
     if (!pcfg) {
-        printf("  SKIP: Unknown platform '%s'\n", entry->platform);
+        printf("  FAIL: Unknown platform '%s'\n", entry->platform);
         return -1;
     }
 
@@ -71,7 +71,7 @@ int run_arm_firmware_test(const arm_firmware_test_entry_t *entry, int max_instru
     arm_platform_init(&plat, pcfg);
 
     if (arm_load_elf(&plat.cpu, entry->path) != 0) {
-        printf("  SKIP: Cannot load %s\n", entry->path);
+        printf("  FAIL: Cannot load %s\n", entry->path);
         arm_platform_destroy(&plat);
         return -1;
     }
@@ -127,7 +127,7 @@ int run_arm_firmware_tests(int verbose) {
 
     int failures = 0;
     const arm_firmware_test_entry_t firmware_tests[] = {
-        { "firmware/cc2538dk/hello-world.cc2538dk",      "cc2538dk",     NULL },
+        { "firmware/cc2538dk/hello-world.cc2538dk",      "cc2538dk",     "Hello, world" },
         /* Phase A bring-up for the Zolertia Firefly: assert the BOARD_STRING
          * banner from arch/platform/zoul/firefly/board.h appears on UART0.
          * Covers L0 (ELF loads) through L4 (Contiki init reaches platform_init
@@ -138,7 +138,7 @@ int run_arm_firmware_tests(int verbose) {
 
     for (int i = 0; firmware_tests[i].path; i++) {
         int result = run_arm_firmware_test(&firmware_tests[i], 500000000, verbose);
-        if (result > 0) failures++;
+        if (result != 0) failures++;   /* a missing image fails too */
     }
 
     return failures;

@@ -687,8 +687,10 @@ static void put_block(FILE *f, const char *key, const char *text, int indent) {
 /* Mote-type naming for the writer.  Existing mote_types keep their order
  * (getMoteTypes()[i] in JS scripts depends on it); firmware paths not
  * covered by one get a synthesized type named after the file stem. */
-/* A type is identified by its firmware pair: two nodes with the same
- * Non-secure image but different Secure-world images are different types. */
+/* A node names its type (type_name) when it has one: two types may share an
+ * image and differ in board.  A node without one is matched by its firmware
+ * pair: the same Non-secure image with different Secure-world images is
+ * two types. */
 typedef struct {
     char name[64];
     char firmware[256];
@@ -708,6 +710,17 @@ static void stem_of(const char *fw, char *out, size_t sz) {
     if (dot && dot != out) *dot = '\0';
 }
 
+/* The type a node is written under: the one it names, else the first with
+ * its images; -1 if none yet. */
+static int node_type(const wtype_t *types, int n, const sim_node_config_t *nd) {
+    if (nd->type_name[0])
+        for (int k = 0; k < n; k++)
+            if (types[k].src && strcmp(types[k].name, nd->type_name) == 0) return k;
+    for (int k = 0; k < n; k++)
+        if (same_images(&types[k], nd->firmware, nd->secure_firmware)) return k;
+    return -1;
+}
+
 static int build_types(const sim_normalized_config_t *cfg, wtype_t *types, int max) {
     int n = 0;
     for (int i = 0; i < cfg->mote_type_count && n < max; i++) {
@@ -725,8 +738,7 @@ static int build_types(const sim_normalized_config_t *cfg, wtype_t *types, int m
     for (int i = 0; i < cfg->node_count && n < max; i++) {
         const char *fw = cfg->nodes[i].firmware;
         const char *sfw = cfg->nodes[i].secure_firmware;
-        int found = 0;
-        for (int k = 0; k < n; k++) if (same_images(&types[k], fw, sfw)) { found = 1; break; }
+        int found = node_type(types, n, &cfg->nodes[i]) >= 0;
         if (found) continue;
         wtype_t *t = &types[n];
         snprintf(t->firmware, sizeof(t->firmware), "%s", fw);
@@ -810,9 +822,8 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
     fputs("\nnodes:\n", f);
     for (int i = 0; i < cfg->node_count; i++) {
         const sim_node_config_t *n = &cfg->nodes[i];
-        const char *tname = "?";
-        for (int k = 0; k < ntypes; k++)
-            if (same_images(&types[k], n->firmware, n->secure_firmware)) { tname = types[k].name; break; }
+        int k = node_type(types, ntypes, n);
+        const char *tname = k >= 0 ? types[k].name : "?";
         fputs("  - { type: ", f); put_str(f, tname);
         if (n->name[0]) { fputs(", name: ", f); put_str(f, n->name); }
         if (n->meta[0]) put_meta(f, n->meta);

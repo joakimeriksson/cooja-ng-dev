@@ -1,0 +1,9 @@
+version: 2
+title: a step timeout that is not whole milliseconds
+mote_types:
+  - { name: a, firmware: firmware/sky/hello-world.sky }
+nodes:
+  - { type: a, id: 1 }
+test:
+  steps:
+    - { wait: "Hello", timeout_ms: 1.5 }

@@ -12,6 +12,8 @@
 #      unknown example, an image with no board, a duration without a unit,
 #      checks that name a node the setup does not have.
 #   5. Ctrl-C ends a run with exit 130 and INTERRUPTED, not a failed check.
+#   6. The README's platform table matches the board registry: every board
+#      `cngsim boards` lists has a row, and every extension a row names loads.
 #
 # Usage: tools/check-cngsim.sh   (after make; run from the repo root)
 set -u
@@ -157,6 +159,10 @@ printf 'version: 2\nmote_types:\n  - { name: a, board: nrf52840-dongle, firmware
 "$CNGSIM" run "$WORK/dongle.yaml" --duration 1s -q >/dev/null 2>&1 \
     && ok "board: nrf52840-dongle on a .nrf52840 image" || bad "board: nrf52840-dongle on a .nrf52840 image"
 expect2 "a duration without a unit" "$CNGSIM" run hello-sky -t 10
+expect2 "a duration longer than a run can simulate (720h)" "$CNGSIM" run hello-sky --duration 720h
+expect2 "a duration under 1 ms" "$CNGSIM" run hello-sky --duration 0.0004s
+expect2 "test_runner -t beyond an int" "$RUNNER" multinode "$ROOT/firmware/sky/hello-world.sky" -t 3000000000
+expect2 "test_runner -t that is no number" "$RUNNER" multinode "$ROOT/firmware/sky/hello-world.sky" -t 12x
 expect2 "rpl-udp with more nodes than the server answers" "$CNGSIM" new rpl-udp -n 17 -o "$WORK/x.yaml"
 expect2 "nullnet with one node (nothing to receive from)" "$CNGSIM" new nullnet -n 1 -o "$WORK/x.yaml"
 sed -e 's/node: 2 }/node: 77 }/' -e "s#\.\./firmware/#$ROOT/firmware/#g" \
@@ -188,6 +194,29 @@ if [ "$rc" = 130 ] && grep -q '^INTERRUPTED' "$WORK/intv.out"; then
 else
     bad "-v Ctrl-C: exit $rc, '$(tail -1 "$WORK/intv.out")'"
 fi
+
+echo "== README platform table vs cngsim boards"
+"$CNGSIM" boards > "$WORK/boards.out" 2>&1
+awk '/^## Supported platforms/ { t = 1; next } /^## / { t = 0 } t && /^\| `\./' "$ROOT/README.md" \
+    > "$WORK/readme-rows.txt"
+# Each extension a row names must load, as the board `check` reports for it;
+# together they must cover every board in the registry.
+: > "$WORK/covered.txt"
+for ext in $(grep -oE '`\.[a-z0-9-]+`' "$WORK/readme-rows.txt" | tr -d '`.' | sort -u); do
+    : > "$WORK/image.$ext"
+    printf '{ "version": 2, "mote_types": [ { "name": "t", "firmware": "%s" } ], "nodes": [ { "type": "t" } ] }\n' \
+        "$WORK/image.$ext" > "$WORK/ext.json"
+    if "$CNGSIM" check "$WORK/ext.json" > "$WORK/ext.out" 2>&1; then
+        board=$(tail -1 "$WORK/ext.out" | awk '{ print $2 }')
+        echo "$board" >> "$WORK/covered.txt"
+        ok "README .$ext loads as $board"
+    else
+        bad "README .$ext: $(head -1 "$WORK/ext.out")"
+    fi
+done
+for b in $(awk 'NR > 1 && NF == 0 { exit } NR > 1 { print $1 }' "$WORK/boards.out"); do
+    grep -qxF "$b" "$WORK/covered.txt" || bad "board $b (cngsim boards) has no README row"
+done
 
 echo
 if [ "$fails" -eq 0 ]; then echo "check-cngsim: OK"; else echo "check-cngsim: $fails failed"; fi

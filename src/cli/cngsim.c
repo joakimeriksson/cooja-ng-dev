@@ -27,6 +27,7 @@
 #include "csim_version.h"
 #include "sim_board.h"
 #include "sim_config.h"
+#include "sim_registry.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -382,6 +383,11 @@ static void stdout_line(int out, char *line) {
         if (!F.quiet) out_fmt(out, "%s\n", line);
         return;
     }
+    /* The energest plugin's end-of-run report: the setup asked for it. */
+    if (strncmp(t, "energest: ", 10) == 0) {
+        if (!F.quiet) out_fmt(out, "%s\n", t);
+        return;
+    }
     /*   TEST step 2 PASS: "Received response" matched 3/3 (node 2, 37083 ms) */
     {
         int step;
@@ -534,7 +540,8 @@ static void *filter_thread(void *p) {
 /* A simulated duration, which must carry its unit: "60s", "500ms", "2m".
  * A bare number is refused rather than guessed — test_runner's -t takes
  * milliseconds and --wall-timeout seconds, so "-t 10" would be 10 ms to one
- * reader and 10 s to the next.  -2 = a number without a unit. */
+ * reader and 10 s to the next.  -2 = a number without a unit; -3 = less
+ * than 1 ms or more than the INT_MAX ms (24.8 days) a run can simulate. */
 static int parse_duration_ms(const char *s, long *ms) {
     char *end;
     double v = strtod(s, &end);
@@ -546,9 +553,13 @@ static int parse_duration_ms(const char *s, long *ms) {
     else if (strcmp(end, "m") == 0 || strcmp(end, "min") == 0) mult = 60000.0;
     else if (strcmp(end, "h") == 0) mult = 3600000.0;
     else return -1;
-    *ms = (long)(v * mult + 0.5);
+    double r = floor(v * mult + 0.5);
+    if (r < 1 || r > INT_MAX) return -3;
+    *ms = (long)r;
     return 0;
 }
+
+#define DURATION_RANGE "from 1ms to 596h (24.8 days)"
 
 /* Ctrl-C: the first one ends the run the normal way (the verdict, the exit
  * code, --save-config); a second one, if that hangs, ends cngsim at once. */
@@ -612,6 +623,10 @@ static int cmd_run(int argc, char **argv) {
             if (dr == -2) {
                 fail("run: %s %s: give the unit, e.g. %ss or %sms", a, argv[i],
                      argv[i], argv[i]);
+                return EXIT_INVALID;
+            }
+            if (dr == -3) {
+                fail("run: %s %s: a run simulates " DURATION_RANGE, a, argv[i]);
                 return EXIT_INVALID;
             }
             if (dr != 0) {
@@ -937,6 +952,28 @@ static int cmd_check(int argc, char **argv) {
     if (cfg.bundled_fallback[0])
         fprintf(stderr, "%s: note: %s is not next to the setup, so the bundled "
                 "firmware is used (as for the examples)\n", argv[0], cfg.bundled_fallback);
+    /* Plugins as the runner resolves them: a path must be readable, a bare
+     * or "builtin:" name must be a compiled-in service. */
+    static sim_registry_t reg;
+    if (!reg.service_count) csim_register_builtin_services(&reg);
+    for (int p = 0; p < cfg.plugin_count; p++) {
+        const char *entry = cfg.plugins[p];
+        size_t len = strlen(entry);
+        if (!len) continue;
+        if (strchr(entry, '/') || (len > 3 && strcmp(entry + len - 3, ".so") == 0)) {
+            if (access(entry, R_OK) != 0) {
+                fprintf(stderr, "%s: cannot read plugin %s\n", argv[0], entry);
+                bad++;
+            }
+        } else {
+            const char *name = strncmp(entry, "builtin:", 8) == 0 ? entry + 8 : entry;
+            if (!sim_registry_find_service(&reg, name)) {
+                fprintf(stderr, "%s: unknown plugin '%s' (not a built-in service, "
+                        "and not a path to a .so)\n", argv[0], name);
+                bad++;
+            }
+        }
+    }
     if (cfg.has_js_script && cfg.js_script_path[0] && access(cfg.js_script_path, R_OK) != 0) {
         fprintf(stderr, "%s: cannot read js_script %s\n", argv[0], cfg.js_script_path);
         bad++;
@@ -999,6 +1036,18 @@ static const template_t *find_template(const char *name) {
     for (size_t i = 0; i < sizeof(templates) / sizeof(templates[0]); i++)
         if (strcmp(templates[i].name, name) == 0) return &templates[i];
     return NULL;
+}
+
+/* The bundled image for one role of a template on a board, in `out`: the
+ * board's UART-console build when it has one (the dongle's plain hello-world
+ * prints over native USB, which the simulator does not model).  Returns 0 if
+ * the board has no usable image. */
+static int template_image(const char *data, const char *board, const template_t *tp,
+                          int r, char *out, size_t outsz) {
+    snprintf(out, outsz, "%s/firmware/%s/%s-uart.%s", data, board, tp->images[r], board);
+    if (is_file(out)) return 1;
+    snprintf(out, outsz, "%s/firmware/%s/%s.%s", data, board, tp->images[r], board);
+    return is_file(out);
 }
 
 /* What `new` writes: the template, the board's bundled images and the
@@ -1179,6 +1228,10 @@ static int cmd_new(int argc, char **argv) {
                 fail("new: --duration %s: give the unit, e.g. %ss", v, v);
                 return EXIT_INVALID;
             }
+            if (dr == -3) {
+                fail("new: --duration %s: a run simulates " DURATION_RANGE, v);
+                return EXIT_INVALID;
+            }
             if (dr != 0) {
                 fail("new: bad duration '%s' (try 120s, 5m)", v);
                 return EXIT_INVALID;
@@ -1257,16 +1310,14 @@ static int cmd_new(int argc, char **argv) {
     char fw[2][PATH_MAX];
     for (int r = 0; r < 2 && tp->roles[r]; r++) {
         char img[PATH_MAX + 256];
-        snprintf(img, sizeof(img), "%s/firmware/%s/%s.%s", data, board, tp->images[r], board);
-        if (!is_file(img)) {
+        if (!template_image(data, board, tp, r, img, sizeof(img))) {
             char have[512] = "";
             for (int k = 0;; k++) {
                 const sim_board_desc_t *b = sim_board_at(k);
                 if (!b) break;
                 if (!b->name || strstr(have, b->name)) continue;
                 char p[PATH_MAX + 256];
-                snprintf(p, sizeof(p), "%s/firmware/%s/%s.%s", data, b->name, tp->images[r], b->name);
-                if (is_file(p)) {
+                if (template_image(data, b->name, tp, r, p, sizeof(p))) {
                     strncat(have, have[0] ? ", " : "", sizeof(have) - strlen(have) - 1);
                     strncat(have, b->name, sizeof(have) - strlen(have) - 1);
                 }
@@ -1521,10 +1572,14 @@ static void help_run(void) {
         "  --ui [PORT]           watch it in the browser (http://127.0.0.1:8080/): it\n"
         "                        opens paused, at real time; --start runs at once,\n"
         "                        --no-open does not open the browser\n"
-        "  --ui-edit             allow adding/removing nodes from a UI on --ui-bind\n"
+        "  --ui-bind ADDR        serve the UI on ADDR: whoever reaches it can pause,\n"
+        "                        play, set the speed, restart and move nodes\n"
+        "  --ui-edit             on --ui-bind, also add, remove and reboot nodes,\n"
+        "                        send lines and save (always on, on loopback)\n"
+        "  --paused              start paused (with --ui, --shell or --script)\n"
         "  --duration 60s, -t    simulated time, with its unit: 60s, 500ms, 2m\n"
         "  --seed N              another run, as reproducible as the first\n"
-        "  --speed N|max|realtime  pacing (headless runs are unpaced)\n"
+        "  --speed N|max|realtime  pacing (headless runs are unpaced); --realtime is 1x\n"
         "  --shell               interactive command line (docs/shell.md)\n"
         "  --script FILE         a command script with a pass/fail verdict\n"
         "  --save-config F.yaml  write the setup as it is at the end (moved/added nodes)\n"
@@ -1532,6 +1587,8 @@ static void help_run(void) {
         "  --ui-record FILE      record the run for replay in the browser\n"
         "  --plugin LIB.so       load a plugin (service or radio medium)\n"
         "  --wall-timeout DUR    give up after this much real time (exit 6)\n"
+        "  --gdb [NODE:]PORT     a GDB server on a node; --gdb-wait waits for GDB\n"
+        "  --renode [ADDR:MAIN:ASYNC]  run as Renode's clock slave; --renode-freq HZ\n"
         "  -n N                  with firmware files: the number of nodes\n"
         "  --board NAME          with firmware files: the board they run on, for an\n"
         "                        image not named <app>.<board> (cngsim boards)\n"
@@ -1562,13 +1619,21 @@ static int cmd_help(int argc, char **argv) {
     else if (argc > 0 && strcmp(argv[0], "new") == 0) help_new();
     else if (argc > 0 && strcmp(argv[0], "check") == 0)
         printf("cngsim check <sim.yaml>\n\nLoads the setup the way run would: every key known, every value\n"
-               "of the right type, every firmware image found and its board known.\n"
+               "of the right type, every firmware image found and its board known,\n"
+               "every plugin a built-in name or a readable file.\n"
                "Prints a summary and exits 0, or the problems and exits 2.\n");
     else if (argc > 0 && strcmp(argv[0], "convert") == 0)
         printf("cngsim convert <sim.csc> [-o sim.yaml] [--contiki DIR] [--firmware-dir DIR]\n\n"
                "Converts a Cooja simulation (Sky, Z1 and Cooja motes, UDGM, the test\n"
                "script) with tools/csc2json.py.  Needs python3.  The firmware must\n"
                "already be built; see docs/contiki-ng-testing.md.\n");
+    else if (argc > 0 && strcmp(argv[0], "examples") == 0)
+        printf("cngsim examples\n\nLists the bundled example simulations and where they are.  Run one\n"
+               "by name (cngsim run rpl-udp-sky), or copy it and edit the copy.\n");
+    else if (argc > 0 && strcmp(argv[0], "boards") == 0)
+        printf("cngsim boards\n\nLists the boards, their CPU and radio, and the Contiki-NG TARGET/BOARD\n"
+               "that builds for each.  An image named <app>.<board> runs as that board;\n"
+               "for any other name, add  board: <board>  to its mote type.\n");
     else help(stdout);
     return 0;
 }

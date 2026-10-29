@@ -1,7 +1,9 @@
 # Binary releases — the artifact Contiki-NG CI downloads instead of compiling us.
 #
-# Pushing a tag `v*` builds a per-platform tarball of test_runner + the three
-# runner scripts, smoke-tests THE UNPACKED TARBALL (not the build tree), and
+# Pushing a tag `v*` builds a per-platform tarball of test_runner + the
+# runner scripts the Contiki-NG suite uses, with cngsim, its examples, their
+# firmware and the guides beside them (tools/install-data.sh), smoke-tests
+# THE UNPACKED TARBALL (not the build tree), and
 # attaches everything plus SHA256SUMS to a GitHub release.  Running the
 # workflow by hand (Actions -> release -> Run workflow, or
 # `gh workflow run release.yml --ref main`) is a dry run: the same builds and
@@ -273,7 +275,7 @@ jobs:
 
               CONTIKI_DIR=/path/to/contiki-ng tools/run-cooja-tests.sh
               CONTIKI_DIR=/path/to/contiki-ng tools/run-cooja-tests.sh --with-tun   # + border-router tests (needs sudo/TUN)
-              CONTIKI_DIR=/path/to/contiki-ng tools/run-cooja-tests.sh 07-simulation-base/01-cooja-hello-world \
+              CONTIKI_DIR=/path/to/contiki-ng tools/run-cooja-tests.sh 07-simulation-base/01-hello-world-sky \
                   --seed 3 --logdir /path/to/contiki-ng/tests     # one test, one seed, .testlog beside the .csc
 
           --seed N is Cooja's --random-seed (same seed = byte-identical run);
@@ -291,7 +293,8 @@ jobs:
           Own simulations: cngsim run my-sim.yaml (YAML or JSON). Schema:
           docs/test-format.md
 
-          Requires: python3 (csc conversion), a Contiki-NG checkout, and the
+          cngsim and its examples need nothing else. The Contiki-NG suite
+          needs python3 (csc conversion), a Contiki-NG checkout, and the
           usual embedded toolchains for the firmware builds.
 
           Self-check without a Contiki-NG tree:
@@ -331,6 +334,8 @@ jobs:
           for i in $(seq 1 50); do curl -s http://127.0.0.1:8765/ > page.html && break; sleep 0.2; done
           kill -INT $!; wait || true
           grep -q '<title>Cooja-NG Simulator</title>' page.html || { echo "::error::cngsim --ui did not serve the page"; cat ui.out; exit 1; }
+          # Gate G3: the quick-start the package ships, run as written.
+          "$GITHUB_WORKSPACE/tools/check-quick-start.sh" "$pkg"
 
       # The test configs are not in the tarball, so run the unpacked binary
       # from the checkout, where configs/ and firmware/ are.

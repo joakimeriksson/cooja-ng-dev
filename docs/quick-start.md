@@ -14,8 +14,8 @@ Download a release for your machine and put its `bin/` on your PATH. On
 Linux (x86-64):
 
 ```sh
-curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.3.1/cooja-ng-v0.3.1-linux-x86_64.tar.gz | tar xz
-export PATH=$PWD/cooja-ng-v0.3.1-linux-x86_64/bin:$PATH
+curl -L https://github.com/mikroverk/cooja-ng/releases/download/v0.4.0/cooja-ng-v0.4.0-linux-x86_64.tar.gz | tar xz
+export PATH=$PWD/cooja-ng-v0.4.0-linux-x86_64/bin:$PATH
 cngsim --version
 ```
 
@@ -46,7 +46,7 @@ cngsim run rpl-udp-sky
 and sends it a UDP request every ten seconds or so; node 1 answers each one:
 
 ```
-cooja-ng 0.3.1 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
+cooja-ng 0.4.0 · RPL-UDP on two Tmote Skys · 2 nodes · seed 42 · 120 s
     ...
     9.423 [Node 2/MSP430] [INFO: App       ] Not reachable yet
    19.000 [Node 2/MSP430] [INFO: App       ] Sending request 0 to fd00::212:7401:1:101
@@ -97,6 +97,16 @@ slider goes faster. Things to try:
 When the checks have passed, or the simulated time is up, the simulation
 pauses and the terminal says so. Play runs on; Ctrl-C ends the run with its
 verdict.
+
+The UI takes commands, so it listens on loopback only and refuses WebSocket
+connections from other sites' pages. `--ui-bind 0.0.0.0` (or one IPv4
+address) makes it reachable from the network. It also turns off the Host
+check that stops DNS rebinding, so any web page open in your own browser can
+drive the run too, even with the port firewalled. Anyone who reaches such a
+UI can pause, play, change the speed, restart the run and move nodes. Adding,
+removing and rebooting nodes, sending a node a line, and Save also need
+`--ui-edit` (on loopback they are always on). With `--ui-edit`, Save sends
+the setup, file paths included, to every page connected at the time.
 
 ## 4. Make your own setup
 

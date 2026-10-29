@@ -36,7 +36,7 @@ export CONTIKI_DIR=/path/to/contiki-ng
 tools/run-cooja-tests.sh                                  # all non-TUN tests (85 in 5.2)
 tools/run-cooja-tests.sh --with-tun                       # all 93, incl. border-router (needs TUN: sudo or setcap on tunslip6)
 tools/run-cooja-tests.sh 14-rpl-lite                      # one category
-tools/run-cooja-tests.sh 07-simulation-base/01-cooja-hello-world   # one test
+tools/run-cooja-tests.sh 07-simulation-base/01-hello-world-sky   # one test
 tools/run-cooja-tests.sh 14-rpl-lite -v                   # show each test's output
 ```
 
@@ -47,6 +47,17 @@ arguments; `--no-build` to skip, `--clean` to force — shipped prebuilt images
 are kept), runs the
 simulation with the test's JavaScript attached, and prints `PASS`/`FAIL` per
 test plus a summary.
+
+All 93 tests pass: the 85 headless ones, and with `--with-tun` and root the 8
+`17-tun-rpl-br/*` cases. That covers all 27 of `07-simulation-base/*`
+(RPL-Lite, TSCH, Orchestra, multicast, IPv6, stack guard, data structures)
+including `26-tsch-drift-z1`, all of `09-ipv6/*`, `13-ieee802154/*`,
+`14-rpl-lite/*` and `15-rpl-classic/*` (with the 28-hour DAG stability
+tests), and the three EDHOC tests in `21-security-protocols/*`. The TUN cases
+run against a real `tun0` and `tunslip6`, including `10-native-nat64-cooja`
+(UDP and TCP echo through the NAT64 gateway) and
+`09-native-border-router-cooja-frag` (see the serial-socket note under
+[Troubleshooting](#8-troubleshooting)).
 
 ## 3. Seeds
 
@@ -99,7 +110,7 @@ no result that is green by accident:
 | TUN tests without `--with-tun`; missing firmware with `--no-build` | `SKIP` — the only two, and both are explicit opt-outs |
 
 When a new upstream `.csc` uses a feature Cooja-NG lacks, the fix is to add
-real support or port that test to Cooja-NG's native JSON config — never to
+real support or port that test to a Cooja-NG setup file (YAML or JSON) — never to
 loosen the check. `csc2json.py --lax` exists for local exploration and must not
 be used in CI.
 
@@ -221,7 +232,7 @@ green over enough PR traffic, drop `continue-on-error` and it is the gate.
 
 - **`ERROR … (conversion failed): unsupported radio medium class …`** — the
   test needs something Cooja-NG does not implement. Add support, or port the
-  test to a native JSON config ([`test-format.md`](test-format.md)). Do not
+  test to a Cooja-NG setup file ([`test-format.md`](test-format.md)). Do not
   use `--lax` in CI.
 - **`ERROR … (firmware build failed)`** — the Contiki-NG build for that
   target failed; run `tools/build-test-firmware.sh --from-json …` or the
@@ -230,3 +241,18 @@ green over enough PR traffic, drop `continue-on-error` and it is the gate.
   `sudo setcap cap_net_admin+eip tools/serial-io/tunslip6` once.
 - **Two runs differ** — they should not with the same seed. That is a bug in
   Cooja-NG; report it with both `.testlog`s.
+- **The serial socket delays mote→host bytes by 40 ms of wall-clock time**
+  (`CSIM_SERIAL_TX_LATENCY_MS`; `0` turns it off). This is deliberate. Without
+  it, `border-router.native` deadlocks and
+  `17-tun-rpl-br/09-native-border-router-cooja-frag` fails with 100% packet
+  loss. SLIP has no flow control, so Contiki waits a fixed 31 ms
+  (`SLIP_DEV_CONF_SEND_DELAY`) with a passive `struct timer` that the
+  sleeping native platform cannot see, against a 1 s `SELECT_TIMEOUT`. A
+  reply that lands inside that 31 ms uses up the router's only early wake-up
+  while it may not flush yet, so it sleeps a full second per fragment and its
+  2048-byte queue overflows. Measured flush→reply latency: Cooja-NG 0.2–26.5
+  ms (0 of 13 above 31 ms; the router dies), Java Cooja 0.0–47.3 ms (5 of 14
+  above; it passes, but stalls a second each time it loses the race). The
+  delay models the USB-CDC link a real slip-radio sits behind, which is what
+  makes Contiki's 31 ms work on hardware. When it can go is written down in
+  `src/sim/sim_serial_bridge.c`.

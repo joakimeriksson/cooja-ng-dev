@@ -109,10 +109,10 @@ flowchart TB
 
     %% ---- Tests ----
     subgraph TST["test/ — build/test_runner"]
-        T1["correctness / arm-correctness<br/>(72 + 224 insn tests)"]
+        T1["correctness / arm-correctness<br/>(87 + 557 insn tests)"]
         T2["firmware / arm-firmware"]
         T3["multinode / arm-multinode / nrf*-multinode<br/>zoul-firefly-multinode (mixed MSP430+ARM)"]
-        T4["bench • timeline (76) • radio-medium (241)<br/>radio-bus (120) • cc1200-mock-host (73)"]
+        T4["bench • timeline (76) • radio-medium (250)<br/>radio-bus (212) • cc1200-mock-host (73)"]
     end
 
     %% ---- Edges ----
@@ -174,7 +174,78 @@ flowchart TB
   timing polls receiving_packet() while a frame is in flight), BATCH (JS).
 - **Timeline + WebSocket are observation-only.** They subscribe to the kernel
   observer stream; removing them doesn't change simulation outcomes.
-- **JIT is MSP430-only**, optional, gated on GNU Lightning at build time.
+- **The JITs are optional**, gated on GNU Lightning at build time: MSP430
+  ALU blocks, and ARM Thumb-16 blocks. Both are cycle-exact, so output is the
+  same with them on or off.
+
+## Ports and adapters
+
+Structurally Cooja-NG is a ports-and-adapters (hexagonal) design. A small
+simulation **kernel** — `sim_runtime_t` (clock, unified event queue, radio
+bus, mote slots) plus the service host and the radio medium — is the core,
+and it depends on nothing concrete: it talks only to a handful of narrow
+vtable **ports**, and everything platform- or feature-specific is an
+**adapter** behind one of them.
+
+| Port (interface) | Adapters (implementations) |
+|---|---|
+| `sim_mote_ops_t` — "a node" | MSP430-ELF, ARM-ELF (CC2538/Firefly/nRF52840/nRF54L15/CC13x2), native Cooja mote, JS app mote, Renode device |
+| `sim_service_ops_t` — "an observer/feature" | timeline, pcap, progress, gdb, websocket-UI, energest, shell, JSON/JS test engines |
+| `sim_medium_ops_t` — "a propagation policy" | UDGM, NONE, and plugin media |
+| `sim_host_t` — chip→host callbacks | the runner's radio channel/power/byte hooks |
+| `csim_api` (`csim_plugin.h`) — the dlopen boundary | external `.so` plugins (service / medium / UI panel) |
+| `sim_observer_event_t` — the outbound event stream | anything that subscribes |
+
+The enforced rule is **dependency inversion**: the kernel never branches on
+a node's type — *"add an op, don't `switch` on `NODE_MSP430`"* — so the
+runner includes no chip headers, and a new SoC, radio policy, feature or
+plugin slots in by implementing a port, not by editing the core. The plugin
+ABI is the strictest port: a plugin reaches the host *only* through the
+passed vtable, never a kernel struct. (Pragmatic C, not dogma: the kernel
+exposes a concrete `sim_runtime_t` rather than an opaque handle, and the
+`test_runner` frontend is still a fat driving adapter — but the dependency
+arrows point inward.) The staged refactor that established this boundary is
+in [`design/refactor-plan.md`](design/refactor-plan.md).
+
+**Two time domains.** Every CPU tracks `cycles` (the unit the interpreter
+advances) and `sim_time_ns` (the unit peripherals and the other nodes use).
+They are reconciled at three points: before each event callback, at the end
+of `*_step_until()`, and inside `*_set_frequency()` on DCO calibration. That
+is what lets one node speed up after DCO calibration while another is still
+booting, or an MSP430 and a CC2538 at different clock rates share a medium.
+
+**Hot path.** No ns conversion or floating point: events are scheduled in
+cycles, and ns-based events are converted once when scheduled and again only
+on a frequency change.
+
+```
+fetch -> dispatch via computed goto (or JIT block)
+      -> execute, update regs/flags/cycles
+      -> if (cycles >= next_event_cycle) execute_events()
+      -> if (interrupts pending && GIE) service_interrupt()
+```
+
+**Per-byte RF delivery** is the key fidelity choice: receivers get one byte
+at a time, at the ns it arrives, rather than whole frames at once. Frames
+route by `(band, channel)` per radio, so 2.4 GHz and sub-GHz networks
+coexist and TSCH channel hops change what each receiver hears. See
+[`radio-medium.md`](radio-medium.md), and
+[`porting-a-device.md`](porting-a-device.md) §8 for the chip-driver event
+model.
+
+## Environment variables
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MSPSIM_JIT_THRESHOLD` | `100` | Executions of a basic block before the MSP430 JIT compiles it |
+| `MSPSIM_JIT_INBLOCK_CHECKS` | `1` | IRQ/event checks inside MSP430 JIT blocks (needed for tight timer loops; `0` for maximum throughput) |
+| `CSIM_TRACE_TSCH_ACK` | unset | CC2420 ACK timing trace for TSCH debugging |
+| `CSIM_TRACE_EVENT_SPIN` | unset | Warn about same-time event spin loops in the kernel |
+| `NRF54L_RADIO_TRACE` | unset | nRF54L15 RADIO state/event/INTENSET trace; `NRF54L_RADIO_NODE=<cpu-tag>` filters it |
+| `CONTIKI_DIR` | `../contiki-ng` | The Contiki-NG checkout `make cooja-tests` and `tools/build-test-firmware.sh` use |
+
+The ARM JIT, TrustZone and per-SoC trace variables are listed in
+[`CLAUDE.md`](../CLAUDE.md).
 
 ## File inventory
 
@@ -223,8 +294,8 @@ are already tabled in `CLAUDE.md`. The rest of the tree:
 | File | Purpose |
 |------|---------|
 | `test_main.c` | Dispatcher for all subcommands (`correctness`, `bench`, `firmware`, `multinode`, `arm-correctness`, `arm-firmware`, `arm-multinode`, `zoul-firefly-multinode`, `nrf52840-{dk,dongle}-multinode`, `nrf54l15-dk-multinode`, `nrf54l15-spim`, `mx25r6435f-mock-host`, `enc28j60-mock-host`, `mixed-multinode`, `test`, `cc1200-mock-host`, `radio-medium`, `radio-bus`, `timeline`) |
-| `test_correctness.c` | 72 MSP430 instruction-level correctness tests (port of MSPSim's `CorrectnessTests.java`) |
-| `test_arm_correctness.c` | 224 ARM instruction-level tests — Thumb/Thumb-2, M4 DSP + FPv4-SP VFP, ARMv8-M (M33) load-acquire/store-release, plus **71 TrustZone-M tests** (SAU/IDAU attribution, SAU MMIO, access enforcement, TT, SG/BXNS, SecureFault, `NVIC_ITNS`, transition counters, BLXNS/FNC_RETURN) |
+| `test_correctness.c` | 87 MSP430 instruction-level correctness tests (port of MSPSim's `CorrectnessTests.java`) |
+| `test_arm_correctness.c` | 557 ARM instruction-level tests — Thumb/Thumb-2, M4 DSP + FPv4-SP VFP, ARMv8-M (M33) load-acquire/store-release, plus **333 TrustZone-M tests** (SAU/IDAU attribution, SAU MMIO, access enforcement, TT, SG/BXNS, SecureFault, `NVIC_ITNS`, transition counters, BLXNS/FNC_RETURN) |
 | `test_benchmark.c` | MSP430 micro-benchmarks + firmware benchmarks (port of `PerformanceBenchmark.java`) |
 | `test_firmware.c` | MSP430 firmware boot tests; loads ELF, monitors USART output |
 | `test_arm_firmware.c` | ARM firmware boot tests; loads CC2538 / zoul-firefly ELF, monitors UART banner |
@@ -234,8 +305,8 @@ are already tabled in `CLAUDE.md`. The rest of the tree:
 | `test_nrf54l15_spim.c` | 90 nRF54L15 SPIM register-model tests (mock host, EasyDMA over a byte array) |
 | `test_mx25r6435f.c` | 49 MX25R6435F serial-flash chip tests (mock host, no CPU) |
 | `test_enc28j60.c` | 47 ENC28J60 Ethernet-controller chip tests (mock host, no CPU) |
-| `test_radio_medium.c` | 241 radio-medium routing / range / interference tests |
-| `test_radio_bus.c` | 120 `sim_radio_bus` frame-assembly / delivery-mode / auto-ACK tests |
+| `test_radio_medium.c` | 250 radio-medium routing / range / interference tests |
+| `test_radio_bus.c` | 212 `sim_radio_bus` frame-assembly / delivery-mode / auto-ACK tests |
 | `test_timeline.c` | 76 unit tests for timeline ring buffer, serialization, sub-ms timestamp precision |
 
 ### `tools/` — scripts (selected)

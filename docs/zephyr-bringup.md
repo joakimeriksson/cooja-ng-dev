@@ -26,9 +26,9 @@ standard ELF32 ARM image and loads exactly like a Contiki one.
 
 ## Build environment (set up on this machine, 2026-06-15)
 
-- Zephyr workspace: `/Users/joakimeriksson/work/zephyrproject` (Zephyr v4.2,
+- Zephyr workspace: `~/zephyrproject` (Zephyr v4.2,
   `modules/hal/nordic` present, board `nrf52840dk/nrf52840`).
-- Python venv: `/Users/joakimeriksson/work/zephyrproject/.venv` (python3.12;
+- Python venv: `~/zephyrproject/.venv` (python3.12;
   `west` + Zephyr `scripts/requirements.txt`). System python3.9 is too old for
   Zephyr 4.2 deps — use 3.10+.
 - Host tools via Homebrew: `cmake ninja dtc` (+ `coreutils` for `gtimeout`).
@@ -39,7 +39,7 @@ standard ELF32 ARM image and loads exactly like a Contiki one.
 
 ```sh
 # Build Zephyr hello_world for the nRF52840 DK
-cd /Users/joakimeriksson/work/zephyrproject
+cd ~/zephyrproject
 ZEPHYR_TOOLCHAIN_VARIANT=gnuarmemb GNUARMEMB_TOOLCHAIN_PATH=/opt/homebrew \
   .venv/bin/west build -p always -b nrf52840dk/nrf52840 \
   zephyr/samples/hello_world -d /tmp/zephyr-hello-nrf52840

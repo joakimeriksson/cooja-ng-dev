@@ -1,8 +1,21 @@
 # Release 0.3.1: Cooja-NG for people
 
-Status: **implemented (2026-10-21)**, on branch `feat/cngsim`: U1–U9, with
-the deviations below.  Decisions in §10 taken 2026-10-21; the binding ones
-are in the refactor plan's Decisions Log.
+Status: **shipped in 0.4.0 (2026-10-28)**, not 0.3.1: the release also
+removes four boards and turns several silent config surprises into load
+errors, which the CHANGELOG's own rule makes a minor release.  U1–U8 are
+implemented (#79), with the deviations below; U9's docs, CHANGELOG and
+`CSIM_VERSION` landed with the release.  **Gate G3** landed with it too:
+`tools/check-quick-start.sh` runs the quick-start's commands as written, from
+an empty directory against a package laid out as the tarball is, and checks
+its transcripts against what the package prints; `test.yml` runs it on every
+PR and the release smoke test on the unpacked tarball.  So did the rest of
+§8.2: the README platform table is checked against `cngsim boards` in
+`check-cngsim.sh`, `--pcap`, `--plugin` and `-d` are documented
+(`--help`, `cngsim help run`, `test-format.md`), `scripts/csc2json.py` is
+gone, and the site's Get started list begins with Install.  Decisions in §10 taken 2026-10-21; the binding ones are in
+the refactor plan's Decisions Log.  The plan keeps its file name so links
+to it stay good; "0.3.1" below is the plan as written, and "0.4" in §6.4
+and §7 now means the release after this one.
 
 **Where the implementation differs from this plan:**
 - **The runner stays in `test/`.**  `cngsim` links

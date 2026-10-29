@@ -86,13 +86,21 @@ int sim_control_reboot(sim_control_t *c, int node_id, unsigned flags) {
 int sim_control_add(sim_control_t *c, const char *fw_or_type,
                     const char *secure_fw, int node_id,
                     double x, double y, unsigned flags) {
-    if (!c || !fw_or_type || !c->ops.add) return -1;
-    if (sim_control_index_of_id(c, node_id) >= 0) return -1;  /* id in use */
+    if (!c || !fw_or_type) return -1;
     const char *fw = NULL, *sfw = NULL;
     if (c->ops.firmware_for_type)
         fw = c->ops.firmware_for_type(c->ops.user, fw_or_type, &sfw);
-    if (!fw) { fw = fw_or_type; sfw = secure_fw; }
-    int idx = c->ops.add(c->ops.user, fw, sfw, node_id);
+    if (fw)
+        return sim_control_add_typed(c, fw_or_type, fw, sfw, node_id, x, y, flags);
+    return sim_control_add_typed(c, NULL, fw_or_type, secure_fw, node_id, x, y, flags);
+}
+
+int sim_control_add_typed(sim_control_t *c, const char *type_name,
+                          const char *fw, const char *sfw, int node_id,
+                          double x, double y, unsigned flags) {
+    if (!c || !fw || !c->ops.add) return -1;
+    if (sim_control_index_of_id(c, node_id) >= 0) return -1;  /* id in use */
+    int idx = c->ops.add(c->ops.user, fw, sfw, node_id, type_name);
     if (idx < 0) return -1;
     if ((x != 0.0 || y != 0.0) && c->ops.set_position)
         c->ops.set_position(c->ops.user, idx, x, y);

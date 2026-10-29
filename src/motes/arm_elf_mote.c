@@ -753,7 +753,9 @@ static void arm_mote_destroy(sim_mote_t *m) {
 static void arm_mote_reset_time(sim_mote_t *m, int64_t now_ns) {
     arm_cpu_t *cpu = &MOTE_IMPL(m)->plat.arm.cpu;
     cpu->sim_time_ns = now_ns;
-    cpu->cycles = now_ns * cpu->cpu_freq_hz / 1000000000LL;
+    /* Split as cpu_ns_to_cycles does: now_ns * freq overflows an int64
+     * past 72 s at 128 MHz, and a reboot or add from the UI gets there. */
+    cpu->cycles = cpu_ns_to_cycles(now_ns, cpu->cpu_freq_hz);
 }
 
 /* GPIO input from outside: CC2538 latches the level and raises the edge
@@ -794,10 +796,14 @@ static void arm_mote_ui_leds(const sim_mote_t *m, uint8_t leds[3]) {
     arm_platform_t *plat = &MOTE_IMPL(m)->plat.arm;
     cc2538_soc_t *soc = arm_platform_cc2538(plat);
     if (soc) {
-        uint32_t pc_data = soc->gpio.ports[2].data;
-        leds[0] = (pc_data >> 0) & 1;  /* red */
-        leds[1] = (pc_data >> 1) & 1;  /* yellow */
-        leds[2] = (pc_data >> 2) & 1;  /* green */
+        /* The board's LED pins: PC0-2 on the CC2538DK, PC4/6/7 on the
+         * OpenMote, PD5/4/3 on the Firefly. */
+        const arm_platform_config_t *cfg = plat->config;
+        for (int i = 0; i < 3; i++) {
+            const arm_gpio_pin_t *led = &cfg->leds[i];
+            uint32_t data = led->port < CC2538_GPIO_NUM_PORTS ? soc->gpio.ports[led->port].data : 0;
+            leds[i] = (uint8_t)(((data >> led->pin) & 1u) ^ (led->active_low ? 1u : 0u));
+        }
         return;
     }
     cc13x2_soc_t *c13 = arm_platform_cc13x2(plat);

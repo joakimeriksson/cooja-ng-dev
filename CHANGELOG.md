@@ -7,6 +7,26 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-29
+
+Cooja-NG for people who did not build it. `cngsim` takes a download to a
+running simulation in three commands, with commented examples, layouts that
+place many nodes at once, and a web UI that edits the running network and
+saves it as YAML. The same C code runs in the browser on the original
+firmware ELFs, held to the native build byte for byte, behind the site's
+live demos. Two TI SimpleLink LaunchPads join (CC1352R1 and CC1312R7, checked
+against hardware), Contiki-NG talks to Zephyr and to RIOT in two interop
+demos, and four boards without a radio model leave. Configs are checked
+harder: an image whose board cannot be told, a duplicate id, too many mote
+types or a plugin that is not there is an error now rather than a quiet
+surprise, so read *Changed* before upgrading. The plugin API (version 3) and
+the files Contiki-NG's CI uses are unchanged; plugins that read
+`radio_medium_t` fields directly must be rebuilt (*Changed*).
+
+Contributors to this release: @nfi (warnings as errors, and reviews of the
+CC13x2 boards, `cngsim`, the browser build, the engine timing fixes and the
+board removal), and @nvt (reviews of `cngsim` and the browser build).
+
 ### Changed — check these before upgrading
 - **An unknown or missing firmware extension is an error**, in `cngsim`
   and `test_runner` alike: exit 2 before anything starts, naming the file.
@@ -18,10 +38,46 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 - **`test_runner` with no arguments, or an unknown mode, exits 2** with its
   usage on stderr.  An unknown mode used to run nothing and exit 0.
   `--help` prints the usage, now listing every mode and option.
-- **More than 16 mote types, or more nodes than the limit, is a load
+- **More than 16 mote types, or more nodes than the limit (128), is a load
   error.**  Mote types beyond 8 used to be dropped without a word.  A v1
   config is held to it too, counting each distinct firmware image as a
   type: one with 17 images loaded, and the file Save wrote from it did not.
+  On the command line `-n` over 128, or more than 128 firmware images, is
+  refused the same way; it used to run 128 nodes under a banner naming more.
+- **Durations outside 1 ms to 24.8 days are refused** (exit 2): `-t`,
+  `--duration`, a config's `timeout_ms` and a test step's.  `-t` took
+  `atoi`'s word, so `abc` was 0 and `3000000000` wrapped to a negative run
+  that ended at once, and `cngsim run --duration 720h` reported DONE at
+  0 s; a config's `timeout_ms` of 3000000000 was cut to 24.8 days and 1.5
+  to 1 without a word.  `-t` takes whole milliseconds only.
+- **A plugin that cannot be loaded, or a medium no plugin provides, is an
+  error** (exit 2, before the run starts), from `--plugin`, a config's
+  `plugins` list or its `medium`.  A misspelt built-in name (`energist`)
+  used to print one line and run without it, and an unknown medium ran on
+  the default UDGM.  `cngsim check` reports an unknown built-in name and an
+  unreadable plugin path too.
+- **With `--ui`, a test verdict no longer ends the run.**  It is printed when
+  it is decided and the run continues until the UI ends it (or
+  `--wall-timeout`); the full report still comes at the end.  A script that
+  relied on `--ui` exiting at the verdict now runs until it is stopped.
+  Headless and `--ui-record` runs are unchanged (*Fixed* has the details).
+- **Firmware paths are looked up next to the config first** (*Added*): a
+  name that exists both there and in the current directory now gives the
+  file next to the config.
+- **libcsim: changed signatures and layouts.**  `sim_board_for_path`
+  returns NULL for an unknown extension instead of the Sky board;
+  `sim_config_write_yaml` takes the directory to write paths relative to,
+  the `sim_control` ops' `save_config` a `for_page` flag and `add` the
+  mote type's name (`sim_control_add_typed` names it apart from the
+  images);
+  `msp430_config_find`, `msp430f149_config` and `cc430f5137_config` are
+  gone with their boards.  `sim_normalized_config_t` (16 mote types, node
+  `name`, `meta` and relative paths), `arm_cpu_t` (96 IO windows,
+  `io_width`) and `radio_medium_t` (the frame tracker's `tail`) changed
+  layout, so code built against them, including a medium plugin that reads
+  `radio_medium_t` fields rather than calling its accessors, must be
+  rebuilt.  The plugin headers (`csim_plugin.h`, `sim_service.h`,
+  `sim_observer.h`) are unchanged and `CSIM_PLUGIN_API_VERSION` stays 3.
 - **Two nodes with the same id is a load error**, including an explicit id
   equal to the one an unnumbered node is given.  They used to share an
   address and a console label.
@@ -29,13 +85,27 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   clang, and `-Werror` is on by default; `make WERROR=0` drops it for a
   compiler that reports something new. The vendored QuickJS header is a
   system include (`-isystem`), so its function-pointer cast no longer warns
-  in every file that includes `js_node.h`. `make debug -jN` no longer races
-  `clean` against the compile.
+  in every file that includes `js_node.h`.
 - **A PR that moves a simulation on purpose says which workloads.** A
   `baseline-moves: shell54` line in its description lets the
   `byte-identity vs main` job pass when exactly those workloads differ;
   any other difference, or a named workload that does not move, still
   fails it. `tools/check-baseline.sh` takes the list as `MOVED`.
+- **Simulation output moves relative to 0.3.0** where a model was fixed
+  (*Fixed* below), so a baseline recorded with 0.3.0 differs in these
+  places; of the nine `check-baseline` workloads only shell54 moves:
+  - a timed config action applies at its time: shell54's `send` lands at
+    2000 ms instead of 2007 ms;
+  - console input to an idle ARM node runs at the time it arrives, and
+    wakes the node;
+  - nRF52840 UARTE input keeps the first byte of a line, which arrives one
+    byte time after the ENDRX acknowledgement;
+  - an ARM core in WFI with no event queued sleeps to the slice horizon;
+  - radio-bus frames too long for the old 160-byte queue entry (a CC1200
+    frame over about 150 bytes) reach a busy receiver whole, and a frame
+    whose length cannot be read no longer holds up the queue;
+  - the 802.15.4g frame tracker takes each frame's own channel and counts
+    the CC1200's trailing CRC bytes with it.
 
 ### Added
 - **`cngsim`, the command for people** (`docs/quick-start.md`).  `cngsim run
@@ -54,9 +124,10 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `new rpl-udp` takes up to 16 nodes.
 - **Edit a running simulation in the web UI**: add nodes of the setup's
   mote types, remove and reboot nodes, send a line to a node's console,
-  and save the setup as YAML.  On by default on a loopback UI; a UI on
-  `--ui-bind` is look-only unless `--ui-edit` is given.  The browser never
-  names a file.
+  and save the setup as YAML.  On by default on a loopback UI; a UI bound
+  to another address with `--ui-bind` needs `--ui-edit` for these (anyone
+  who reaches it can still pause, play, change the speed, restart and move
+  nodes).  The browser never names a file.
 - **Layouts**: a node entry with `count` and `layout` (`grid`, `line`,
   `circle`, `random`) places many nodes, as Cooja's Add-motes dialog does.
 - **`board:` on a mote type** names the board, so Contiki-NG's `.nrf`,
@@ -73,13 +144,25 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   directory and from an installed binary.  A `ui/index.html` in the
   current directory still wins, and `CSIM_UI_PAGE` names another.
 - **Twelve commented example simulations** (`examples/`), runnable by name.
+- **The quick start is a test** (`tools/check-quick-start.sh`): every
+  command in `docs/quick-start.md` runs as written, from an empty directory
+  against a package laid out as the release tarball, and the output it
+  shows must be what the package prints. It runs on every PR and on each
+  release's unpacked tarball, beside a check that the README's platform
+  table matches `cngsim boards`. `test-format.md` lists the run options,
+  `--pcap`, `--plugin` and `-d` among them.
+- **A sanitizer job in CI** (ASan + UBSan, interpreter build) runs the
+  malformed-firmware images, failed reboots (`tools/check-lifecycle.sh`),
+  live saves (`tools/check-save.sh`) and the config loader's refusals on
+  every PR; the two new checks also run in the normal jobs.
 - **`make install`** (`PREFIX`, `DESTDIR`), and release tarballs that carry
-  `cngsim`, the examples, their firmware and the guides beside the
-  `build/test_runner` and `tools/` the Contiki-NG suite uses.
+  `cngsim`, the examples, their firmware, the guides and the setups the
+  guides run, beside the `build/test_runner` and `tools/` the Contiki-NG
+  suite uses.
 - **Cooja-NG in the browser** (`wasm/`): the whole runner compiled to
   WebAssembly with Emscripten, running in a Web Worker behind the existing
-  web UI, on the original firmware ELFs. Each demo on the site gets a "Run it
-  live" link next to its recording. It is the same C code as the native
+  web UI, on the original firmware ELFs. The site's demos get a "Run it live"
+  link next to their recording. It is the same C code as the native
   build, held to it by `make -C wasm check`: every live scenario gives output
   identical to `build/test_runner`, down to each node's final cycle count,
   checked on every PR and before every deploy. Interpreter only; no `.so`
@@ -122,6 +205,16 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `firmware` per node. A click no longer sends a move: a node is dragged
   only once the pointer has moved. A `name` over 47 bytes, or a `meta`
   over its limits or with a key twice, is refused rather than trimmed.
+- **The Cooja-NG logo** at the top of the README and in the site's header
+  (each with a variant for dark themes), and its app icon as the favicon
+  of the site and the web UI and beside the web UI's title.
+- **A shorter README**: what Cooja-NG is, the quick start, building, the
+  board table, the features, running the tests and the known issues. The
+  detail moved where it belongs: the ports-and-adapters design, the time
+  model and the environment variables to `docs/architecture.md`, the Cooja
+  suite's coverage and the serial-socket delay to
+  `docs/contiki-ng-testing.md`, and the UI's network access to
+  `docs/quick-start.md`.
 
 ### Removed
 - **ESB, WisMote, MSP-EXP5438 and CC430** (`esb`, `wismote`, `exp5438`,
@@ -132,14 +225,25 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `.exp5438` firmware file is now refused with a message saying its board
   was removed. The MSP430F5437 config stays as the MSP430X core of the
   CPU tests; no board uses it.
+- **`scripts/csc2json.py`**, a stale copy of `tools/csc2json.py`, and
+  `firmware/udp-client.cooja`, a macOS build of a native mote that nothing
+  used and every tarball carried.
 
 ### Fixed
+- **The XIAO nRF54L15's bundled RPL-UDP images form a network.** They were
+  built from a Contiki-NG of May (`f15d82e`) whose idle loop spun with
+  interrupts masked instead of sleeping, so the radio interrupt ran ~65 µs
+  late and the client hit a driver assertion on every DIO, and which still
+  sent a software ACK on top of the hardware one. Rebuilt from the commit
+  the DK images use (`509e0b236`); `cngsim new rpl-udp` offers the XIAO
+  again, and CI runs the pair (`configs/test-2node-nrf54l15-xiao.json`).
+- **The 16-node CC2538 grid runs live on the site again.** It did not stall:
+  it was measured with a debugger attached, which keeps Chrome's
+  WebAssembly on its baseline compiler (`wasm/README.md`).
 - **`--ui`: a finished test ended the run**, about two seconds into the
-  TSCH demo, while `-t` already did not. With the web UI on, a test verdict
-  (JSON steps or a JS script) is now printed when it is decided and the run
-  continues until the UI ends it; the full report still comes at the end.
-  Steps that pass with a validator still short of its count print as failed,
-  as the report will say. A restart from the UI or the shell re-arms the test
+  TSCH demo, while `-t` already did not (*Changed*). Steps that pass with
+  a validator still short of its count print as failed, as the report will
+  say. A restart from the UI or the shell re-arms the test
   instead of keeping the previous run's verdict, and a `--wall-timeout` after
   the verdict keeps its exit code (it exits 6 only when it cut the test
   short). Headless and `--ui-record` runs are unchanged.
@@ -175,15 +279,75 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   preamble, so a hopping sub-GHz sender's frames were filtered on the wrong
   channel. It now also counts the CC1200's two trailing CRC bytes as part
   of the frame, so they share its channel snapshot and loss decision.
-- **Radio bus: a queued frame longer than 160 bytes was truncated.** The
-  deferred-RX queue now holds 256-byte frames, the longest the bus carries
-  (sub-GHz PHR lengths up to 200, `RADIO_BUS_SUBGHZ_MAX_LEN`); a CC1200
-  frame over ~150 bytes reached a busy receiver cut short.
+- **Radio bus: a queued frame too long for its 160-byte entry was
+  truncated.** The entry held the preamble, SFD and length header too, so a
+  CC1200 frame over about 150 bytes reached a busy receiver cut short. The
+  deferred-RX queue now holds 256 bytes, the longest the bus carries
+  (sub-GHz PHR lengths up to 200, `RADIO_BUS_SUBGHZ_MAX_LEN`).
 - **Radio bus: a frame whose length could not be read was parked at the
   head of the receiver's queue for good**, holding back every frame behind
   it. It is handed to the chip, whose own sync search ignores it.
 - **ARM: an SoC registering more than 64 IO windows lost the extra ones
   silently.** The limit is 96 and exceeding it stops at init.
+- **A node rebooted or added late started at a wrong cycle count.** The
+  count came from `now_ns * cpu_freq_hz`, which overflows past 72 s at
+  128 MHz (nRF54L15) and 144 s at 64 MHz: an nRF54L15 rebooted at 80 s from
+  the shell or the UI sat at −8.2 × 10⁹ cycles and printed nothing more.
+  MSP430 nodes had the same product, past about 38 minutes.
+- **Web UI LEDs of the Zolertia Firefly stayed off.** Every CC2538 board was
+  read from the CC2538DK's pins (PC0–2); the Firefly's own (PD5/4/3) are read
+  now. The simulation itself was not affected.
+- **`make debug -jN` raced `clean` against the compile.**
+- **CI: the determinism, config-equivalence and browser-parity checks
+  passed when both sides failed the same way** (a missing firmware twice).
+  Each now requires the runs to exit 0.
+- **A reboot whose boot failed left a dead node in the run.** Rebooting a
+  node whose firmware had gone or been truncated freed its platform but
+  left the slot counted, so the end-of-run diagnostics read freed memory
+  and the teardown freed it again: the run aborted (MSP430 and ARM alike),
+  or died with a bus error once radio traffic reached the node.  The
+  reboot now fails with a message, the node is left removed, the others
+  run on, and a later reboot that succeeds revives it.  An external mote
+  whose peer would not start, and a node whose `peripherals` cannot be
+  set up, release what they allocated too.
+- **A node ran on the board of the first mote type with its image**, not
+  its own: with two types naming one image and different boards (the
+  nRF52840 DK and the dongle), every node booted on the first type's.
+  Reboot, a shell `add`, the web UI's Add node and a JS `addMote` kept the
+  wrong board, and a save wrote every such node under the first type.
+- **A save lost what made a node what it was:** a board given with
+  `--board` (the saved file then would not load: `hello.elf` has no board
+  of its own), each node's `name` and `meta`, and a clock deviation set
+  from the shell, which was saved as the config's value.  A save now also
+  checks that every node it wrote resolves to the board it ran on.
+- **Test suites that passed without testing:** `firmware` and `arm-firmware`
+  counted an image they could not load as a skip and exited 0, and the
+  cc2538dk hello-world entry had no assertion; `config-reject` passed a
+  file that does not exist and a call with no files.  Each is a failure
+  now, and the cc2538dk entry waits for "Hello, world".
+- **Web UI: the topology stopped drawing in a panel under 80 px.** The
+  40 px margin made the scale negative and `arc()` threw `IndexSizeError`
+  on every update (seen on the site's live demos). The margin now shrinks
+  with the panel. The page also has a favicon now.
+
+### Known limitations
+- SVC and UDF execute as no-ops: no SVCall or UsageFault exception is taken,
+  so a Zephyr kernel oops or a `udf` trap runs on where silicon would fault.
+  An unhandled 32-bit instruction prints a message and continues.
+- An ARM core in WFI whose next event lies beyond the slice can set its
+  cycle count back to the horizon after running past it (#76).
+- nRF52840 console timestamps can run backwards across a burst of output.
+- A node added at run time can bring a 17th firmware image into a session;
+  saving that session writes a file the loader refuses.
+- `kind`, `cpu` and `soc` on a mote type are labels and select nothing
+  (`docs/test-format.md`).
+- The MSP-EXP430FR5969 LaunchPad (`.msp430fr5969`) has no bundled firmware,
+  so no test runs it: its two test images went in 0.1.0, and the `firmware`
+  suite's entries for them are gone too.
+- From 0.3.0, still standing: the kernel/radio review's open findings (F2,
+  F3, F6, F18), Renode as an RPL client of a csim root, no FreeBSD binary,
+  MSP430 CS HFXT returning the DCO frequency, the energest ARM CPU current,
+  and the serial socket's 40 ms host-link latency.
 
 ## [0.3.0] — 2026-10-11
 
@@ -722,7 +886,8 @@ frequency — unmodeled; only affects firmware that uses them. The serial socket
 carries a deliberate 40 ms wall-clock host-link latency (see below) that a
 future flow-controlled link should remove.
 
-[Unreleased]: https://github.com/mikroverk/cooja-ng/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mikroverk/cooja-ng/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.3.0
 [0.2.3]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.3
 [0.2.2]: https://github.com/mikroverk/cooja-ng/releases/tag/v0.2.2

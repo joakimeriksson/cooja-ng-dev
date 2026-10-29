@@ -86,7 +86,7 @@ CSIM_NODE1_INPUT='\nrpl init 5\n' CSIM_NODE1_AT_MS=4000 \
 Node 1 becomes the root (emits DIOs); node 2 joins as a Router, sends a DAO, and
 gets a DAO-ACK. (`5` is the gnrc interface number — check it with `ifconfig`.)
 
-> The env vars are quick scaffolding. A JSON config is the better home: timed
+> The env vars are quick scaffolding. A setup file is the better home: timed
 > `send` actions type into the shell at an exact time (`docs/test-format.md`).
 > `configs/interop-contiki-riot.json` drives the bundled image that way.
 

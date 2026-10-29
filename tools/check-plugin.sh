@@ -5,7 +5,8 @@
 # Builds the example packet-sink plugin and asserts:
 #   1. loading it via --plugin prints a non-zero observer tally at teardown;
 #   2. the tally is deterministic across two runs;
-#   3. a missing .so degrades cleanly (error reported, no crash).
+#   3. a missing .so or an unknown built-in name is refused: exit 2, with
+#      the reason on stderr, before the run starts.
 #
 # Usage: tools/check-plugin.sh
 #
@@ -28,14 +29,23 @@ if [ "$t1" != "$t2" ]; then echo "FAIL: tally not deterministic"; echo " $t1"; e
 # Assert the tally observed *something* (log lines or uart bytes are always emitted).
 if echo "$t1" | grep -qE '0 log lines, 0 uart bytes'; then echo "FAIL: tally is empty: $t1"; exit 1; fi
 
-# Missing .so: clean error, non-crash (exit code must not be a signal, i.e. < 128).
-"$RUNNER" test "$CFG" -t 2000 --plugin /no/such/plugin.so -q >/tmp/csim_plugin_miss.txt 2>&1
+# Missing .so: refused with the reason, exit 2 (not a run without it).
+miss=$("$RUNNER" test "$CFG" -t 2000 --plugin /no/such/plugin.so -q 2>&1)
 rc=$?
-rm -f /tmp/csim_plugin_miss.txt
-if [ "$rc" -ge 128 ]; then echo "FAIL: missing .so crashed (rc=$rc)"; exit 1; fi
+if [ "$rc" -ne 2 ]; then echo "FAIL: missing .so gave rc=$rc, want 2"; exit 1; fi
+echo "$miss" | grep -q '^plugin: /no/such/plugin.so: ' || { echo "FAIL: missing .so not reported"; exit 1; }
+# A misspelt built-in name in a config: the same.
+tmpcfg=$(mktemp "${TMPDIR:-/tmp}/csim-plugin-XXXXXX") && mv "$tmpcfg" "$tmpcfg.json" && tmpcfg="$tmpcfg.json"
+sed 's/"energest"/"energist"/' configs/plugin-energest-builtin-v2.json > "$tmpcfg"
+grep -q '"energist"' "$tmpcfg" || { echo "FAIL: could not make the misspelt config"; rm -f "$tmpcfg"; exit 1; }
+miss=$("$RUNNER" test "$tmpcfg" -t 2000 -q 2>&1)
+rc=$?
+rm -f "$tmpcfg"
+if [ "$rc" -ne 2 ]; then echo "FAIL: unknown built-in plugin gave rc=$rc, want 2"; exit 1; fi
+echo "$miss" | grep -q "unknown builtin service 'energist'" || { echo "FAIL: unknown built-in not reported"; exit 1; }
 
 echo "PLUGIN OK: $t1"
-echo "PLUGIN OK: missing .so degraded cleanly (rc=$rc)"
+echo "PLUGIN OK: a missing .so and an unknown built-in are refused (exit 2)"
 
 # --- Radio-medium plugin (Phase 11): the lossy medium selected by config v2 ---
 MED_SO=build/plugins/lossy_medium.so
