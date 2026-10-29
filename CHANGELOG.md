@@ -205,6 +205,9 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   `firmware` per node. A click no longer sends a move: a node is dragged
   only once the pointer has moved. A `name` over 47 bytes, or a `meta`
   over its limits or with a key twice, is refused rather than trimmed.
+- **The Cooja-NG logo** at the top of the README and in the site's header
+  (each with a variant for dark themes), and its app icon as the favicon
+  of the site and the web UI and beside the web UI's title.
 - **A shorter README**: what Cooja-NG is, the quick start, building, the
   board table, the features, running the tests and the known issues. The
   detail moved where it belongs: the ports-and-adapters design, the time

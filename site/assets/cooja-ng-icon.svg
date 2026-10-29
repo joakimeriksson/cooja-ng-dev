@@ -1,11 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#1c2a6b"/>
-  <g stroke="#f2b21b" stroke-width="3" stroke-linecap="round" opacity=".9">
-    <line x1="18" y1="44" x2="32" y2="20"/>
-    <line x1="32" y1="20" x2="46" y2="44"/>
-    <line x1="18" y1="44" x2="46" y2="44"/>
-  </g>
-  <circle cx="32" cy="20" r="7" fill="#f2b21b"/>
-  <circle cx="18" cy="44" r="6" fill="#9fb0ff"/>
-  <circle cx="46" cy="44" r="6" fill="#7ee2b8"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Cooja-NG"><title>Cooja-NG — reconstructed artwork</title><rect width="512" height="512" fill="#092949"/><g transform="translate(256 256) scale(1.5) translate(-210 -193)"><g stroke-linecap="round" stroke-linejoin="round"><path d="M 201 195 Q 194 134 208 82" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="208" cy="82" r="16" fill="#FFFFFF"/><path d="M 201 195 Q 221.36 149.88 289 101" fill="none" stroke="#38C7F3" stroke-width="6"/><circle cx="289" cy="101" r="15" fill="#38C7F3"/><path d="M 201 195 Q 231.44 191.16 331 187" fill="none" stroke="#38C7F3" stroke-width="6"/><circle cx="331" cy="187" r="14" fill="#38C7F3"/><path d="M 201 195 Q 201 251 245 297" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="245" cy="297" r="15" fill="#FFFFFF"/><path d="M 201 195 Q 186.08 238.68 142 286" fill="none" stroke="#38C7F3" stroke-width="6"/><circle cx="142" cy="286" r="15" fill="#38C7F3"/><path d="M 201 195 Q 175.04 217.56 96 242" fill="none" stroke="#38C7F3" stroke-width="6"/><circle cx="96" cy="242" r="13" fill="#38C7F3"/><path d="M 201 195 Q 175.04 187.32 96 179" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="96" cy="179" r="15" fill="#FFFFFF"/><path d="M 201 195 Q 183.68 154.2 132 110" fill="none" stroke="#38C7F3" stroke-width="6"/><circle cx="132" cy="110" r="15" fill="#38C7F3"/><circle cx="201" cy="195" r="15" fill="#FFFFFF"/></g></g></svg>
