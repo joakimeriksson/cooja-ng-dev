@@ -1018,19 +1018,16 @@ typedef struct {
     const char *roles[2], *images[2];
     const char *expect;                   /* console line the check waits for */
     int expect_radio;                     /* the check needs a radio path */
-    const char *not_on;                   /* a board whose bundled images don't run it */
 } template_t;
 
 static const template_t templates[] = {
     { "rpl-udp", "an RPL network: node 1 is the UDP server and the RPL root, the "
       "others are clients that send it requests",
-      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1,
-      /* its XIAO images boot but never form a network (as in 0.3.0) */
-      "nrf54l15-xiao" },
+      { "server", "client" }, { "udp-server", "udp-client" }, "Received response", 1 },
     { "nullnet", "broadcast without IP: every node broadcasts and prints what "
-      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1, NULL },
+      "it receives", { "node", NULL }, { "nullnet-broadcast", NULL }, "Received", 1 },
     { "hello", "hello world on every node", { "node", NULL }, { "hello-world", NULL },
-      "Hello, world", 0, NULL },
+      "Hello, world", 0 },
 };
 
 #define RPL_UDP_MAX_NODES 16          /* the server and 15 clients */
@@ -1047,7 +1044,6 @@ static const template_t *find_template(const char *name) {
  * the board has no usable image. */
 static int template_image(const char *data, const char *board, const template_t *tp,
                           int r, char *out, size_t outsz) {
-    if (tp->not_on && strcmp(board, tp->not_on) == 0) return 0;
     snprintf(out, outsz, "%s/firmware/%s/%s-uart.%s", data, board, tp->images[r], board);
     if (is_file(out)) return 1;
     snprintf(out, outsz, "%s/firmware/%s/%s.%s", data, board, tp->images[r], board);

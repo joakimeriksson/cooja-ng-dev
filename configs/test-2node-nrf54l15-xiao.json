@@ -1,0 +1,23 @@
+{
+    "title": "2-node XIAO nRF54L15 RPL-UDP (server + client, single hop)",
+    "timeout_ms": 60000,
+    "seed": 42,
+    "radiomedium": {
+        "type": "udgm",
+        "tx_range": 50.0,
+        "interference_range": 100.0,
+        "success_ratio_tx": 1.0,
+        "success_ratio_rx": 1.0
+    },
+    "nodes": [
+        { "firmware": "firmware/nrf54l15-xiao/udp-server.nrf54l15-xiao", "id": 1, "x": 0.0, "y": 0.0 },
+        { "firmware": "firmware/nrf54l15-xiao/udp-client.nrf54l15-xiao", "id": 2, "x": 20.0, "y": 0.0 }
+    ],
+    "test": {
+        "description": "Single-hop RPL-UDP on the XIAO nRF54L15: the client joins the server's DAG and they exchange request/response end-to-end. Regression test for the bundled images (rebuilt from contiki-ng 509e0b236; the May build asserted in the radio driver).",
+        "validators": [
+            { "pattern": "Received request",  "node": 1, "min_count": 1 },
+            { "pattern": "Received response", "node": 2, "min_count": 1 }
+        ]
+    }
+}

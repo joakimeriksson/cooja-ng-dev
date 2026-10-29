@@ -132,7 +132,7 @@ A small simulation kernel (clock, one event queue, the radio bus, mote slots) ta
 
 ## Known issues
 
-The known limitations of this release are listed under its version in [`CHANGELOG.md`](CHANGELOG.md); among them, the bundled XIAO nRF54L15 RPL-UDP images do not form a network, and the 16-node CC2538 grid stalls when run live in a browser (its recording plays).  The serial socket delays mote→host bytes by 40 ms of wall-clock time on purpose, for Contiki-NG's native border router: [contiki-ng-testing.md](docs/contiki-ng-testing.md#8-troubleshooting) explains why.
+The known limitations of this release are listed under its version in [`CHANGELOG.md`](CHANGELOG.md).  The serial socket delays mote→host bytes by 40 ms of wall-clock time on purpose, for Contiki-NG's native border router: [contiki-ng-testing.md](docs/contiki-ng-testing.md#8-troubleshooting) explains why.
 
 Release history is in [`CHANGELOG.md`](CHANGELOG.md).
 

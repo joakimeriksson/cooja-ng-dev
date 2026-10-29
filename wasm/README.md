@@ -111,6 +111,13 @@ Smaller scenarios run as fast as the speed slider asks. Most of the gap with
 the UI on is the runner's UI path itself (native slows down too), not
 WebAssembly. ARM nodes run on the interpreter only (no JIT in a browser).
 
+Measure with no debugger attached. While DevTools or a debugging
+extension (anything using `chrome.debugger`, such as browser automation) is
+attached to the page, Chrome keeps WebAssembly on its baseline compiler, and
+the emulator runs a couple of hundred times slower there: the 16-node CC2538
+grid then looks stalled at about 0.6 s simulated for half a minute.  Node shows
+the same with `node --liftoff-only`.
+
 ## Limitations
 
 - Interpreter only: no GNU Lightning JIT for MSP430 or ARM.

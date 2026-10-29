@@ -7,7 +7,7 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
-## [0.4.0] — 2026-10-28
+## [0.4.0] — 2026-10-29
 
 Cooja-NG for people who did not build it. `cngsim` takes a download to a
 running simulation in three commands, with commented examples, layouts that
@@ -162,7 +162,7 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - **Cooja-NG in the browser** (`wasm/`): the whole runner compiled to
   WebAssembly with Emscripten, running in a Web Worker behind the existing
   web UI, on the original firmware ELFs. The site's demos get a "Run it live"
-  link next to their recording (all but the 16-node CC2538 grid, below). It is the same C code as the native
+  link next to their recording. It is the same C code as the native
   build, held to it by `make -C wasm check`: every live scenario gives output
   identical to `build/test_runner`, down to each node's final cycle count,
   checked on every PR and before every deploy. Interpreter only; no `.so`
@@ -227,6 +227,16 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
   used and every tarball carried.
 
 ### Fixed
+- **The XIAO nRF54L15's bundled RPL-UDP images form a network.** They were
+  built from a Contiki-NG of May (`f15d82e`) whose idle loop spun with
+  interrupts masked instead of sleeping, so the radio interrupt ran ~65 µs
+  late and the client hit a driver assertion on every DIO, and which still
+  sent a software ACK on top of the hardware one. Rebuilt from the commit
+  the DK images use (`509e0b236`); `cngsim new rpl-udp` offers the XIAO
+  again, and CI runs the pair (`configs/test-2node-nrf54l15-xiao.json`).
+- **The 16-node CC2538 grid runs live on the site again.** It did not stall:
+  it was measured with a debugger attached, which keeps Chrome's
+  WebAssembly on its baseline compiler (`wasm/README.md`).
 - **`--ui`: a finished test ended the run**, about two seconds into the
   TSCH demo, while `-t` already did not (*Changed*). Steps that pass with
   a validator still short of its count print as failed, as the report will
@@ -331,13 +341,6 @@ board removal), and @nvt (reviews of `cngsim` and the browser build).
 - The MSP-EXP430FR5969 LaunchPad (`.msp430fr5969`) has no bundled firmware,
   so no test runs it: its two test images went in 0.1.0, and the `firmware`
   suite's entries for them are gone too.
-- The bundled XIAO nRF54L15 `udp-server`/`udp-client` images boot but never
-  form a network (as in 0.3.0), so `cngsim new rpl-udp` does not offer the
-  XIAO; its TrustZone RPL-UDP setup (`configs/test-tz-rpl-udp-nrf54l15-xiao.yaml`)
-  works.
-- The 16-node CC2538 grid stalls at about 0.6 s simulated when run live in
-  a browser, while the WebAssembly build runs it under Node.js with output
-  identical to native; the site shows its recording only.
 - From 0.3.0, still standing: the kernel/radio review's open findings (F2,
   F3, F6, F18), Renode as an RPL client of a csim root, no FreeBSD binary,
   MSP430 CS HFXT returning the DCO frequency, the energest ARM CPU current,
