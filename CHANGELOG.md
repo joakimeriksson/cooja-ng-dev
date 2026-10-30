@@ -76,11 +76,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   they run, so a node reaches `main()` about 10 000 cycles sooner.  The
   consoles are unchanged apart from the times; of the nine `check-baseline`
   workloads `mixed` and `armmn` move.
-- **Console timestamps move for nRF52840 TSCH (`tsch52`).**  Reading the PSDU
-  byte by byte adds a CPU event per byte on the sender.  Every byte keeps
-  its air time and the TSCH schedule (ASNs, channels, sequence numbers) is
-  unchanged, but three console lines are stamped one 10 ms slice apart
-  (the console-timestamp limitation of 0.4.0).
+- **Console timestamps on ARM nodes move.**  A line is stamped with the
+  cycle its byte was written at.  It used to take the node's slice time,
+  which the interpreter and the JIT advance at different points, so a line
+  could be stamped up to a slice (about 10 ms) earlier, differently with
+  and without the JIT, and lines could run backwards (a 0.4.0 known
+  limitation; hello-world on the CC2538 had three).  What the nodes do is
+  unchanged; the `check-baseline` ARM workloads (`mixed`, `armmn`, `tsch52`,
+  `tzrpl`, `tzwdt`, `shell54`, `nrf2`) move in their console times and in
+  the times the test engine reports a match at.
 
 ## [0.4.0] — 2026-10-29
 
