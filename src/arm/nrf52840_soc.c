@@ -2028,9 +2028,21 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
             }
             break;
         case TIMER_TASKS_STOP:
-        case TIMER_TASKS_SHUTDOWN:
             if (value == 1 && t->running) {
                 t->counter_at_start = timer_compute_counter(t, (int64_t)cpu->cycles, cpu->cpu_freq_hz);
+                t->start_cycles = (int64_t)cpu->cycles;
+                t->running = false;
+                timer_cancel_compare(t);
+            }
+            break;
+        case TIMER_TASKS_SHUTDOWN:
+            /* SHUTDOWN stops the timer and resets its counter: nrf_802154
+             * uses it alone on the nRF52 series (anomaly 78) to make TIMER0
+             * count from 0 at the next frame's END, and times its ACK from
+             * that.  Keeping the old count put the ACK's ramp-up compare in
+             * the past, and Zephyr nodes never acknowledged a frame. */
+            if (value == 1) {
+                t->counter_at_start = 0;
                 t->start_cycles = (int64_t)cpu->cycles;
                 t->running = false;
                 timer_cancel_compare(t);
@@ -2043,7 +2055,10 @@ static void nrf_timer_write(void *user_data, uint32_t addr, uint32_t value) {
                 if (t->running) timer_schedule_next_compare(t);
             }
             break;
-        case TIMER_SHORTS:    t->shorts    = value; break;
+        case TIMER_SHORTS:
+            t->shorts = value;
+            if (t->running) timer_schedule_next_compare(t);   /* a short listens */
+            break;
         case TIMER_INTENSET:
             /* Enabling a COMPARE interrupt must (re)schedule its event: drivers
              * commonly write CC[chan] first and INTENSET second (e.g. RIOT's
@@ -2106,9 +2121,14 @@ static void timer_schedule_next_compare(nrf_timer_state_t *t) {
     int best_i = -1;
     int64_t best_delta = INT64_MAX;
     for (int i = 0; i < 6; i++) {
-        /* Only schedule if something listens: INTENSET bit or PPI EEP. */
+        /* Only schedule if something listens: INTENSET bit, a PPI EEP, or
+         * a COMPARE[i]_CLEAR / COMPARE[i]_STOP short.  nrf_802154 parks
+         * TIMER0 with CC0 = 1 and COMPARE0_STOP alone while it waits for a
+         * frame, so the frame's END restarts it from 1; with the short not
+         * counted the timer ran on and the ACK's ramp-up compare was missed. */
         uint32_t int_bit = (1u << (16 + i));
-        bool has_listener = (t->intenset & int_bit) != 0;
+        bool has_listener = (t->intenset & int_bit) != 0 ||
+                            (t->shorts & ((1u << i) | (1u << (8 + i)))) != 0;
         if (!has_listener) {
             uint32_t evt_addr = t->base + TIMER_EVENTS_COMPARE_0 + (uint32_t)i * 4;
             for (int p = 0; p < 20 && !has_listener; p++)
