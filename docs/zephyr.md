@@ -140,5 +140,7 @@ The per-mote GDB stub is also available for interactive inspection.
   path (Phase 3 of `docs/design/zephyr-802154-plan.md`). In the bundled echo
   pair every frame that asks for an ACK gets one. Up to 0.4.0 the model
   missed it and Zephyr never acknowledged a frame.
-- OpenThread (Thread/mesh on top of 802.15.4) is a further step — see
+- OpenThread on Zephyr is a further step — see
   `docs/design/zephyr-802154-plan.md` (needs the QSPI settings backend).
+  OpenThread's own bare-metal nRF52840 port (`ot-nrf528xx`) runs and forms
+  a Thread network (CHANGELOG, Unreleased).

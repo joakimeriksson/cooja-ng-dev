@@ -15,6 +15,14 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   frame acknowledged.  It needed the model to provide the CC2538's ROM
   functions (the table at 0x48: flash page erase and program for its
   settings, memset/memcpy and the rest), which it did not.
+- **OpenThread on the nRF52840.**  OpenThread's nRF52840 port
+  ([`openthread/ot-nrf528xx`](https://github.com/openthread/ot-nrf528xx),
+  the software-crypto build) forms a Thread network: a leader, a router
+  and a child, answering a multicast ping over MAC-secured frames.  The
+  model gained what it used: the NVMC (flash page erase and programming),
+  the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
+  radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
+  UARTE input read through RXD.
 
 ### Fixed
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
@@ -38,6 +46,24 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   CC13x2 boards.  It was pushed into the 16-byte RX FIFO at once, so a line
   longer than 16 characters lost its tail.
 
+### Fixed (nRF52840)
+- **RTC compares no longer go missing.**  A write to INTENSET/INTENCLR
+  re-armed every compare channel; one that had matched in that very tick
+  but was not yet delivered was pushed a full counter wrap (512 s) away.
+  OpenThread toggles the overflow interrupt around every counter read, so
+  its CSMA backoff timer never fired and transmission stopped.  A write now
+  re-arms only what it touches.  EVTENSET and EVTENCLR were at the wrong
+  offsets (0x340/0x344 for 0x344/0x348); a compare whose event routing is
+  enabled now latches and reaches PPI, and enabling an interrupt whose
+  compare already latched raises it.
+- **A frame's PSDU is read from RAM as it goes on air**, as EasyDMA does,
+  not at TASKS_START: OpenThread secures the frame in place from the
+  ADDRESS interrupt, and the plaintext went out.
+- **No more made-up ACKs.**  The radio sent a stand-in immediate ACK 96 µs
+  after a frame asking for one, for stacks whose own ACK path was not
+  modelled; Zephyr, RIOT, Contiki-NG and OpenThread all send their own now,
+  and on short-addressed frames (Thread's) the stand-in doubled them.
+
 ### Changed — check these before upgrading
 - **Simulation output moves for CC2538 nodes.**  Contiki-NG's CC2538 start-up
   copies `.data` and clears `.bss` through the ROM's memcpy and memset; with
@@ -45,6 +71,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   they run, so a node reaches `main()` about 10 000 cycles sooner.  The
   consoles are unchanged apart from the times; of the nine `check-baseline`
   workloads `mixed` and `armmn` move.
+- **Console timestamps move for nRF52840 TSCH (`tsch52`).**  Reading the PSDU
+  byte by byte adds a CPU event per byte on the sender.  Every byte keeps
+  its air time and the TSCH schedule (ASNs, channels, sequence numbers) is
+  unchanged, but three console lines are stamped one 10 ms slice apart
+  (the console-timestamp limitation of 0.4.0).
 
 ## [0.4.0] — 2026-10-29
 
