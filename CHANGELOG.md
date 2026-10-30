@@ -7,6 +7,20 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Added
+- **The web UI's Packets tab dissects every frame** with
+  [dpkt-js](https://mikroverk.github.io/dpkt-js/): the Protocol and Info
+  columns come from the dissection (DIO, UDP, MLE, TMF, CoAP...), and a
+  click opens the whole tree and a hex dump.  OpenThread's encrypted frames
+  open by themselves once a node is given its network key on the console
+  (`dataset networkkey`, echoed by OpenThread's CLI); a key and the 6LoWPAN
+  context can also be typed in.  The simulator now sends each frame's
+  bytes with its summary (a byte string after it in the timeline entries,
+  hex in `--ui-record` files: docs/ui-replay.md), kept for the UI in a
+  4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
+  from its npm release, by `tools/vendor-dpkt-js.sh` (115 KB); the live
+  player, `--ui PATH` and replays all have it.
+
 ### Fixed
 - **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the
   verbose `[PKT]` lines found a frame by the 2.4 GHz SFD (0x7A), which
@@ -15,7 +29,8 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   1-byte length and a TI IEEE 802.15.4g frame after its 2-byte PHR, and is
   written with a computed 802.15.4 FCS, as link type 195 expects (the CC1200
   model sends no CRC; TI's PHY sends a CRC-32).  2.4 GHz captures are
-  byte-identical.
+  byte-identical.  The UI's received-frame events had the same search and
+  now use the same reading.
 
 ## [0.4.0] — 2026-10-29
 
