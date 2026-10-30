@@ -61,6 +61,12 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .tab-content { display: none; flex: 1; overflow-y: auto; }
 .tab-content.active { display: block; }
 .node-card { border-bottom: 1px solid var(--border); padding: 10px 12px; }
+.node-pop { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; flex: none; }
+.node-pop:hover { color: var(--text); }
+.node-card.floating { position: fixed; z-index: 50; width: 440px; height: 320px; min-width: 240px; min-height: 140px; max-width: calc(100vw - 8px); max-height: calc(100vh - 8px); resize: both; overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; background: var(--header-bg); border: 1px solid var(--accent); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); padding: 0 10px 10px; }
+.node-card.floating.front { z-index: 51; }
+.node-card.floating .node-header { cursor: move; user-select: none; touch-action: none; padding: 8px 0 6px; margin: 0; }
+.node-card.floating .console-box { flex: 1; max-height: none; }
 .con-in { width: 100%; box-sizing: border-box; margin-top: 4px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-family: inherit; font-size: 11px; }
 #node-menu { position: fixed; display: none; z-index: 20; background: var(--header-bg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 0; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 #node-menu div { padding: 4px 16px; cursor: pointer; }
@@ -104,7 +110,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 .pkt-type-udp { color: #58a6ff; }
 .pkt-type-ack { color: var(--dim); }
 .pkt-type-data { color: var(--text); }
-.pkt-detail { display: none; flex-direction: column; position: fixed; background: var(--header-bg); border: 1px solid var(--accent); border-radius: 6px; font-size: 11px; font-family: 'SF Mono', Menlo, monospace; color: var(--text); white-space: pre-wrap; width: 520px; height: min(70vh, 640px); min-width: 260px; min-height: 120px; max-width: calc(100vw - 8px); max-height: calc(100vh - 8px); overflow: hidden; resize: both; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.4); pointer-events: auto; }
+.pkt-detail { display: none; flex-direction: column; position: fixed; z-index: 100 !important; background: var(--header-bg); border: 1px solid var(--accent); border-radius: 6px; font-size: 11px; font-family: 'SF Mono', Menlo, monospace; color: var(--text); white-space: pre-wrap; width: 520px; height: min(70vh, 640px); min-width: 260px; min-height: 120px; max-width: calc(100vw - 8px); max-height: calc(100vh - 8px); overflow: hidden; resize: both; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.4); pointer-events: auto; }
 .pkt-detail.visible { display: flex; }
 .pkt-detail .pd-bar { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border-bottom: 1px solid var(--border); color: var(--muted); cursor: move; user-select: none; touch-action: none; flex: none; }
 .pkt-detail .pd-bar span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -529,7 +535,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   function hideNodeMenu() { nodeMenu.style.display = 'none'; }
   window.addEventListener('click', hideNodeMenu);
   canvas.addEventListener('contextmenu', (e) => {
-    if (replay || !setup.edit || !state || !state.nodes) return;
+    if (!state || !state.nodes) return;
     const rect = canvas.getBoundingClientRect();
     const wx = screenToWorldX(e.clientX - rect.left), wy = screenToWorldY(e.clientY - rect.top);
     const hitR = Math.max(12, Math.min(22, 18 * camZoom)) + 4;
@@ -537,19 +543,23 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       (wx - n.x) ** 2 + (wy - n.y) ** 2 <= (hitR / lastScale) ** 2);
     if (!hit) return;
     e.preventDefault();
+    const editable = !replay && setup.edit;
     nodeMenu.innerHTML = '<div class="title">Node ' + esc(hit.id) + '</div>' +
-      '<div data-cmd="reboot">Reboot</div><div data-cmd="remove">Remove</div>';
+      '<div data-cmd="window">Open in a window</div>' +
+      (editable ? '<div data-cmd="reboot">Reboot</div><div data-cmd="remove">Remove</div>' : '');
     nodeMenu.style.left = e.clientX + 'px';
     nodeMenu.style.top = e.clientY + 'px';
     nodeMenu.style.display = 'block';
     nodeMenu.onclick = (ev) => {
       const cmd = ev.target.dataset.cmd;
-      if (cmd && ws && ws.readyState === 1) ws.send(JSON.stringify({cmd: cmd, node: hit.id}));
+      if (cmd === 'window') floatCard(hit.id, null);
+      else if (cmd && ws && ws.readyState === 1) ws.send(JSON.stringify({cmd: cmd, node: hit.id}));
       hideNodeMenu();
     };
   });
-  // Serial input: the box under each node's console (built by buildSidebar).
-  document.getElementById('nodes-tab').addEventListener('keydown', (e) => {
+  // Serial input: the box under each node's console (built by buildSidebar),
+  // in the sidebar or in a node's window.
+  document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || !e.target.classList.contains('con-in')) return;
     if (ws && ws.readyState === 1)
       ws.send(JSON.stringify({cmd: 'send', node: parseInt(e.target.dataset.node), data: e.target.value}));
@@ -1314,6 +1324,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       for (let l = 0; l < 3; l++)
         html += '<div class="led led-off" id="led-' + id + '-' + l + '" title="LED ' + l + '"></div>';
       html += '</div>';
+      html += '<button class="node-pop" data-node="' + id + '" title="Open in a window">⧉</button>';
       html += '</div>';
       html += '<div class="node-stats" id="stats-' + id + '"></div>';
       html += '<div class="console-box" id="con-' + id + '"></div>';
@@ -1321,8 +1332,15 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         html += '<input class="con-in" data-node="' + id + '" placeholder="Send a line to node ' + id + ' (Enter)">';
       html += '</div>';
     }
+    // A rebuild makes new cards: the windows of the old ones are put back
+    // over the new ones, where they were.
+    document.querySelectorAll('body > .node-card.floating').forEach((el) => el.remove());
     nodesTab.innerHTML = html;
     sidebarBuilt = true;
+    for (const [nid, geom] of [...nodeWindows]) {
+      nodeWindows.delete(nid);
+      floatCard(nid, geom);
+    }
   }
 
   function updateSidebar(s) {
@@ -1417,14 +1435,113 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
    * last dragged to), is moved by its title bar, resized from its corner,
    * and never left outside the window. */
   let pdPos = null;
-  function clampDetail(left, top) {
-    const w = pktDetail.offsetWidth, h = pktDetail.offsetHeight;
+  /* Put a fixed-position window at (left, top), kept inside the window. */
+  function clampFixed(el, left, top) {
+    const w = el.offsetWidth, h = el.offsetHeight;
     left = Math.min(Math.max(4, left), Math.max(4, window.innerWidth - w - 4));
     top = Math.min(Math.max(4, top), Math.max(4, window.innerHeight - h - 4));
-    pktDetail.style.left = left + 'px';
-    pktDetail.style.top = top + 'px';
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
     return { left, top };
   }
+  const clampDetail = (left, top) => clampFixed(pktDetail, left, top);
+  /* Move el by dragging handle (not its buttons or inputs); moved(pos) after each step. */
+  function dragBy(handle, el, moved) {
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('button, input')) return;
+      const r = el.getBoundingClientRect();
+      const dx = e.clientX - r.left, dy = e.clientY - r.top;
+      handle.setPointerCapture(e.pointerId);
+      const move = (ev) => moved(clampFixed(el, ev.clientX - dx, ev.clientY - dy));
+      const up = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up); };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+      handle.addEventListener('pointercancel', up);
+      e.preventDefault();
+    });
+  }
+
+  /* Node windows: a node's card (header, stats, console, serial input) can
+   * leave the sidebar and float, moved by its header and resized from its
+   * corner, its console growing with it.  It is the same element, so it
+   * keeps updating; x puts it back.  nodeWindows: node id -> where it is. */
+  const nodeWindows = new Map();
+  function raiseCard(card) {
+    document.querySelectorAll('.node-card.floating.front').forEach((c) => c.classList.remove('front'));
+    card.classList.add('front');
+  }
+  function floatCard(nid, geom) {
+    const card = document.getElementById('card-' + nid);
+    if (!card) return;
+    if (card.classList.contains('floating')) { raiseCard(card); return; }
+    const mark = document.createElement('div');          // its place in the sidebar
+    mark.id = 'card-place-' + nid;
+    mark.hidden = true;
+    card.before(mark);
+    document.body.appendChild(card);
+    card.classList.add('floating');
+    const pop = card.querySelector('.node-pop');
+    pop.textContent = '×';
+    pop.title = 'Back to the sidebar';
+    if (geom) { card.style.width = geom.width + 'px'; card.style.height = geom.height + 'px'; }
+    // Cascade new windows to the left of the sidebar.
+    const n = nodeWindows.size;
+    const sb = document.getElementById('sidebar').getBoundingClientRect();
+    const pos = geom ? clampFixed(card, geom.left, geom.top) : clampFixed(card, sb.left - card.offsetWidth - 16 - 24 * n, 70 + 28 * n);
+    nodeWindows.set(String(nid), { ...pos, width: card.offsetWidth, height: card.offsetHeight });
+    raiseCard(card);
+    const con = card.querySelector('.console-box');
+    if (con) con.scrollTop = con.scrollHeight;
+  }
+  function dockCard(nid) {
+    const card = document.getElementById('card-' + nid);
+    const mark = document.getElementById('card-place-' + nid);
+    nodeWindows.delete(String(nid));
+    if (!card) return;
+    card.classList.remove('floating', 'front');
+    card.style.cssText = '';
+    const pop = card.querySelector('.node-pop');
+    pop.textContent = '⧉';
+    pop.title = 'Open in a window';
+    if (mark) mark.replaceWith(card); else nodesTab.appendChild(card);
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.node-pop');
+    if (!b) return;
+    if (b.closest('.node-card.floating')) dockCard(b.dataset.node); else floatCard(b.dataset.node, null);
+  });
+  document.addEventListener('pointerdown', (e) => {
+    const card = e.target.closest('.node-card.floating');
+    if (!card) return;
+    raiseCard(card);
+    const head = e.target.closest('.node-header');
+    if (!head || e.button !== 0 || e.target.closest('button, input')) return;
+    const nid = card.id.slice('card-'.length);
+    const r = card.getBoundingClientRect();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    head.setPointerCapture(e.pointerId);
+    const move = (ev) => { const p = clampFixed(card, ev.clientX - dx, ev.clientY - dy); Object.assign(nodeWindows.get(nid) || {}, p); };
+    const up = () => { head.removeEventListener('pointermove', move); head.removeEventListener('pointerup', up); head.removeEventListener('pointercancel', up); };
+    head.addEventListener('pointermove', move);
+    head.addEventListener('pointerup', up);
+    head.addEventListener('pointercancel', up);
+    e.preventDefault();
+  });
+  // Resized from the corner, or the browser window got smaller: keep every window reachable.
+  const keepInside = new ResizeObserver((entries) => {
+    for (const en of entries) {
+      const card = en.target;
+      if (!card.classList.contains('floating')) continue;
+      const nid = card.id.slice('card-'.length);
+      const p = clampFixed(card, parseFloat(card.style.left) || 4, parseFloat(card.style.top) || 4);
+      if (nodeWindows.has(nid)) nodeWindows.set(nid, { ...p, width: card.offsetWidth, height: card.offsetHeight });
+    }
+  });
+  new MutationObserver(() => document.querySelectorAll('.node-card.floating').forEach((c) => keepInside.observe(c)))
+    .observe(document.body, { childList: true });
+  window.addEventListener('resize', () => {
+    document.querySelectorAll('.node-card.floating').forEach((c) => clampFixed(c, parseFloat(c.style.left) || 4, parseFloat(c.style.top) || 4));
+  });
   function placeDetail(rowRect) {
     if (pdPos) { pdPos = clampDetail(pdPos.left, pdPos.top); return; }
     // To the left of the list, level with the row, so the list stays in view.
@@ -1434,19 +1551,6 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
   }
   pktDetail.addEventListener('click', (e) => {
     if (e.target.closest('.pd-close')) pktDetail.classList.remove('visible');
-  });
-  pktDetail.addEventListener('pointerdown', (e) => {
-    const bar = e.target.closest('.pd-bar');
-    if (!bar || e.target.closest('.pd-close') || e.button !== 0) return;
-    const r = pktDetail.getBoundingClientRect();
-    const dx = e.clientX - r.left, dy = e.clientY - r.top;
-    bar.setPointerCapture(e.pointerId);
-    const move = (ev) => { pdPos = clampDetail(ev.clientX - dx, ev.clientY - dy); };
-    const up = () => { bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up); };
-    bar.addEventListener('pointermove', move);
-    bar.addEventListener('pointerup', up);
-    bar.addEventListener('pointercancel', up);
-    e.preventDefault();
   });
   // A smaller window (or a resize from the corner) keeps it reachable.
   window.addEventListener('resize', () => { if (pktDetail.classList.contains('visible')) pdPos = clampDetail(parseFloat(pktDetail.style.left) || 4, parseFloat(pktDetail.style.top) || 4); });
@@ -1627,6 +1731,7 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
         pktDetail.innerHTML = '<div class="pd-bar" title="Drag to move; resize from the corner"><span>' + esc(title) +
           '</span><button class="pd-close" title="Close" aria-label="Close">×</button></div><div class="pd-body">' + body + '</div>';
         pktDetail.classList.add('visible');
+        dragBy(pktDetail.querySelector('.pd-bar'), pktDetail, (pos) => { pdPos = pos; });
         placeDetail(row.getBoundingClientRect());
       });
       pktLog.appendChild(row);
