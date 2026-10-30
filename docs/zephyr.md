@@ -143,4 +143,4 @@ The per-mote GDB stub is also available for interactive inspection.
 - OpenThread on Zephyr is a further step — see
   `docs/design/zephyr-802154-plan.md` (needs the QSPI settings backend).
   OpenThread's own bare-metal nRF52840 port (`ot-nrf528xx`) runs and forms
-  a Thread network (CHANGELOG, Unreleased).
+  a Thread network: [openthread.md](openthread.md).

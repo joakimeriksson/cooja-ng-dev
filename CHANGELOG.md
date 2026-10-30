@@ -27,7 +27,7 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `configs/test-openthread-nrf52840-dk.yaml` boot two nodes on the bundled
   `ot-cli-ftd` images, give them one dataset, and pass when node 1 leads,
   node 2 is its child and node 1's ping to `ff03::1` is answered (CI runs
-  both).
+  both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
 
 ### Fixed
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
