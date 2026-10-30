@@ -733,8 +733,7 @@ static int arm_mote_serial_input(sim_mote_t *m, const uint8_t *buf, int len) {
     if (cc13)
         len = cc13x2_uart_feed_rx(cc13, buf, len);
     else if (cc)
-        for (int i = 0; i < len; i++)
-            cc2538_uart_receive_byte(&cc->uart0, buf[i]);
+        len = cc2538_uart_feed_rx(&cc->uart0, buf, len);
     else if (nrf)
         nrf_uart_feed_rx(&nrf->uart0, buf, len);
     else if (nrfl)
