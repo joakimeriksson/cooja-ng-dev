@@ -23,6 +23,11 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   the ECB AES block cipher, RTC2, EGU1–5, PPI channel groups and FORK, the
   radio's bit counter (BCC/BCMATCH) and MAC header match (MHRMATCH), and
   UARTE input read through RXD.
+- **Tests for both:** `configs/test-openthread-cc2538dk.yaml` and
+  `configs/test-openthread-nrf52840-dk.yaml` boot two nodes on the bundled
+  `ot-cli-ftd` images, give them one dataset, and pass when node 1 leads,
+  node 2 is its child and node 1's ping to `ff03::1` is answered (CI runs
+  both).
 
 ### Fixed
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`
