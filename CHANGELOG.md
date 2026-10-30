@@ -20,6 +20,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   4096-frame ring beside the timeline.  dpkt-js is inlined in the page,
   from its npm release, by `tools/vendor-dpkt-js.sh` (115 KB); the live
   player, `--ui PATH` and replays all have it.
+- **Movable windows in the web UI.**  A node's card (console, serial
+  input, LEDs) pops out of the sidebar into a window with the button in
+  its header or Open in a window on the node's right-click menu; it moves
+  by its header, resizes from its corner with its console, and × puts it
+  back.  The packet popup moves by its title bar, resizes and closes with
+  ×; it opens beside the packet list, or where it was last put.  The node
+  information popup moves by its title and then stays put instead of
+  following the node; its Console link opens the node's window.  None of
+  them can be dragged outside the window.
 
 ### Fixed
 - **Sub-GHz frames in captures.**  The pcap, the web UI's packet list and the

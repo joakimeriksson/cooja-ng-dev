@@ -88,7 +88,8 @@ slider goes faster. Things to try:
 - **Drag node 2** out of node 1's range (its circle). Its console reports
   `Not reachable yet` until you bring it back.
 - **Consoles:** one per node, in the sidebar. Type a line in the box under
-  a node's console to send it to that node.
+  a node's console to send it to that node. ⧉ in a node's header (or
+  right-click the node) opens it in a window you can move and resize.
 - **Packets:** every radio frame, dissected by
   [dpkt-js](https://mikroverk.github.io/dpkt-js/): 802.15.4 and TSCH,
   6LoWPAN, IPv6, RPL, UDP, CoAP, Thread's MLE and TMF. Click a frame for
