@@ -28,7 +28,7 @@ header h1::before { content: ""; display: inline-block; width: 18px; height: 18p
 /* Node info card: opened by clicking a node on the canvas. */
 #node-info { position: absolute; z-index: 4; width: 320px; background: var(--header-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
 #node-info[hidden] { display: none; }
-#node-info h4 { margin: 0 0 6px; font-size: 12px; color: var(--accent); font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#node-info h4 { margin: 0 0 6px; font-size: 12px; color: var(--accent); font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: move; user-select: none; touch-action: none; }
 #node-info h4 button { background: none; border: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
 #node-info table { border-collapse: collapse; width: 100%; margin-bottom: 6px; }
 #node-info td { padding: 1px 0; vertical-align: top; overflow-wrap: break-word; word-break: break-word; }
@@ -2277,20 +2277,42 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     }
     const con = document.createElement('a');
     con.textContent = 'Console \u203a'; con.href = '#';
+    con.title = 'Open the node\'s console in a window';
     con.onclick = (e) => {
       e.preventDefault();
-      document.querySelector('.sidebar-tabs button[data-tab="nodes-tab"]').click();
+      floatCard(id, null);
       const card = document.getElementById('card-' + id);
-      if (card) {
-        card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
-        card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
-      }
+      if (card) { card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash'); }
     };
     nodeInfo.append(h, table, con);
     nodeInfo.hidden = false;
     if (state) drawCanvas(state);
   }
   function hideNodeInfo() { infoNodeId = null; nodeInfo.hidden = true; }
+  /* Dragged by its title, the popup stops following its node and stays
+   * there (inside the canvas), for this node and the next ones. */
+  let infoPinned = null;
+  nodeInfo.addEventListener('pointerdown', (e) => {
+    const head = e.target.closest('h4');
+    if (!head || e.button !== 0 || e.target.closest('button')) return;
+    const box = nodeInfo.offsetParent.getBoundingClientRect();
+    const r = nodeInfo.getBoundingClientRect();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    head.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      const W = nodeInfo.offsetParent.clientWidth, H = nodeInfo.offsetParent.clientHeight;
+      const x = Math.max(8, Math.min(ev.clientX - box.left - dx, W - nodeInfo.offsetWidth - 8));
+      const y = Math.max(8, Math.min(ev.clientY - box.top - dy, H - nodeInfo.offsetHeight - 8));
+      infoPinned = { x, y };
+      nodeInfo.style.left = Math.round(x) + 'px';
+      nodeInfo.style.top = Math.round(y) + 'px';
+    };
+    const up = () => { head.removeEventListener('pointermove', move); head.removeEventListener('pointerup', up); head.removeEventListener('pointercancel', up); };
+    head.addEventListener('pointermove', move);
+    head.addEventListener('pointerup', up);
+    head.addEventListener('pointercancel', up);
+    e.preventDefault();
+  });
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && infoNodeId !== null) hideNodeInfo(); });
   function updateNodeInfo(s, tx, ty, nodeRadius, W, H) {
     if (infoNodeId === null) return;
@@ -2309,10 +2331,12 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
       .filter(j => j < s.nodes.length).map(j => nodeTitle(s.nodes[j]));
     set('range', nbs.length === 0 ? 'none'
         : nbs.slice(0, 6).join(', ') + (nbs.length > 6 ? ' +' + (nbs.length - 6) + ' more' : ''));
-    // Above the node (below when there is no room), kept inside the canvas.
+    // Above the node (below when there is no room), or where it was dragged
+    // to; kept inside the canvas either way.
     const w = nodeInfo.offsetWidth, h = nodeInfo.offsetHeight;
     let x = tx(n.x) - w / 2, y = ty(n.y) - nodeRadius - 12 - h;
     if (y < 8) y = ty(n.y) + nodeRadius + 40;
+    if (infoPinned) { x = infoPinned.x; y = infoPinned.y; }
     x = Math.max(8, Math.min(x, W - w - 8));
     y = Math.max(8, Math.min(y, H - h - 8));
     nodeInfo.style.left = Math.round(x) + 'px';
