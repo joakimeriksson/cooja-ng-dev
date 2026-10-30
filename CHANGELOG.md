@@ -80,7 +80,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   consoles are unchanged apart from the times; of the nine `check-baseline`
   workloads `mixed` and `armmn` move.
 - **Console timestamps on ARM nodes move.**  A line is stamped with the
-  cycle its byte was written at.  It used to take the node's slice time,
+  simulated time of the cycle its byte was written at (the slice's start
+  plus the cycles run since; the raw count runs ahead by the cycles spent
+  booting, 14 ms on the nRF54L15).  It used to take the node's slice time,
   which the interpreter and the JIT advance at different points, so a line
   could be stamped up to a slice (about 10 ms) earlier, differently with
   and without the JIT, and lines could run backwards (a 0.4.0 known
