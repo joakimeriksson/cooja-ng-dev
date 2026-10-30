@@ -28,6 +28,9 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   `ot-cli-ftd` images, give them one dataset, and pass when node 1 leads,
   node 2 is its child and node 1's ping to `ff03::1` is answered (CI runs
   both).  [`docs/openthread.md`](docs/openthread.md) is the guide.
+- **An OpenThread demo on the site**: three CC2538s form a Thread network,
+  recorded by the Pages build and runnable live in the browser (WebAssembly,
+  held to the native run like the others).
 
 ### Fixed
 - **Zephyr nodes acknowledge 802.15.4 frames (nRF52840).**  `nrf_802154`

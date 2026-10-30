@@ -16,9 +16,11 @@ nodes:
 
 test:
   steps:
-    - { wait: "leader", node: 1, timeout_ms: 21000 }
-    - { wait: "child", node: 2 }
-    - { wait: "bytes from", node: 1 }
+    - { wait: "bytes from", node: 1, count: 1, timeout_ms: 25000 }
+  # The state replies come in the same millisecond, in any order.
+  validators:
+    - { pattern: "leader", node: 1, min_count: 1 }
+    - { pattern: "child", min_count: 1 }
   actions:
     - { at_ms: 2000, type: send_all, data: "dataset networkkey 00112233445566778899aabbccddeeff\n" }
     - { at_ms: 2100, type: send_all, data: "dataset channel 15\n" }

@@ -11,7 +11,7 @@ A fast, multi-architecture emulator and network simulator for Contiki-NG, writte
 
 **Status:** the full Contiki-NG Cooja test suite passes — **93 / 93**, including all 8 TUN/border-router cases (those need `--with-tun` and root).  See [docs/contiki-ng-testing.md](docs/contiki-ng-testing.md).
 
-**Watch it run:** <https://mikroverk.github.io/cooja-ng/> — recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT) replayed in the browser by the simulator's own web UI, or **run live in the browser**: the simulator compiled to WebAssembly, on the original firmware, with no server ([`wasm/`](wasm/README.md)).
+**Watch it run:** <https://mikroverk.github.io/cooja-ng/> — recorded runs (a 100-node Sky grid, three CPU architectures on one RPL network, TrustZone-M, TSCH, Contiki-NG with Zephyr and with RIOT, a Thread network with OpenThread) replayed in the browser by the simulator's own web UI, or **run live in the browser**: the simulator compiled to WebAssembly, on the original firmware, with no server ([`wasm/`](wasm/README.md)).
 
 ```
                           ┌──────────────────────────────────────────────┐
