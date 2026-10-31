@@ -92,6 +92,29 @@ With binutils 2.45 or later, `ot-cc2538` needs one change to link:
 example. The file's extension names the board; or keep the ELF's name and
 say `board:` in the setup.
 
+## Seeing the network: the thread overlay
+
+Add `plugins: [thread]` to a config (version 2) and the canvas draws the
+network in OTNS's style: the leader a hexagon with a red ring, routers
+hexagons, children circles (a sleepy child's ring dashed), each filled with
+its partition's colour and labelled with its RLOC16, with green arrows from
+children to their parents and blue links between routers.  It reads each
+node's MLE state out of OpenThread's static instance (`ot::gInstanceRaw`)
+with offsets from `src/services/thread_layout.h`, picked by the image's CPU
+and `sizeof(ot::Instance)`.  `plugins: [thread-packets]` shows what the MAC
+headers alone tell (a node's RLOC16 says router or child, and whose child),
+without the leader or the partition, which travel inside encrypted MLE.
+
+Right-click a node for its role commands — become leader (`leaderweight
+128`, `state leader`: OpenThread only lets a node take over with a higher
+leader weight), become router or child, detach, rejoin — sent to its console
+as if typed.  `examples/thread-overlay.yaml` puts six CC2538s through a
+leader, routers, a sleepy child, a partition split and a merge:
+
+```sh
+cngsim run thread-overlay --ui
+```
+
 ## What the emulator provides
 
 OpenThread drives hardware Contiki-NG never touches; running it brought these
@@ -100,7 +123,10 @@ into the models (CHANGELOG, Unreleased, has the details):
 - **CC2538:** the ROM function table (flash erase and programming for the
   settings pages, memset/memcpy), the alternate interrupt map, frames sent as
   long as their length byte says when the driver writes the FCS bytes too,
-  and console input at 115200 baud.
+  console input at 115200 baud, the auto-ACK one turnaround after the frame,
+  and source address matching for its frame-pending bit and
+  `SRC_MATCH_FOUND` (without them a sleepy child never attached to a CC2538
+  parent).
 - **nRF52840:** the NVMC (flash), the ECB AES block cipher, RTC2, EGU1–5, PPI
   channel groups and FORK, the radio's bit counter (address filtering as the
   frame arrives) and MAC header match (ACK matching), UARTE input read

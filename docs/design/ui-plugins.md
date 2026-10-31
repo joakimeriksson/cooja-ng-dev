@@ -95,6 +95,7 @@ The vocabulary is small and protocol-neutral:
 | `fill`, `ring` | CSS colours; `ring` draws a 3 px outline, `ring_dash: true` dashes it (a sleepy node) |
 | `badge` | up to 2 characters drawn in the glyph |
 | `label` | short text under the node's name |
+| `actions` | `[[label, command], ...]`: console commands offered on the node's right-click menu (when the page may edit the run: loopback, or `--ui-edit`) and sent to the node as typed lines; a command may hold several lines |
 | `links[]` | `from`, `to` (node ids), `style`: `parent` (green, arrow to the parent) \| `router` (blue) \| `dashed` \| `plain`; optional `color` |
 | `legend` | rows for the box, as `rows` are |
 
@@ -149,7 +150,10 @@ DWARF (`tools/strip-debug.py`).  At run time
 whose machine matches the image and whose `sizeof` matches the size the
 image's symbol table records for the variable: an image built with another
 configuration picks no layout, and the overlay says so instead of reading
-the wrong bytes.
+the wrong bytes.  A row is `{ layout, machine, struct, field, offset, size, bit, bits }`;
+for a bitfield (OpenThread's neighbour state and link quality are) `bits`
+is its width and `bit` its position from the least significant bit of the
+byte at `offset`, and `struct_layout_value()` picks it out.
 
 ## Writing an overlay: the rpl walkthrough
 
@@ -180,6 +184,12 @@ code runs as the built-in (`rpl_overlay_service.c`, kernel calls) or as a
 `.so` handed the v3 `ui` and v4 `fw` vtables.  `tools/check-plugin.sh`
 checks the DODAG on a Sky chain (firmware and packets) and on Sky +
 CC2538 + nRF52840, and that the PCAP is the same with and without it.
+
+The **thread overlay** (`thread_overlay_engine.c`, `"plugins": ["thread"]`)
+is the second example: OpenThread's MLE role, device mode, RLOC16, leader
+data, parent and router table from `ot::gInstanceRaw`, drawn in OTNS's
+grammar, with each node's role commands as `actions`
+(`docs/openthread.md`).
 
 Out of scope: writing firmware memory; firmware reads on native, JS and
 external nodes (they have no ELF — the packet source covers what they

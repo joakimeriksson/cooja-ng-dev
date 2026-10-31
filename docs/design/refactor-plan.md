@@ -3371,6 +3371,12 @@ the same patch.
   arrows, in a lane beside their centre line (the overlay plan had them
   under the arrows, where RPL's traffic — almost all of it on parent
   links — hid them).
+- **A layer's node actions are console lines.**  `actions` in a layer node
+  are `[label, command]` pairs the page offers on the node's right-click
+  menu and sends with the existing `send` command — the same path, and the
+  same edit gate (loopback or `--ui-edit`), as typing into the node's
+  console — so a role change needs no panel→plugin command channel and
+  goes into the console history like anything typed.
 
 ## Doc Status
 
