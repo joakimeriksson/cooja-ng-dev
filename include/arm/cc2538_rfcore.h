@@ -83,6 +83,7 @@ typedef enum {
 #define RFIRQF0_RXPKTDONE (1 << 6)
 #define RFIRQF0_SFD       (1 << 1)
 #define RFIRQF0_FIFOP     (1 << 2)
+#define RFIRQF0_SRC_MATCH_FOUND (1 << 4)   /* a source-match table entry matched */
 
 /* IRQ numbers for RF Core, by interrupt map (SYS_CTRL_I_MAP.ALTMAP): the
  * regular map Contiki-NG uses puts them at vectors 157/158, the alternate
