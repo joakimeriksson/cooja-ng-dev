@@ -135,9 +135,16 @@ A firmware variable is usually a struct whose layout depends on the CPU
 and the build configuration, so offsets are not hard-coded.
 `tools/gen-struct-layout.py` reads them from the DWARF of an unstripped
 image and merges rows into an overlay's layout header
-(`src/services/rpl_layout.h`); `build-device-firmware.sh --layout HEADER`
-rebuilds an image's example with `-g` (which changes no code) to get that
-DWARF without rewriting the shipped image.  At run time
+(`src/services/rpl_layout.h`).  The bundled Sky and nRF52840 RPL-UDP images
+carry their DWARF: they were rebuilt with `build-device-firmware.sh --debug`
+at the commit and with the compiler they were first built with, and
+`tools/check-same-program.py` confirms each is the same program (every
+allocated section, the entry point, every symbol), so simulations are
+unchanged and their layouts come from the images themselves.  For an image
+without DWARF, `build-device-firmware.sh --layout HEADER` rebuilds its
+example with `-g` (which changes no code) to read the layout, without
+rewriting the shipped image.  The browser build serves firmware stripped of
+DWARF (`tools/strip-debug.py`).  At run time
 `struct_layout_pick()` (`include/sim/struct_layout.h`) chooses the group
 whose machine matches the image and whose `sizeof` matches the size the
 image's symbol table records for the variable: an image built with another

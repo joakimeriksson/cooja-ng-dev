@@ -30,6 +30,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   Plugins now also receive `SIM_OBS_PACKET_FRAME` events, with the frame's
   bytes, in headless runs, as they do with the UI on.  New unit suite:
   `./build/test_runner fwvar`.
+- **The Sky and nRF52840 RPL-UDP images carry DWARF.**  Rebuilt at the
+  Contiki-NG commit and with the compiler each was first built with
+  (`build-device-firmware.sh --debug`, and `--relstr` for the version
+  string), they are the same programs — every allocated section, the entry
+  point and every symbol (`tools/check-same-program.py`), and the same
+  simulation output and PCAP — so overlays read struct layouts from the
+  images themselves.  The browser build serves firmware without it
+  (`tools/strip-debug.py`).  Docker builds now print the checkout's version
+  (`git describe`, taken on the host) instead of a bare "Contiki-NG".
 - **The web UI's Packets tab dissects every frame** with
   [dpkt-js](https://mikroverk.github.io/dpkt-js/): the Protocol and Info
   columns come from the dissection (DIO, UDP, MLE, TMF, CoAP...), and a

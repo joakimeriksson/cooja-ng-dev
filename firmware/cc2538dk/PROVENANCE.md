@@ -23,11 +23,13 @@
 
 ## Overlay struct layouts (udp-client, udp-server)
 
-`src/services/rpl_layout.h` has rows for `udp-client.cc2538dk` and `udp-server.cc2538dk`
-(layout `contiki-ng-cortex-m`), from DWARF builds of `examples/rpl-udp` at contiki-ng
-commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (host arm-none-eabi-gcc 15.2), made with each
-image's build command plus `--layout src/services/rpl_layout.h`.  The
-overlay picks them by CPU and `sizeof(rpl_instance_t)` (352 bytes, which the
-shipped images' `curr_instance` symbols match); an image rebuilt with
-another configuration needs the rows regenerated (see
-`firmware/PROVENANCE-template.md`).
+`udp-client.cc2538dk` and `udp-server.cc2538dk` print
+`Contiki-NG-release/v5.1` and were built with Arm GCC 9-2019-q4 (their
+`.comment`); they carry no DWARF for Contiki's code, and that toolchain is
+not at hand to rebuild them as the same program.  `src/services/rpl_layout.h`
+has rows for them (layout `contiki-ng-cortex-m`) from DWARF builds of
+`examples/rpl-udp` at contiki-ng `52f1b1e7d66605c30e3441ae87ab00328aa561f2`
+(host Arm GCC 15.2, `--layout src/services/rpl_layout.h`); the overlay picks
+them by `sizeof(rpl_instance_t)` (352 bytes, which these images'
+`curr_instance` symbols match), the same layout the nRF52840 images' own
+DWARF gives.

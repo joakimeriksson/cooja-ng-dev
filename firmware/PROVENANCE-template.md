@@ -67,7 +67,10 @@ working. Used by `test_firmware.c` and friends.
 
 An image an overlay reads (the rpl overlay: RPL Lite's `curr_instance`)
 needs a row in that overlay's layout header, or the overlay falls back to
-the packets.  Rows come from a DWARF build of the same source and
+the packets.  Prefer building the image with `--debug`: it then carries its
+DWARF (the same program — `-g` changes no code) and the rows come from the
+image itself (`tools/gen-struct-layout.py --update HEADER IMAGE`).  Docker
+builds need `--relstr` to reproduce an older image's version string.  Rows come from a DWARF build of the same source and
 configuration — the image's own build command plus `--layout HEADER`
 (`tools/build-device-firmware.sh`; `-g` changes no code, the image is not
 rewritten).  Rebuilding an image with another configuration can change

@@ -19,13 +19,26 @@
   capture/compare paths (timertest); the boot test asserts clean
   execution, no expected-output substring.
 
+## udp-server.sky
+
+- **Source**: contiki-ng commit `f15d82e66` (the image prints `Contiki-NG-release/v5.1-164-gf15d82e66`)
+- **Source path**: `examples/rpl-udp` (file: `udp-server.c`)
+- **TARGET**: `sky`
+- **Toolchain**: Docker contiker/contiki-ng, msp430-gcc 4.7.4 (mspgcc dev 20120911), the compiler the image's `.comment` names
+- **Built**: 2026-10-31 by Joakim Eriksson, with DWARF: `tools/build-device-firmware.sh --target sky --example examples/rpl-udp --source-file udp-server --output firmware/sky/udp-server.sky --debug --relstr release/v5.1-164-gf15d82e66`
+- **Why**: the RPL-UDP pair most configs use.  This rebuild replaced an image with no recorded provenance and no DWARF for Contiki's code; it is the same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — so overlays can read struct layouts from the image itself.
+
+## udp-client.sky
+
+- **Source**: contiki-ng commit `f15d82e66` (the image prints `Contiki-NG-release/v5.1-164-gf15d82e66`)
+- **Source path**: `examples/rpl-udp` (file: `udp-client.c`)
+- **TARGET**: `sky`
+- **Toolchain**: Docker contiker/contiki-ng, msp430-gcc 4.7.4 (mspgcc dev 20120911), the compiler the image's `.comment` names
+- **Built**: 2026-10-31 by Joakim Eriksson, with DWARF: `tools/build-device-firmware.sh --target sky --example examples/rpl-udp --source-file udp-client --output firmware/sky/udp-client.sky --debug --relstr release/v5.1-164-gf15d82e66`
+- **Why**: the RPL-UDP pair most configs use.  This rebuild replaced an image with no recorded provenance and no DWARF for Contiki's code; it is the same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — so overlays can read struct layouts from the image itself.
+
 ## Overlay struct layouts (udp-client, udp-server)
 
-`src/services/rpl_layout.h` has rows for `udp-client.sky` and `udp-server.sky`
-(layout `contiki-ng-msp430`), from DWARF builds of `examples/rpl-udp` at contiki-ng
-commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (Docker contiker/contiki-ng, msp430-gcc 4.7.4), made with each
-image's build command plus `--layout src/services/rpl_layout.h`.  The
-overlay picks them by CPU and `sizeof(rpl_instance_t)` (254 bytes, which the
-shipped images' `curr_instance` symbols match); an image rebuilt with
-another configuration needs the rows regenerated (see
-`firmware/PROVENANCE-template.md`).
+`src/services/rpl_layout.h`'s layout `contiki-ng-msp430` holds for these two
+images: `tools/gen-struct-layout.py` on the images themselves gives exactly
+its rows (`sizeof(rpl_instance_t)` = 254).

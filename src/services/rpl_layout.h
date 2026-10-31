@@ -1,12 +1,14 @@
 /*
  * rpl_layout — Contiki-NG RPL Lite struct layouts for the rpl overlay.
  *
- * GENERATED rows: do not edit them by hand.  Add an image with its own build
- * command plus --layout (a DWARF build; the image itself is not rewritten):
+ * GENERATED rows: do not edit them by hand.  An image that carries DWARF
+ * (the bundled Sky and nRF52840 RPL-UDP images do: build-device-firmware.sh
+ * --debug) is added straight from itself:
  *
- *   tools/build-device-firmware.sh --target sky --example examples/rpl-udp \
- *       --source-file udp-client --output firmware/sky/udp-client.sky \
- *       --layout src/services/rpl_layout.h
+ *   tools/gen-struct-layout.py --update src/services/rpl_layout.h firmware/sky/udp-client.sky
+ *
+ * one without, through a DWARF build of its source (the image itself is not
+ * rewritten): its own build command plus --layout src/services/rpl_layout.h.
  *
  * The overlay picks a layout by the image's machine and the size of its
  * curr_instance symbol (sizeof rpl_instance_t); see struct_layout.h.

@@ -17,6 +17,7 @@
 - **Toolchain**: Docker contiker/contiki-ng:latest
 - **Built**: 2026-05-11T09:09:05Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --output firmware/nrf52840-dk/udp-server.nrf52840-dk --source-file udp-server`
+- **Rebuilt with DWARF**: 2026-10-31 by Joakim Eriksson, at the same commit and toolchain (Docker contiker/contiki-ng, Arm GCC 10.3-2021.10, the compiler the image's `.comment` names): `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --source-file udp-server --output firmware/nrf52840-dk/udp-server.nrf52840-dk --debug --relstr release/v5.1-81-gad0d07381`.  The same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — now with DWARF, so overlays can read its struct layouts.
 
 ## udp-client.nrf52840-dk
 
@@ -27,6 +28,7 @@
 - **Toolchain**: Docker contiker/contiki-ng:latest
 - **Built**: 2026-05-11T09:09:11Z by Joakim Eriksson
 - **Build command**: `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --output firmware/nrf52840-dk/udp-client.nrf52840-dk --source-file udp-client`
+- **Rebuilt with DWARF**: 2026-10-31 by Joakim Eriksson, at the same commit and toolchain (Docker contiker/contiki-ng, Arm GCC 10.3-2021.10, the compiler the image's `.comment` names): `tools/build-device-firmware.sh --target nrf52840 --board dk --example examples/rpl-udp --source-file udp-client --output firmware/nrf52840-dk/udp-client.nrf52840-dk --debug --relstr release/v5.1-81-gad0d07381`.  The same program — every allocated section, the entry point and every symbol (`tools/check-same-program.py`), and the same simulation output and PCAP — now with DWARF, so overlays can read its struct layouts.
 
 ## zephyr-echo-server.nrf52840-dk / zephyr-echo-client.nrf52840-dk
 
@@ -90,11 +92,6 @@ The Contiki-NG side of the two interop demos (`configs/interop-contiki-zephyr.js
 
 ## Overlay struct layouts (udp-client, udp-server)
 
-`src/services/rpl_layout.h` has rows for `udp-client.nrf52840-dk` and `udp-server.nrf52840-dk`
-(layout `contiki-ng-cortex-m`), from DWARF builds of `examples/rpl-udp` at contiki-ng
-commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (host arm-none-eabi-gcc 15.2), made with each
-image's build command plus `--layout src/services/rpl_layout.h`.  The
-overlay picks them by CPU and `sizeof(rpl_instance_t)` (352 bytes, which the
-shipped images' `curr_instance` symbols match); an image rebuilt with
-another configuration needs the rows regenerated (see
-`firmware/PROVENANCE-template.md`).
+`src/services/rpl_layout.h`'s layout `contiki-ng-cortex-m` holds for these
+two images: `tools/gen-struct-layout.py` on the images themselves (they carry
+DWARF) gives exactly its rows (`sizeof(rpl_instance_t)` = 352).
