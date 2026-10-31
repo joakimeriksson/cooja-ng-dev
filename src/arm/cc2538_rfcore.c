@@ -79,6 +79,36 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
     rf->fsmstat0 = (uint32_t)state;
 }
 
+/* 802.15.4 aTurnaroundTime: 12 symbols of 16 us. */
+#define RF_ACK_TURNAROUND_NS (12 * 16000LL)
+
+/* --- Auto-ACK, one turnaround after the frame it answers --- */
+
+static void rfcore_ack_send(void *user_data, arm_event_t *ev) {
+    cc2538_rfcore_t *rf = (cc2538_rfcore_t *)user_data;
+    (void)ev;
+    if (!rf->tx_callback) return;
+    /* ACK frame: preamble(4) + SFD(1) + len(1) + FCF(2) + DSN(1) + FCS(2) */
+    for (int i = 0; i < PREAMBLE_MIN; i++)
+        rf->tx_callback(rf->tx_user_data, 0x00);
+    rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
+    rf->tx_callback(rf->tx_user_data, 5);    /* length: FCF(2) + DSN(1) + FCS(2) */
+    uint8_t ack_fcf0 = 0x02; /* frame type = ACK */
+    uint8_t ack_fcf1 = 0x00;
+    rf->tx_callback(rf->tx_user_data, ack_fcf0);
+    rf->tx_callback(rf->tx_user_data, ack_fcf1);
+    rf->tx_callback(rf->tx_user_data, rf->ack_dsn);
+    /* Compute FCS (CCITT CRC with bit reversal) */
+    uint16_t ack_crc = 0;
+    ack_crc = crc_add_bitrev(ack_crc, ack_fcf0);
+    ack_crc = crc_add_bitrev(ack_crc, ack_fcf1);
+    ack_crc = crc_add_bitrev(ack_crc, rf->ack_dsn);
+    rf->tx_callback(rf->tx_user_data, bitrev((ack_crc >> 8) & 0xFF));
+    rf->tx_callback(rf->tx_user_data, bitrev(ack_crc & 0xFF));
+    rf->rfirqf1 |= RFIRQF1_TXACKDONE;
+    rfcore_check_interrupts(rf);
+}
+
 /* --- TX done event callback --- */
 
 static void rfcore_tx_done(void *user_data, arm_event_t *ev) {
@@ -604,6 +634,8 @@ void cc2538_rfcore_init(cc2538_rfcore_t *rf, arm_cpu_t *cpu, arm_nvic_t *nvic) {
 
     rf->tx_event.callback = rfcore_tx_done;
     rf->tx_event.user_data = rf;
+    rf->ack_event.callback = rfcore_ack_send;
+    rf->ack_event.user_data = rf;
 
     arm_register_io(cpu, RFCORE_FFSM_BASE, RFCORE_FFSM_SIZE,
                     ffsm_read, ffsm_write, rf);
@@ -828,25 +860,16 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                 if ((rf->frmctrl0 & (1 << 5)) && rf->rx_ack_request &&
                     rf->tx_callback && !rf->rx_overflow && crc_ok &&
                     rfcore_dest_addr_matches(rf)) {
-                    for (int i = 0; i < PREAMBLE_MIN; i++)
-                        rf->tx_callback(rf->tx_user_data, 0x00);
-                    rf->tx_callback(rf->tx_user_data, IEEE802154_SFD);
-                    rf->tx_callback(rf->tx_user_data, 5);    /* length: FCF(2) + DSN(1) + FCS(2) */
-                    uint8_t ack_fcf0 = 0x02; /* frame type = ACK */
-                    uint8_t ack_fcf1 = 0x00;
-                    uint8_t ack_dsn  = rf->rx_dsn;
-                    rf->tx_callback(rf->tx_user_data, ack_fcf0);
-                    rf->tx_callback(rf->tx_user_data, ack_fcf1);
-                    rf->tx_callback(rf->tx_user_data, ack_dsn);
-                    /* Compute FCS (CCITT CRC with bit reversal) */
-                    uint16_t ack_crc = 0;
-                    ack_crc = crc_add_bitrev(ack_crc, ack_fcf0);
-                    ack_crc = crc_add_bitrev(ack_crc, ack_fcf1);
-                    ack_crc = crc_add_bitrev(ack_crc, ack_dsn);
-                    rf->tx_callback(rf->tx_user_data, bitrev((ack_crc >> 8) & 0xFF));
-                    rf->tx_callback(rf->tx_user_data, bitrev(ack_crc & 0xFF));
-                    rf->rfirqf1 |= RFIRQF1_TXACKDONE;
-                    rfcore_check_interrupts(rf);
+                    /* Not now: the sender is still turning its radio from
+                     * TX to RX.  The ACK goes out aTurnaroundTime (12
+                     * symbols, 192 us) after the frame, as on silicon and
+                     * as the CC2420 model does; sent at once it began
+                     * within microseconds of the frame (a byte early for
+                     * a sender whose bytes are delivered at their start)
+                     * and no sender heard it. */
+                    rf->ack_dsn = rf->rx_dsn;
+                    arm_schedule_event_ns(rf->cpu, &rf->ack_event,
+                                          rf->cpu->sim_time_ns + RF_ACK_TURNAROUND_NS);
                 }
 
                 /* Reset for next frame */

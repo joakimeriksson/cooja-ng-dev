@@ -227,6 +227,9 @@ typedef struct cc2538_rfcore {
 
     /* Events */
     arm_event_t      tx_event;
+    /* Auto-ACK, sent one turnaround (12 symbols) after the frame it answers. */
+    arm_event_t      ack_event;
+    uint8_t          ack_dsn;
     arm_event_t      rx_cal_event;
 } cc2538_rfcore_t;
 

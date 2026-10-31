@@ -7,6 +7,20 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 
 ## [Unreleased]
 
+### Fixed
+- **The CC2538's auto-ACK came too early for anyone to hear it.**  It went
+  out the moment the frame's last byte was received (a byte before the end
+  for an nRF52840 sender), while the sender's radio was still turning from
+  TX to RX, so a Sky or an nRF52840 never saw a CC2538 ACK and retried every
+  unicast to the maximum.  Direct links hid it (the retries were duplicates
+  of frames already delivered); a node whose parent was a CC2538 lost its
+  parent to MAC failures and dropped out of the DAG.  The ACK now goes out
+  aTurnaroundTime (12 symbols, 192 us) after the frame, as on silicon and in
+  the CC2420 model.  New test: `configs/test-mixed-platform-line.yaml` (an
+  nRF52840 reaching a Sky root through a CC2538).  Runs with a CC2538 that
+  is sent unicast frames change (the `mixed` and `armmn` baseline
+  workloads): fewer retransmissions, the same traffic.
+
 ## [0.4.0] — 2026-10-29
 
 This release makes Cooja-NG usable without building it from source. `cngsim`
