@@ -20,6 +20,15 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
   nRF52840 reaching a Sky root through a CC2538).  Runs with a CC2538 that
   is sent unicast frames change (the `mixed` and `armmn` baseline
   workloads): fewer retransmissions, the same traffic.
+- **A sleepy child could not attach to a CC2538 parent.**  The CC2538's
+  auto-ACK never set *frame pending*: the radio's source-address matching
+  (the table OpenThread fills with its sleepy children while it has frames
+  for them, the per-entry enable and auto-pending bits, `SRCMATCH`,
+  `FRMCTRL1.PENDING_OR`) was not modelled, so a sleepy child's Data Request
+  was answered "nothing for you", it went back to sleep, and it never
+  received its Child ID Response.  The ACK now sets the bit as SWRU319 §23.7
+  describes, with the registers' reset values (`SRCMATCH` = 0x07).
+  Contiki-NG clears `SRCMATCH`, so its runs are unchanged.
 
 ## [0.4.0] — 2026-10-29
 

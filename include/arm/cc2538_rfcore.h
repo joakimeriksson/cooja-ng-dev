@@ -230,6 +230,16 @@ typedef struct cc2538_rfcore {
     /* Auto-ACK, sent one turnaround (12 symbols) after the frame it answers. */
     arm_event_t      ack_event;
     uint8_t          ack_dsn;
+    bool             ack_pending;       /* the ACK's frame-pending bit       */
+
+    /* Source address matching (SWRU319 §23.7), for the frame-pending bit:
+     * the table is one byte per 32-bit word of RFCORE_FFSM_SRCADDRESS_TABLE
+     * (a short entry i is words 4i..4i+3: PAN ID, short address; an
+     * extended entry i words 8i..8i+7), and the enable and auto-pending
+     * bits are 24-bit masks (short entry i: bit i; extended: bit 2i). */
+    uint8_t          src_table[96];
+    uint32_t         src_short_en, src_ext_en;
+    uint32_t         src_short_penden, src_ext_penden;
     arm_event_t      rx_cal_event;
 } cc2538_rfcore_t;
 
