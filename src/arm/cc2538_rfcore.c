@@ -84,16 +84,20 @@ static void rfcore_set_state(cc2538_rfcore_t *rf, rf_state_t state) {
 
 /* --- The auto-ACK's frame-pending bit (SWRU319 §23.7) --- */
 
-/* The ACK says "frame pending" when FRMCTRL1.PENDING_OR is set, or when
- * source matching with AUTOPEND is on and the frame's source address is an
- * enabled table entry whose auto-pending bit is set — only for a MAC Data
- * Request with PEND_DATAREQ_ONLY.  OpenThread keeps its sleepy children's
- * addresses there while it has frames queued for them; with the bit always
- * clear, as before, a sleepy child slept through its parent's replies and
- * never attached.  `p` is the received frame (PSDU), `n` its length. */
-static bool rfcore_frame_pending(const cc2538_rfcore_t *rf, const uint8_t *p, int n) {
-    if (rf->frmctrl1 & (1u << 2)) return true;                 /* PENDING_OR */
-    if ((rf->srcmatch & 3u) != 3u || n < 3) return false;      /* SRC_MATCH_EN + AUTOPEND */
+/* Source matching on a received frame (`p` its PSDU, `n` its length).
+ * With SRCMATCH.SRC_MATCH_EN, a source address that is an enabled table
+ * entry sets RFIRQF0.SRC_MATCH_FOUND (*found) — OpenThread's driver reads
+ * that flag as "this frame was ACKed with frame pending".  The return value
+ * is the ACK's frame-pending bit: FRMCTRL1.PENDING_OR, or AUTOPEND and a
+ * found entry whose auto-pending bit is set, for a MAC Data Request only
+ * when PEND_DATAREQ_ONLY.  OpenThread keeps its sleepy children's
+ * addresses there while it has frames queued for them; with neither
+ * modelled, as before, a sleepy child slept through its parent's replies
+ * and the parent never sent them: it never attached. */
+static bool rfcore_src_match(const cc2538_rfcore_t *rf, const uint8_t *p, int n, bool *found) {
+    *found = false;
+    bool pending_or = (rf->frmctrl1 & (1u << 2)) != 0;
+    if (!(rf->srcmatch & 1u) || n < 3) return pending_or;      /* SRC_MATCH_EN */
     uint16_t fcf = (uint16_t)(p[0] | (p[1] << 8));
     int type = fcf & 7, dam = (fcf >> 10) & 3, sam = (fcf >> 14) & 3;
     bool compress = (fcf >> 6) & 1, secured = (fcf >> 3) & 1;
@@ -105,7 +109,27 @@ static bool rfcore_frame_pending(const cc2538_rfcore_t *rf, const uint8_t *p, in
         src = p + pos;
         pos += sam == 3 ? 8 : 2;
     }
-    if (!src || sam == 1 || pos > n) return false;
+    if (!src || sam == 1 || pos > n) return pending_or;
+    bool penden = false;
+    if (sam == 2) {
+        for (int i = 0; i < 24 && !*found; i++) {
+            const uint8_t *e = rf->src_table + 4 * i;
+            if ((rf->src_short_en >> i & 1) && span &&
+                e[0] == span[0] && e[1] == span[1] && e[2] == src[0] && e[3] == src[1]) {
+                *found = true;
+                penden = rf->src_short_penden >> i & 1;
+            }
+        }
+    } else {
+        for (int i = 0; i < 12 && !*found; i++) {
+            if ((rf->src_ext_en >> (2 * i) & 1) && memcmp(rf->src_table + 8 * i, src, 8) == 0) {
+                *found = true;
+                penden = rf->src_ext_penden >> (2 * i) & 1;
+            }
+        }
+    }
+    if (pending_or) return true;
+    if (!(rf->srcmatch & 2u) || !*found || !penden) return false;   /* AUTOPEND */
     if (rf->srcmatch & 4u) {                                   /* PEND_DATAREQ_ONLY */
         if (secured && pos < n) {                              /* the auxiliary security header */
             static const int keyid_len[4] = { 0, 1, 5, 9 };
@@ -113,21 +137,7 @@ static bool rfcore_frame_pending(const cc2538_rfcore_t *rf, const uint8_t *p, in
         }
         if (type != 3 || pos >= n || p[pos] != 0x04) return false;   /* Data Request */
     }
-    if (sam == 2) {
-        for (int i = 0; i < 24; i++) {
-            const uint8_t *e = rf->src_table + 4 * i;
-            if ((rf->src_short_en >> i & 1) && (rf->src_short_penden >> i & 1) &&
-                span && e[0] == span[0] && e[1] == span[1] && e[2] == src[0] && e[3] == src[1])
-                return true;
-        }
-    } else {
-        for (int i = 0; i < 12; i++) {
-            if ((rf->src_ext_en >> (2 * i) & 1) && (rf->src_ext_penden >> (2 * i) & 1) &&
-                memcmp(rf->src_table + 8 * i, src, 8) == 0)
-                return true;
-        }
-    }
-    return false;
+    return true;
 }
 
 /* --- Auto-ACK, one turnaround after the frame it answers --- */
@@ -939,6 +949,15 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                         (uint8_t)((crc_ok ? 0x80 : 0x00) | (lqi & 0x7F)); /* CRC_OK | LQI */
                 }
 
+                /* Source matching is done while the frame arrives, so its
+                 * flag is up by the time the frame is (SWRU319 §23.7). */
+                bool src_found = false;
+                {   /* the frame as it sits in RXFIFO: length byte, then PSDU */
+                    int start = rf->rxfifo_len - 1 - rf->rxlen;
+                    rf->ack_pending = start >= 0 && !rf->rx_overflow &&
+                        rfcore_src_match(rf, rf->rxfifo + start + 1, rf->rxlen - 2, &src_found);
+                }
+                if (src_found) rf->rfirqf0 |= RFIRQF0_SRC_MATCH_FOUND;
                 rf->rfirqf0 |= RFIRQF0_RXPKTDONE | RFIRQF0_FIFOP;
                 rf->fifop_signal = true;
                 rfcore_check_interrupts(rf);
@@ -959,11 +978,6 @@ void cc2538_rfcore_receive_byte(cc2538_rfcore_t *rf, uint8_t byte) {
                      * a sender whose bytes are delivered at their start)
                      * and no sender heard it. */
                     rf->ack_dsn = rf->rx_dsn;
-                    {   /* the frame as it sits in RXFIFO: length byte, then PSDU */
-                        int start = rf->rxfifo_len - 1 - rf->rxlen;
-                        rf->ack_pending = start >= 0 &&
-                            rfcore_frame_pending(rf, rf->rxfifo + start + 1, rf->rxlen - 2);
-                    }
                     arm_schedule_event_ns(rf->cpu, &rf->ack_event,
                                           rf->cpu->sim_time_ns + RF_ACK_TURNAROUND_NS);
                 }
