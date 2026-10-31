@@ -94,6 +94,8 @@ say `board:` in the setup.
 
 ## Seeing the network: the thread overlay
 
+![The thread overlay: a leader, four routers and a sleepy child](assets/thread-overlay.png)
+
 Add `plugins: [thread]` to a config (version 2) and the canvas draws the
 network in OTNS's style: the leader a hexagon with a red ring, routers
 hexagons, children circles (a sleepy child's ring dashed), each filled with
