@@ -22,6 +22,14 @@
 #                         file with a main() or PROCESS_THREAD.
 #   --no-provenance       Skip writing PROVENANCE.md (rare; CI may want it
 #                         off when stamping in a separate step).
+#   --layout HEADER       Layout rows only: rebuild the example with DWARF
+#                         (DEBUG=1, CFLAGS_DEBUG=-g) and merge the struct
+#                         layouts HEADER asks for into it, under --output's
+#                         file name (tools/gen-struct-layout.py; needs
+#                         pyelftools, $PYTHON or python3).  Neither the image
+#                         nor PROVENANCE.md is written: -g changes no code,
+#                         so the rows hold for the image built without it.
+#                         Give the image's own build command plus --layout.
 #
 # Default toolchain: Docker image contiker/contiki-ng:latest. The image
 # already has arm-none-eabi-gcc + msp430-gcc + the Contiki build harness,
@@ -47,6 +55,7 @@ DOCKER_IMAGE="contiker/contiki-ng:latest"
 # on the BSDs.
 case $(uname -s) in *BSD|DragonFly) MAKE=${MAKE:-gmake} ;; *) MAKE=${MAKE:-make} ;; esac
 SRC_FILE_ARG=""
+LAYOUT_HEADER=""
 
 # ---- args ----
 while [ $# -gt 0 ]; do
@@ -61,6 +70,7 @@ while [ $# -gt 0 ]; do
         --make-args)      EXTRA_MAKE_ARGS="$2"; shift 2 ;;
         --no-provenance)  WRITE_PROVENANCE=0; shift ;;
         --image)          DOCKER_IMAGE="$2"; shift 2 ;;
+        --layout)         LAYOUT_HEADER="$2"; shift 2 ;;
         -h|--help)        usage 0 ;;
         *) echo "unknown arg: $1" >&2; usage 1 ;;
     esac
@@ -117,6 +127,13 @@ else
 fi
 [ -n "$SRC_NAME" ] || { echo "Error: no main/PROCESS in $SRC_DIR/*.c" >&2; exit 1; }
 
+# Layout rows come from a DWARF build of the same source and configuration.
+if [ -n "$LAYOUT_HEADER" ]; then
+    [ -f "$LAYOUT_HEADER" ] || { echo "Error: --layout header not found: $LAYOUT_HEADER" >&2; exit 1; }
+    LAYOUT_HEADER="$(cd "$(dirname "$LAYOUT_HEADER")" && pwd)/$(basename "$LAYOUT_HEADER")"
+    EXTRA_MAKE_ARGS="$EXTRA_MAKE_ARGS DEBUG=1 CFLAGS_DEBUG=-g"
+fi
+
 # ---- build ----
 # Create the output directory first: resolving it with cd before it exists
 # fails inside the substitution and left OUTPUT_ABS as "/<name>".
@@ -166,6 +183,12 @@ for cand in "$SRC_DIR/$SRC_NAME.$TARGET" \
     [ -f "$cand" ] && { BUILT="$cand"; break; }
 done
 [ -n "$BUILT" ] || { echo "Error: built ELF not found near $SRC_DIR" >&2; exit 1; }
+
+if [ -n "$LAYOUT_HEADER" ]; then
+    "${PYTHON:-python3}" "$SCRIPT_DIR/gen-struct-layout.py" --update "$LAYOUT_HEADER" \
+        --name "$(basename "$OUTPUT")" "$BUILT"
+    exit $?
+fi
 
 cp "$BUILT" "$OUTPUT_ABS"
 echo ""

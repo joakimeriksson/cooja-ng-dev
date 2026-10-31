@@ -987,7 +987,8 @@ static void bus_host_frame_observed(void *user,
         node_states[sender_idx].radio_state = SIM_RADIO_ON;
     }
 
-    if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc)) {
+    if (ui_service_observing(&ui_svc) || verbose || pcap_service_is_open(&pcap_svc) ||
+        sim_runtime_frame_events(&sim_rt)) {
         uint8_t cap[RF_BUF_SIZE + 8];
         int cap_len = sim_radio_frame_capture(fi->capture, fi->capture_len,
                                               fi->subghz, cap, (int)sizeof cap);
@@ -1011,7 +1012,7 @@ static void bus_host_frame_observed(void *user,
              * unless MSP430 node 1). */
             if (verbose)
                 msp430_elf_mote_dump_uip(&nodes[sender_idx]);
-            if (ui_service_observing(&ui_svc))
+            if (ui_service_observing(&ui_svc) || sim_runtime_frame_events(&sim_rt))
                 emit_frame_obs(sender_idx, accurate_tx_start, true,
                                pinfo.summary, cap + 1, cap_len - 1);
         }
@@ -1081,7 +1082,7 @@ static void bus_host_on_rx_frame(void *user, const sim_radio_frame_info_t *fi,
                                (double)delivery_start / 1e9,
                                cc2420_state_name(trace_rcc));
         }
-        if (ui_service_observing(&ui_svc) && len > 5) {
+        if ((ui_service_observing(&ui_svc) || sim_runtime_frame_events(&sim_rt)) && len > 5) {
             uint8_t cap[RF_BUF_SIZE + 8];
             int cap_len = sim_radio_frame_capture(data, len, fi->subghz,
                                                   cap, (int)sizeof cap);
@@ -2909,6 +2910,8 @@ sim_restart:
     }
     if (ui_service_active(&ui_svc))
         ui_apply_setup();      /* the nodes' images are known now */
+    if (sim_ctl.sim == &sim_rt)
+        sim_rt.control = &sim_ctl;   /* booted: readable again after a restart */
 
     /* GDB stubs (M37: the gdb service binds one TCP listener per
      * --gdb-tagged node, attaches the arch vtable, sets each cpu->gdb_stub,
@@ -3368,11 +3371,15 @@ sim_restart:
             return SHELL_EXIT_INVALID;
         }
         /* A plugin service may want the radio-state stream (e.g. an energy /
-         * duty-cycle tracker).  Turn tracking on when any plugin service was
+         * duty-cycle tracker) or the transmitted frames (an overlay reading
+         * roles from the packets).  Turn both on when any plugin service was
          * attached (dynamic .so OR a named built-in), so SIM_OBS_RADIO_STATE
-         * flows headless.  No plugin → flag stays off → byte-identical. */
-        if (g_registry.service_count > svc_before || attached_builtin)
+         * and SIM_OBS_PACKET_FRAME flow headless.  No plugin → flags stay
+         * off → byte-identical. */
+        if (g_registry.service_count > svc_before || attached_builtin) {
             sim_runtime_set_radio_state_tracking(&sim_rt, true);
+            sim_runtime_set_frame_events(&sim_rt, true);
+        }
     }
 
     /* M72: a config naming a non-built-in medium (custom_medium, computed
@@ -3929,7 +3936,9 @@ sim_restart:
         ui_service_clear_restart(&ui_svc);
         g_restart_requested = false;
 
-        /* Destroy all nodes */
+        /* Destroy all nodes, with the control bundle detached until they
+         * are booted again (a firmware-variable reader finds no slot). */
+        sim_rt.control = NULL;
         for (int i = 0; i < node_count; i++)
             destroy_node(i);
         node_count = base_node_count;
@@ -4126,6 +4135,11 @@ sim_restart:
         total_node_cycles += node_cycles(i);
         total_node_instructions += node_instructions(i);
     }
+    /* The nodes go now, but observers still get events (the CPU snapshots
+     * below): detach the control bundle first, so a firmware-variable
+     * reader (sim_fwvar, an overlay) finds no slot to read instead of a
+     * freed CPU. */
+    sim_rt.control = NULL;
     for (int i = 0; i < node_count; i++)
         destroy_node(i);
 
