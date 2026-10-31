@@ -73,6 +73,8 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backgro
 #node-menu { position: fixed; display: none; z-index: 20; background: var(--header-bg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 0; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 #node-menu div { padding: 4px 16px; cursor: pointer; }
 #node-menu div:hover { background: var(--btn-bg); }
+#node-menu div.sep { padding: 0; margin: 4px 0; border-top: 1px solid var(--border); cursor: default; }
+#node-menu div.sep:hover { background: none; }
 #node-menu .title { color: var(--muted); cursor: default; }
 #node-menu .title:hover { background: none; }
 .node-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -550,15 +552,24 @@ ${ba.decode(this.body)}`}toBytes(){return x(Na.encode(`${this.startLine()}${this
     if (!hit) return;
     e.preventDefault();
     const editable = !replay && setup.edit;
+    // A plugin layer may offer console commands for the node (the thread
+    // overlay's role changes): sent as a line typed into its console.
+    const ls = activeLayers().nodes[hit.id];
+    const acts = editable && ls && Array.isArray(ls.actions) ? ls.actions.filter(a => Array.isArray(a) && a.length === 2) : [];
     nodeMenu.innerHTML = '<div class="title">Node ' + esc(hit.id) + '</div>' +
       '<div data-cmd="window">Open in a window</div>' +
-      (editable ? '<div data-cmd="reboot">Reboot</div><div data-cmd="remove">Remove</div>' : '');
+      (editable ? '<div data-cmd="reboot">Reboot</div><div data-cmd="remove">Remove</div>' : '') +
+      (acts.length ? '<div class="sep"></div>' + acts.map((a, i) =>
+        '<div data-act="' + i + '">' + esc(String(a[0])) + '</div>').join('') : '');
     nodeMenu.style.left = e.clientX + 'px';
     nodeMenu.style.top = e.clientY + 'px';
     nodeMenu.style.display = 'block';
     nodeMenu.onclick = (ev) => {
       const cmd = ev.target.dataset.cmd;
-      if (cmd === 'window') floatCard(hit.id, null);
+      const act = ev.target.dataset.act;
+      if (act !== undefined && acts[+act] && ws && ws.readyState === 1)
+        ws.send(JSON.stringify({cmd: 'send', node: hit.id, data: String(acts[+act][1])}));
+      else if (cmd === 'window') floatCard(hit.id, null);
       else if (cmd && ws && ws.readyState === 1) ws.send(JSON.stringify({cmd: cmd, node: hit.id}));
       hideNodeMenu();
     };

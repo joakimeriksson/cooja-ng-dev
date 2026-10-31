@@ -306,10 +306,12 @@ void rpl_overlay_refresh(rpl_overlay_t *o, sim_runtime_t *sim, int64_t now_ns) {
 
 void rpl_overlay_on_event(rpl_overlay_t *o, sim_runtime_t *sim,
                           const sim_observer_event_t *ev) {
-    /* Time running back further than a frame's start can lag the event that
-     * refreshed is a restart (the UI's or the shell's): a new run, so
-     * forget what the old one's packets said. */
-    if (ev->time_ns + REFRESH_NS < o->last_ns) {
+    /* A restart (the UI's or the shell's) starts the clock again at 0: a
+     * new run, so forget what the old one's packets said.  Events from
+     * different nodes can arrive a little out of time order (each node runs
+     * in its own slices), so only a clock back near zero, well behind the
+     * last refresh, counts. */
+    if (ev->time_ns < 2 * REFRESH_NS && o->last_ns > ev->time_ns + 10 * REFRESH_NS) {
         memset(o->pkt, 0, sizeof(o->pkt));
         o->last_ns = ev->time_ns;
     }

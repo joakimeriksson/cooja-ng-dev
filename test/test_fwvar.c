@@ -25,6 +25,7 @@
 #include "elf_loader.h"
 #include "cJSON.h"
 #include "../src/services/rpl_overlay_engine.h"
+#include "../src/services/thread_overlay_engine.h"
 #include "../src/services/rpl_layout.h"
 
 #include <stdio.h>
@@ -132,7 +133,9 @@ static void test_arm_memory_only(void) {
 static void test_layer_json(void) {
     sim_layer_t *l = sim_layer_begin("R\"P\\L");
     sim_layer_node(l, 1, &(sim_layer_style_t){ .glyph = "square", .fill = "#2a6", .badge = "R", .label = "rank 128" });
-    sim_layer_node(l, 4, &(sim_layer_style_t){ .ring = "#888", .ring_dash = true, .label = "a\nb" });
+    sim_layer_node(l, 4, &(sim_layer_style_t){ .ring = "#888", .ring_dash = true, .label = "a\nb",
+                                                .actions = (const char *const[]){ "Become leader", "leaderweight 128\nstate leader",
+                                                                                  "Detach", "thread stop", NULL } });
     sim_layer_link(l, 4, 1, "parent", NULL);
     sim_layer_link(l, 2, 1, NULL, "#f00");
     sim_layer_legend(l, "square", "DODAG root");
@@ -152,6 +155,11 @@ static void test_layer_json(void) {
               !cJSON_GetObjectItem(n1, "ring"), "a node carries only the members it was given");
         CHECK(n4 && cJSON_IsTrue(cJSON_GetObjectItem(n4, "ring_dash")) &&
               !strcmp(cJSON_GetObjectItem(n4, "label")->valuestring, "a\nb"), "ring_dash, an escaped label");
+        cJSON *acts = n4 ? cJSON_GetObjectItem(n4, "actions") : NULL;
+        CHECK(cJSON_GetArraySize(acts) == 2 &&
+              !strcmp(cJSON_GetArrayItem(cJSON_GetArrayItem(acts, 0), 1)->valuestring, "leaderweight 128\nstate leader") &&
+              !strcmp(cJSON_GetArrayItem(cJSON_GetArrayItem(acts, 1), 0)->valuestring, "Detach") &&
+              !cJSON_GetObjectItem(n1, "actions"), "node actions: label and command pairs, multi-line kept");
         CHECK(cJSON_GetArraySize(links) == 2 &&
               !strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(links, 1), "style")->valuestring, "plain") &&
               !strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(links, 1), "color")->valuestring, "#f00"),
@@ -235,15 +243,56 @@ static void test_rpl_packets(void) {
     CHECK(!last_panel, "no refresh 200 ms after the last one");
     tx(o, 0, 900000000LL, dio1);
     CHECK(last_panel, "a refresh 500 ms after it");
-    /* A restart runs time back to 0: a new run, the old packets forgotten. */
+    /* Events a little out of time order are not a restart... */
+    tx(o, 1, 600000000LL, dao2);
+    rpl_overlay_refresh(o, NULL, 10000000000LL);
+    CHECK(last_panel && strstr(last_panel, "\"from\":2,\"to\":1"), "node 2's parent kept");
+    /* ...the clock back at 0, ten seconds on, is: a new run, the old packets forgotten. */
     free(last_panel); last_panel = NULL;
     sim_observer_event_t boot = { .kind = SIM_OBS_MOTE_LOG_LINE, .time_ns = 0, .mote_index = 0 };
     rpl_overlay_on_event(o, NULL, &boot);
-    rpl_overlay_refresh(o, NULL, 1000);
+    rpl_overlay_refresh(o, NULL, 100000000LL);
     CHECK(last_panel && strstr(last_panel, "\"nodes\":{}") && strstr(last_panel, "no RPL seen yet: node 1, 2"),
           "after a restart nothing is known: %s", last_panel ? last_panel : "(none)");
     free(last_panel); last_panel = NULL;
     rpl_overlay_free(o);
+}
+
+/* The thread overlay from MAC headers alone: a data frame from a short
+ * address is a node's RLOC16 — child ID 0 a router, any other a child of
+ * the router in its upper bits. */
+static void test_thread_packets(void) {
+    thread_overlay_t *o = thread_overlay_create((thread_overlay_host_t){
+        .panel_id = "rpl-test", .publish = cap_publish, .node_count = two, .node_id = id_of });
+    /* Data, PAN ID compressed, short to short, 2006: 41 98; seq; PAN abcd. */
+    {
+        uint8_t f1[] = { 0x41, 0x98, 0x01, 0xcd, 0xab, 0x01, 0x88, 0x00, 0x88, 0x60, 0x00, 0x00, 0x00, 0x00 };
+        uint8_t f2[] = { 0x41, 0x98, 0x02, 0xcd, 0xab, 0x00, 0x88, 0x01, 0x88, 0x60, 0x00, 0x00, 0x00, 0x00 };
+        sim_observer_event_t ev = { .kind = SIM_OBS_PACKET_FRAME, .time_ns = 100000000LL, .mote_index = 0 };
+        ev.u.frame.is_tx = true; ev.u.frame.bytes = f1; ev.u.frame.bytes_len = (int)sizeof f1;
+        thread_overlay_on_event(o, NULL, &ev);             /* node 1 sends from 0x8800 */
+        ev.mote_index = 1; ev.time_ns = 200000000LL; ev.u.frame.bytes = f2;
+        thread_overlay_on_event(o, NULL, &ev);             /* node 2 from 0x8801 */
+    }
+    thread_overlay_refresh(o, NULL, 300000000LL);
+    cJSON *j = last_panel ? cJSON_Parse(last_panel) : NULL;
+    CHECK(j, "the thread overlay published: %s", last_panel ? last_panel : "(none)");
+    if (j) {
+        cJSON *nodes = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "nodes");
+        cJSON *links = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "layer"), "links");
+        cJSON *n1 = cJSON_GetObjectItem(nodes, "1"), *n2 = cJSON_GetObjectItem(nodes, "2");
+        CHECK(n1 && !strcmp(cJSON_GetObjectItem(n1, "glyph")->valuestring, "hex") &&
+              !strcmp(cJSON_GetObjectItem(n1, "label")->valuestring, "0x8800*"), "0x8800: a router (hexagon)");
+        CHECK(n2 && !strcmp(cJSON_GetObjectItem(n2, "glyph")->valuestring, "circle") &&
+              !strcmp(cJSON_GetObjectItem(n2, "badge")->valuestring, "C"), "0x8801: a child");
+        cJSON *l0 = cJSON_GetArrayItem(links, 0);
+        CHECK(cJSON_GetArraySize(links) == 1 && cJSON_GetObjectItem(l0, "from")->valueint == 2 &&
+              cJSON_GetObjectItem(l0, "to")->valueint == 1, "the child's parent is router 0x8800");
+        CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(n2, "actions")) >= 1, "the child offers role commands");
+        cJSON_Delete(j);
+    }
+    free(last_panel); last_panel = NULL;
+    thread_overlay_free(o);
 }
 
 int run_fwvar_tests(int verbose) {
@@ -254,6 +303,7 @@ int run_fwvar_tests(int verbose) {
     test_arm_memory_only();
     test_layer_json();
     test_rpl_packets();
+    test_thread_packets();
     printf("  %d checks passed, %d failed\n", checks - failures, failures);
     return failures;
 }
