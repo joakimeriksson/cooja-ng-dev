@@ -8,6 +8,28 @@ then, 0.x minor releases may adjust the CLI, config, and plugin ABI.
 ## [Unreleased]
 
 ### Added
+- **Network overlays on the web UI's canvas, and the RPL one.**
+  `"plugins": ["rpl"]` draws Contiki-NG's RPL on the topology: the root a
+  square, every node in its DODAG's colour with its rank, a green arrow to
+  its preferred parent.  It reads RPL Lite's state out of each node's
+  memory by symbol, with struct offsets generated from DWARF
+  (`tools/gen-struct-layout.py`, `build-device-firmware.sh --layout`) for
+  the bundled Sky, CC2538 and nRF52840 images and chosen by CPU and struct
+  size, so an image built another way is never misread; where it has no
+  layout, or no memory to read (native, Renode), it learns rank, DODAG and
+  parent from the DIOs and DAOs the node sends.  `"plugins":
+  ["rpl-packets"]` shows that packet view alone.  The overlay only reads:
+  the PCAP is the same with and without it (`tools/check-plugin.sh`).
+- **Plugin ABI v4**: `api->fw` reads named firmware variables of emulated
+  nodes (`include/sim/sim_fwvar.h`: resolve a symbol, read its bytes —
+  memory only, never a peripheral register), and a panel may carry a
+  `"layer"` of node glyphs, colours, badges, labels and typed links that
+  the page draws on the canvas, in replays and in the browser build too
+  (`include/sim/sim_layer.h` builds it; vocabulary in
+  docs/design/ui-plugins.md).  v1–v3 plugins build and run unchanged.
+  Plugins now also receive `SIM_OBS_PACKET_FRAME` events, with the frame's
+  bytes, in headless runs, as they do with the UI on.  New unit suite:
+  `./build/test_runner fwvar`.
 - **The web UI's Packets tab dissects every frame** with
   [dpkt-js](https://mikroverk.github.io/dpkt-js/): the Protocol and Info
   columns come from the dissection (DIO, UDP, MLE, TMF, CoAP...), and a

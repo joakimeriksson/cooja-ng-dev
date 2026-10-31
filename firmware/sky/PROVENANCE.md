@@ -18,3 +18,14 @@
 - Exercises instruction-level behavior (cputest) and timer A/B
   capture/compare paths (timertest); the boot test asserts clean
   execution, no expected-output substring.
+
+## Overlay struct layouts (udp-client, udp-server)
+
+`src/services/rpl_layout.h` has rows for `udp-client.sky` and `udp-server.sky`
+(layout `contiki-ng-msp430`), from DWARF builds of `examples/rpl-udp` at contiki-ng
+commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (Docker contiker/contiki-ng, msp430-gcc 4.7.4), made with each
+image's build command plus `--layout src/services/rpl_layout.h`.  The
+overlay picks them by CPU and `sizeof(rpl_instance_t)` (254 bytes, which the
+shipped images' `curr_instance` symbols match); an image rebuilt with
+another configuration needs the rows regenerated (see
+`firmware/PROVENANCE-template.md`).

@@ -87,3 +87,14 @@ The Contiki-NG side of the two interop demos (`configs/interop-contiki-zephyr.js
 - **Toolchain**: arm-none-eabi-gcc 13.2.1 (Ubuntu 24.04 package), on jftest4
 - **Built**: 2026-10-26 by Joakim Eriksson; stripped with `--strip-debug`.
 - **Build command**: `BOARD=nrf52840dk make -C examples/networking/gnrc/networking`
+
+## Overlay struct layouts (udp-client, udp-server)
+
+`src/services/rpl_layout.h` has rows for `udp-client.nrf52840-dk` and `udp-server.nrf52840-dk`
+(layout `contiki-ng-cortex-m`), from DWARF builds of `examples/rpl-udp` at contiki-ng
+commit `52f1b1e7d66605c30e3441ae87ab00328aa561f2` (host arm-none-eabi-gcc 15.2), made with each
+image's build command plus `--layout src/services/rpl_layout.h`.  The
+overlay picks them by CPU and `sizeof(rpl_instance_t)` (352 bytes, which the
+shipped images' `curr_instance` symbols match); an image rebuilt with
+another configuration needs the rows regenerated (see
+`firmware/PROVENANCE-template.md`).
