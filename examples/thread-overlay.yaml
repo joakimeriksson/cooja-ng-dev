@@ -5,7 +5,8 @@
 # their parents, blue links between routers.
 #   cngsim run thread-overlay --ui
 # Two clusters, joined by the routers 2 and 3:
-#   A: node 1 (the leader), node 2, node 4 (a sleepy child)
+#   A: node 1 (the leader), node 2, node 4 (a sleepy child: the overlay
+#      shows it with an S and a dashed ring)
 #   B: nodes 3, 5 and 6
 # What happens:
 #   ~2-35 s   the network forms: node 1 leads, node 4 attaches as a sleepy
@@ -41,7 +42,7 @@ nodes:
   - { type: ot, id: 1, x: 0,   y: 0 }
   - { type: ot, id: 2, x: 30,  y: 0 }
   - { type: ot, id: 3, x: 70,  y: 0 }
-  - { type: ot, id: 4, x: 0,   y: 30, name: "sleepy" }
+  - { type: ot, id: 4, x: 0,   y: 30 }
   - { type: ot, id: 5, x: 100, y: 0 }
   - { type: ot, id: 6, x: 90,  y: 30 }
 
